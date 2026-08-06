@@ -1,0 +1,169 @@
+"""Four-tier query gate.
+
+1. schema    — pydantic, in CubeQuery
+2. semantic  — local, against the cached catalog (this module)
+3. compile   — POST /v1/sql, Cube's own compiler, nothing executed
+4. execute   — POST /v1/load
+
+Tiers 1-2 are free and local. Tier 3 costs one HTTP call and no warehouse
+compute. Failures return text for the agent to act on, never exceptions.
+"""
+
+from dataclasses import dataclass, field
+
+from pydantic import ValidationError
+
+from .catalog import Catalog
+from .client import CubeClient, CubeError
+from .schema import CubeQuery, Filter, FilterGroup, FilterNode
+
+
+@dataclass
+class GateResult:
+    ok: bool
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    sql: str | None = None
+    rows: list[dict] | None = None
+    duration_ms: int | None = None
+
+    def as_message(self) -> str:
+        parts = []
+        if self.errors:
+            parts.append("QUERY REJECTED:\n" + "\n".join(f"- {e}" for e in self.errors))
+        if self.warnings:
+            parts.append("Warnings:\n" + "\n".join(f"- {w}" for w in self.warnings))
+        return "\n\n".join(parts)
+
+
+def parse(payload: dict) -> tuple[CubeQuery | None, list[str]]:
+    """Tier 1."""
+    try:
+        return CubeQuery.model_validate(payload), []
+    except ValidationError as e:
+        return None, [f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in e.errors()]
+
+
+def semantic_check(query: CubeQuery, catalog: Catalog) -> GateResult:
+    """Tier 2. Every check the cached catalog can answer, in one pass."""
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    # Does the member exist at all?
+    for member_id in query.referenced_members():
+        if catalog.get(member_id) is None:
+            hint = ", ".join(catalog.nearest(member_id)) or "none"
+            errors.append(f"'{member_id}' does not exist. Closest matches: {hint}")
+
+    # Is it the kind of member this field accepts?
+    for field_name, expected in (
+        ("measures", "measure"),
+        ("dimensions", "dimension"),
+        ("segments", "segment"),
+    ):
+        for member_id in getattr(query, field_name):
+            doc = catalog.get(member_id)
+            if doc and doc.kind != expected:
+                errors.append(f"'{member_id}' is a {doc.kind}, not a {expected}")
+    for td in query.timeDimensions:
+        doc = catalog.get(td.dimension)
+        if doc and doc.type != "time":
+            errors.append(f"timeDimensions.dimension '{td.dimension}' is type {doc.type}, not time")
+
+    # Is the filter operator legal for that member's kind and type?
+    for f in query.iter_filters():
+        doc = catalog.get(f.member)
+        if doc and doc.valid_operators and f.operator not in doc.valid_operators:
+            errors.append(
+                f"operator '{f.operator}' is invalid for {f.member} ({doc.kind}, {doc.type}). "
+                f"Valid: {', '.join(doc.valid_operators)}"
+            )
+
+    # Recursive, so it stays a function.
+    _check_where_having(query.filters, catalog, errors)
+
+    # Does the time dimension offer the requested granularity?
+    for td in query.timeDimensions:
+        doc = catalog.get(td.dimension)
+        if doc and td.granularity and doc.granularities:
+            if td.granularity not in doc.granularities:
+                errors.append(
+                    f"granularity '{td.granularity}' unavailable on {td.dimension}. "
+                    f"Available: {', '.join(doc.granularities)}"
+                )
+
+    # Reaching across entities with no view covering them may not be joinable.
+    known = [m for m in query.referenced_members() if catalog.get(m)]
+    cubes = {catalog.get(m).cube for m in known}
+    if len(cubes) > 1 and not catalog.views_containing(known):
+        warnings.append(
+            f"members span {len(cubes)} entities ({', '.join(sorted(cubes))}) with no single "
+            "view containing them all — verify they are joinable before trusting the result."
+        )
+
+    for f in query.iter_filters():
+        if f.operator in ("inDateRange", "notInDateRange"):
+            warnings.append(
+                f"'{f.operator}' on {f.member} blocks pre-aggregation matching. "
+                "Prefer timeDimensions.dateRange."
+            )
+
+    if query.limit and not query.order:
+        warnings.append(
+            "limit set without order — results may be silently truncated. Set an explicit order."
+        )
+    return GateResult(ok=not errors, errors=errors, warnings=warnings)
+
+
+async def run(payload: dict, catalog: Catalog, client: CubeClient, max_rows: int) -> GateResult:
+    query, errors = parse(payload)
+    if query is None:
+        return GateResult(ok=False, errors=errors)
+
+    checked = semantic_check(query, catalog)
+    if not checked.ok:
+        return checked
+
+    query.limit = min(query.limit, max_rows)
+
+    compiled = await client.compile(query)
+    if not compiled.ok:
+        return GateResult(
+            ok=False,
+            errors=[f"Cube could not compile this query: {compiled.error}"],
+            warnings=checked.warnings,
+        )
+
+    try:
+        loaded = await client.load(query)
+    except CubeError as e:
+        return GateResult(ok=False, errors=[f"Execution failed: {e}"], sql=compiled.sql)
+
+    return GateResult(
+        ok=True,
+        warnings=checked.warnings,
+        sql=compiled.sql,
+        rows=loaded.rows,
+        duration_ms=loaded.duration_ms,
+    )
+
+
+def _check_where_having(nodes: list[FilterNode], catalog: Catalog, errors: list[str]) -> None:
+    """Cube forbids dimension and measure filters in the same logical operator:
+    they compile to WHERE and HAVING respectively."""
+    for node in nodes:
+        if not isinstance(node, FilterGroup):
+            continue
+        kinds = set()
+        for child in node.children:
+            if isinstance(child, Filter):
+                doc = catalog.get(child.member)
+                if doc:
+                    kinds.add(doc.kind)
+        if {"measure", "dimension"} <= kinds:
+            op = "and" if node.and_ else "or"
+            errors.append(
+                f"'{op}' group mixes measure and dimension filters — Cube forbids this "
+                "(WHERE vs HAVING). Split them into separate top-level filters."
+            )
+        _check_where_having(node.children, catalog, errors)
