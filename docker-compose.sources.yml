@@ -1,0 +1,41 @@
+# GENERATED from sources.yml by `analyst source add|rm`. Do not edit by hand.
+services:
+  cube-chinook:
+    image: cubejs/cube:${CUBE_TAG:-latest}
+    env_file:
+    - .env.sources/chinook.env
+    environment:
+      CUBEJS_API_SECRET: ${CUBEJS_API_SECRET:?set CUBEJS_API_SECRET in .env}
+      CUBEJS_DEV_MODE: ${CUBEJS_DEV_MODE:-false}
+      CUBEJS_CUBESTORE_HOST: ds-cubestore-router
+      CUBEJS_CUBESTORE_PORT: '3030'
+    ports:
+    - 4001:4000
+    volumes:
+    - ./cube/sources/chinook:/cube/conf/model
+    depends_on:
+      ds-cubestore-router:
+        condition: service_started
+  ds-cubestore-router:
+    image: cubejs/cubestore:${CUBESTORE_TAG:-latest}
+    environment:
+      CUBESTORE_HTTP_PORT: 3030
+      CUBESTORE_WORKERS: ds-cubestore-worker:10001
+      CUBESTORE_REMOTE_DIR: /cube/data
+      CUBESTORE_META_PORT: 9999
+    volumes:
+    - ds-cubestore:/cube/data
+  ds-cubestore-worker:
+    image: cubejs/cubestore:${CUBESTORE_TAG:-latest}
+    environment:
+      CUBESTORE_WORKER_PORT: 10001
+      CUBESTORE_SERVER_NAME: ds-cubestore-worker:10001
+      CUBESTORE_META_ADDR: ds-cubestore-router:9999
+      CUBESTORE_WORKERS: ds-cubestore-worker:10001
+      CUBESTORE_REMOTE_DIR: /cube/data
+    depends_on:
+    - ds-cubestore-router
+    volumes:
+    - ds-cubestore:/cube/data
+volumes:
+  ds-cubestore: null

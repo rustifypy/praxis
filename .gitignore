@@ -1,0 +1,32 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+
+# Local config
+.env
+.env.cube
+
+# Per-source credentials, written by `analyst source add`
+.env.sources/
+
+# Scratch dir for introspection probes
+.cube-probe/
+
+cube/
+grounding/

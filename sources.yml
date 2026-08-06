@@ -1,0 +1,7 @@
+# Named data sources. One Cube container each — see README.
+# Credentials live in .env.sources/<name>.env and are not committed.
+sources:
+- name: chinook
+  description: 'Digital music store: invoices, tracks, artists and customers.'
+  driver: postgres
+  port: 4001
