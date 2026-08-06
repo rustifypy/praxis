@@ -1,8 +1,10 @@
 import asyncio
 import json
+import webbrowser
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.syntax import Syntax
 from rich.table import Table
 
@@ -49,7 +51,8 @@ def ask_cmd(
 
     async def run():
         result = await ask(question)
-        console.print(result.text)
+        # Rich reads [...] as markup, and model answers contain brackets.
+        console.print(escape(result.text))
         if not result.executed:
             console.print("[red]No query ran — this answer has no data behind it.[/red]")
         for record in result.executed:
@@ -61,6 +64,41 @@ def ask_cmd(
             console.print(f"[dim]{len(result.rejected)} query attempts rejected by the gate[/dim]")
 
     asyncio.run(run())
+
+
+@app.command()
+def web(
+    port: int = typer.Option(0, help="Port to serve on. Defaults to WEB_PORT."),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Do not open a browser."),
+    data_dir: str = typer.Option(
+        "",
+        "--data-dir",
+        help="Where chats are stored. Defaults to DATA_DIR (~/.analyst). "
+        "Point this at a scratch directory when testing — never at real history.",
+    ),
+) -> None:
+    """Open the chat portal in a browser."""
+    import uvicorn
+
+    from .config import settings
+    from .web.server import TOKEN
+    from .web.server import app as web_app
+
+    if data_dir:
+        # Mutated before uvicorn starts; the lifespan reads settings.db_path.
+        settings.data_dir = data_dir
+    port = port or settings.web_port
+    url = f"http://{settings.web_host}:{port}/?token={TOKEN}"
+
+    console.print("\n[bold]Analyst portal[/bold] is running at:")
+    console.print(f"    [cyan]{url}[/cyan]")
+    console.print(f"[dim]Chats are stored in {settings.db_path}[/dim]")
+    console.print("[dim]Press Ctrl-C to stop.[/dim]\n")
+
+    if not no_browser:
+        webbrowser.open(url)
+    # log_level=warning: uvicorn's access log would bury the URL above.
+    uvicorn.run(web_app, host=settings.web_host, port=port, log_level="warning")
 
 
 @app.command()

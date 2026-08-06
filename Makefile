@@ -34,4 +34,12 @@ catalog:
 api:
 	uv run uvicorn analyst_agent.api:app --reload --port 8000
 
-.PHONY: install up down sources logs test lint fmt catalog api
+# Frontend source is src/web; the output is committed into the package so that
+# `analyst web` needs no node toolchain on the machine that runs it.
+web:
+	cd src/web && npm ci && npm run build
+
+serve:
+	uv run analyst web
+
+.PHONY: install up down sources logs test lint fmt catalog api web serve

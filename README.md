@@ -45,6 +45,32 @@ Cube Store has no multi-arch `latest` tag. `.env.example` sets
 `CUBESTORE_TAG=arm64v8` for Apple Silicon — change it to `latest` on Intel or
 AMD, or the containers fail with `no matching manifest for linux/amd64`.
 
+## The web portal
+
+```bash
+make web                # build the frontend once (needs npm; output is committed)
+uv run analyst web      # opens a browser, Jupyter-style, with a token in the URL
+```
+
+Multiple chats, each with its own history, kept in `~/.analyst/analyst.db` along with
+the LangGraph checkpointer that gives a chat its memory. Answers stream, and so does the
+model's reasoning — the panel fills while the agent plans, then collapses when it
+answers.
+
+Every step shows up as a line you can expand: which members `search_model` found, the
+Cube JSON that went to the gate, the SQL Cube generated, the rows that came back, and
+the rejections in between. Tool labels are derived from the query itself, so the trace
+can never claim a query that did not run.
+
+Bound to `127.0.0.1` with a token generated per launch. It is one person on one machine
+— there is no login and no user table.
+
+Reasoning summaries need `AZURE_OPENAI_API_VERSION=2025-03-01-preview` or later;
+`analyst web` refuses to start below it rather than showing an empty thinking panel.
+
+The frontend source is `src/web/` (React + Vite). `npm run dev` there gives hot reload
+against a running `analyst web`. `make web` is what produces what ships.
+
 ## Data sources
 
 Each source is one Cube container with its own model directory and its own
@@ -79,6 +105,13 @@ src/analyst_agent/
   retrieval.py         model search (lexical; swap for pgvector)
   grounding.py         rules / skills / certified queries loader
   agent/tools.py       search_model, run_query, load_grounding, explain_last_query
+  agent/content.py     text_of / reasoning_of — content is blocks, not a string
+  chat/events.py       the Event schema and emit(); parent_id/depth reserved
+  chat/store.py        SQLite chats + events + LangGraph checkpointer, one file
+  chat/service.py      stream_turn() — one turn as a stream of events
+  cube/describe.py     deterministic one-line labels for the tool trace
+  web/server.py        portal routes, SSE, token auth
+  web/static/          committed frontend build (make web)
   agent/model.py       QUERY_MODEL -> chat model (Azure endpoint/deployment wiring)
   agent/build.py       create_agent wiring, caller identity for the audit log
   sources/drivers.py   connection shape per Cube driver
@@ -113,9 +146,15 @@ Edit these instead of the system prompt. They are reviewed diffs in git.
 uv run analyst catalog                                  # what Cube is exposing
 uv run analyst ask "..." --sql                          # ask, optionally show SQL
 uv run analyst check '{"measures":["revenue.count"]}'   # tiers 1-3, no execution
+uv run analyst web                                      # the chat portal
 make api                                                # POST /ask on :8000
+make web                                                # build the frontend
 make test lint
 ```
+
+`src/web/` is the frontend source and sits outside the Python package deliberately. Its
+build output does not: `uv_build` ships only `src/analyst_agent`, so Vite writes to
+`src/analyst_agent/web/static/` and that directory is committed.
 
 ## Next
 

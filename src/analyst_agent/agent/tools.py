@@ -3,9 +3,11 @@ from dataclasses import dataclass, field
 
 from langchain.tools import tool
 
+from ..chat.events import Event, emit
 from ..cube import gate
 from ..cube.catalog import Catalog
 from ..cube.client import CubeClient
+from ..cube.describe import describe_query
 from ..grounding import Grounding
 from ..retrieval import LexicalRetriever, render
 
@@ -39,7 +41,14 @@ def build_tools(session: Session, preview_rows: int = 30) -> list:
         """Find the measures and dimensions available for a question. Returns member
         ids, types, notes, and the valid filter operators for each. Call this before
         building any query."""
+        emit(Event(type="tool_start", data={"tool": "search_model", "label": question}))
         hits = retriever.search(question)
+        emit(
+            Event(
+                type="tool_end",
+                data={"tool": "search_model", "ok": True, "hits": len(hits)},
+            )
+        )
         if not hits:
             return "The semantic model is empty."
         certified = session.grounding.render_certified(question)
@@ -53,13 +62,55 @@ def build_tools(session: Session, preview_rows: int = 30) -> list:
         """Execute a Cube JSON query. Keys: measures, dimensions, timeDimensions,
         filters, segments, order, limit, offset. Returns rows, or a rejection
         explaining what to fix."""
+        emit(
+            Event(
+                type="tool_start",
+                data={
+                    "tool": "run_query",
+                    "label": describe_query(query, session.catalog),
+                    "query": query,
+                },
+            )
+        )
         result = await gate.run(query, session.catalog, session.client, session.max_rows)
 
         if not result.ok:
             session.rejected.append({"query": query, "errors": result.errors})
+            # A rejection is a normal step in the trace, not an error event — the agent
+            # reads the reason and retries, and the user should see that it happened.
+            emit(
+                Event(
+                    type="tool_end",
+                    data={
+                        "tool": "run_query",
+                        "ok": False,
+                        "query": query,
+                        "errors": result.errors,
+                    },
+                )
+            )
             return result.as_message() + "\n\nFix the query and call run_query again."
 
         rows = result.rows or []
+        emit(
+            Event(
+                type="tool_end",
+                data={
+                    "tool": "run_query",
+                    "ok": True,
+                    # Repeated from tool_start so a turn can be rebuilt from tool_end
+                    # alone — see ChatStore.replay_session.
+                    "query": query,
+                    "sql": result.sql,
+                    "rows_total": len(rows),
+                    # The browser shows the same preview the model sees. Full result
+                    # sets stay out of the event log until charts land.
+                    "preview": rows[:preview_rows],
+                    "duration_ms": result.duration_ms,
+                    "warnings": result.warnings,
+                },
+            )
+        )
         session.executed.append(
             QueryRecord(
                 query=query,
@@ -83,8 +134,15 @@ def build_tools(session: Session, preview_rows: int = 30) -> list:
     @tool
     def load_grounding(name: str) -> str:
         """Load the full instructions for a named skill or agent_requested rule."""
+        emit(Event(type="tool_start", data={"tool": "load_grounding", "label": name}))
         pool = session.grounding.skills + session.grounding.rules
         found = next((a for a in pool if a.name == name), None)
+        emit(
+            Event(
+                type="tool_end",
+                data={"tool": "load_grounding", "ok": found is not None},
+            )
+        )
         if not found:
             return f"No artefact named '{name}'. Available: {[a.name for a in pool]}"
         return found.body
@@ -92,6 +150,18 @@ def build_tools(session: Session, preview_rows: int = 30) -> list:
     @tool
     def explain_last_query() -> str:
         """Show the SQL Cube generated for the most recent successful query."""
+        emit(
+            Event(
+                type="tool_start",
+                data={"tool": "explain_last_query", "label": "Reading the last query"},
+            )
+        )
+        emit(
+            Event(
+                type="tool_end",
+                data={"tool": "explain_last_query", "ok": bool(session.executed)},
+            )
+        )
         if not session.executed:
             return "No query has run yet."
         last = session.executed[-1]

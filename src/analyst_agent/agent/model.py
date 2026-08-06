@@ -4,6 +4,11 @@ from langchain_core.language_models import BaseChatModel
 from ..config import settings
 
 AZURE_PREFIX = "azure_openai:"
+# Azure serves the Responses API — and therefore reasoning summaries — only from this
+# version on. Verified empirically: on 2024-12-01-preview the same deployment returns
+# plain string content with zero reasoning tokens, and rejects use_responses_api with a
+# 400. The YYYY-MM-DD-preview format sorts lexicographically, so a string compare works.
+RESPONSES_API_MIN_VERSION = "2025-03-01-preview"
 
 
 def build_model(**overrides) -> BaseChatModel:
@@ -30,4 +35,20 @@ def build_model(**overrides) -> BaseChatModel:
                 f"{settings.query_model} needs {', '.join(missing)} — set "
                 "AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_VERSION in .env"
             )
-    return init_chat_model(settings.query_model, **kwargs, **overrides)
+        if kwargs["api_version"] < RESPONSES_API_MIN_VERSION:
+            raise ValueError(
+                f"AZURE_OPENAI_API_VERSION={kwargs['api_version']} cannot serve reasoning "
+                f"summaries — set it to {RESPONSES_API_MIN_VERSION} or later in .env"
+            )
+        kwargs |= {
+            "use_responses_api": True,
+            # Content arrives as typed blocks rather than a string; agent/content.py
+            # is what turns it back into text for the CLI and the HTTP API.
+            "output_version": "responses/v1",
+            "reasoning": {
+                "effort": settings.reasoning_effort,
+                "summary": settings.reasoning_summary,
+            },
+        }
+    # Overrides win over the derived kwargs — passing one twice would be a TypeError.
+    return init_chat_model(settings.query_model, **{**kwargs, **overrides})

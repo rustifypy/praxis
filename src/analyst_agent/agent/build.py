@@ -1,13 +1,14 @@
 from dataclasses import dataclass
 
 from langchain.agents import create_agent
-from langchain.agents.middleware import ModelCallLimitMiddleware, SummarizationMiddleware
+from langchain.agents.middleware import ModelCallLimitMiddleware
 
 from ..config import settings
 from ..cube.catalog import Catalog
 from ..cube.client import CubeClient, mint_token
 from ..grounding import Grounding
-from .middleware import AuditLog
+from .content import text_of
+from .middleware import AuditLog, CompactionNotice
 from .model import build_model
 from .prompts import build_system_prompt
 from .tools import Session, build_tools
@@ -30,35 +31,68 @@ class Answer:
     rejected: list[dict]
 
 
+# The summarizing model runs inside the graph like any other call, so its tokens show
+# up in the message stream. Tagged here, skipped there — otherwise a compaction would
+# render into the transcript as if it were the agent's answer.
+COMPACTION_TAG = "compaction"
+
+_catalogs: dict[str, Catalog] = {}
+
+
+async def load_catalog(client: CubeClient, refresh: bool = False) -> Catalog:
+    """The catalog, cached per Cube.
+
+    Cube Core does not hot-reload its model, so this only changes when a container
+    restarts — which is exactly what the refresh flag is for. Refetching it per turn
+    would put an HTTP round trip in front of every message in a chat.
+    """
+    key = settings.api_root
+    if refresh or key not in _catalogs:
+        _catalogs[key] = Catalog.from_meta(await client.meta())
+    return _catalogs[key]
+
+
+def build_agent(session: Session, ctx: SecurityContext, checkpointer=None):
+    """The agent, shared by the CLI's single shot and the web's streamed turn.
+
+    Two construction sites would drift; middleware added for the browser would quietly
+    not apply to `analyst ask`. Pass a checkpointer to give the agent memory across
+    turns — without one it behaves exactly as it always has.
+    """
+    model = build_model()
+    return create_agent(
+        model=model,
+        tools=build_tools(session),
+        system_prompt=build_system_prompt(
+            always_rules=session.grounding.always_rules,
+            skill_catalog=session.grounding.catalog_lines(),
+        ),
+        middleware=[
+            AuditLog(user=ctx.user_id),
+            # run_limit, not thread_limit: a thread is a whole conversation once chats
+            # persist, and a thread limit would silently end one mid-chat.
+            ModelCallLimitMiddleware(run_limit=20, exit_behavior="end"),
+            CompactionNotice(model=model.with_config(tags=[COMPACTION_TAG])),
+        ],
+        checkpointer=checkpointer,
+    )
+
+
 async def ask(question: str, ctx: SecurityContext | None = None) -> Answer:
+    """One question, no memory. The CLI and the /ask endpoint."""
     ctx = ctx or SecurityContext()
     client = CubeClient(mint_token(ctx.as_claims()))
     try:
-        catalog = Catalog.from_meta(await client.meta())
-        grounding = Grounding(settings.grounding_dir)
         session = Session(
-            catalog=catalog,
+            catalog=await load_catalog(client),
             client=client,
-            grounding=grounding,
+            grounding=Grounding(settings.grounding_dir),
             max_rows=settings.max_rows,
         )
-        model = build_model()
-        agent = create_agent(
-            model=model,
-            tools=build_tools(session),
-            system_prompt=build_system_prompt(
-                always_rules=grounding.always_rules,
-                skill_catalog=grounding.catalog_lines(),
-            ),
-            middleware=[
-                AuditLog(user=ctx.user_id),
-                ModelCallLimitMiddleware(thread_limit=20, exit_behavior="end"),
-                SummarizationMiddleware(model=model),
-            ],
-        )
+        agent = build_agent(session, ctx)
         result = await agent.ainvoke({"messages": [{"role": "user", "content": question}]})
         return Answer(
-            text=result["messages"][-1].content,
+            text=text_of(result["messages"][-1].content),
             executed=[
                 {
                     "query": r.query,

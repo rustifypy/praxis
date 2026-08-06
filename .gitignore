@@ -28,5 +28,11 @@ wheels/
 # Scratch dir for introspection probes
 .cube-probe/
 
+# Frontend. Only node_modules is ignored — src/analyst_agent/web/static/ is the
+# committed build output, and `analyst web` serves a 503 without it.
+src/web/node_modules/
+
 /cube/
 grounding/
+
+.env.rotate-backup

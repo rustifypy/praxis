@@ -7,8 +7,27 @@ import jwt
 from ..config import settings
 from .schema import CubeQuery
 
+# HS256's key must be at least as long as its output, or the signature is weaker than
+# the algorithm claims. pyjwt warns below this on every single token it mints.
+MIN_SECRET_BYTES = 32
+
 
 def mint_token(security_context: dict, ttl_s: int = 900) -> str:
+    """Sign the security context Cube requires.
+
+    The same secret has to reach the container as CUBEJS_API_SECRET, so a short one
+    cannot be fixed on this side alone — both halves change together, then the
+    container restarts. Failing here is louder than a warning printed per request and
+    points at the actual fix.
+    """
+    if len(settings.cube_api_secret.encode()) < MIN_SECRET_BYTES:
+        raise ValueError(
+            f"CUBE_API_SECRET is {len(settings.cube_api_secret.encode())} bytes; HS256 "
+            f"needs at least {MIN_SECRET_BYTES}. Generate one with "
+            "`python -c 'import secrets; print(secrets.token_urlsafe(36))'` and set it "
+            "as both CUBE_API_SECRET and CUBEJS_API_SECRET in .env, then "
+            "`make down && make up` so Cube verifies with the same key."
+        )
     payload = {**security_context, "exp": int(time.time()) + ttl_s}
     return jwt.encode(payload, settings.cube_api_secret, algorithm="HS256")
 
