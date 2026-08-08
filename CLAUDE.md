@@ -210,6 +210,20 @@ result.
 - **A progress sink may return a value.** `run._say` tests `inspect.isawaitable` rather
   than truthiness: the web's sink returns the `Event` it emitted, and awaiting that killed
   every job on its first progress call.
+- **`body { line-height: 1.6 }` is inherited by buttons but not by inputs**, so identical
+  padding gives a 32px button beside a 27px input beside a 27px icon button. Every control
+  that shares a row takes `min-height: var(--control)` and `line-height: 1.2`; do not size
+  a new one with padding alone.
+- **`.container button` also matches buttons inside components nested in that container.**
+  `.detail-primary button` was restyling the overflow menu's items into bordered grey
+  boxes, because it is later in the file than `.menu-panel button` at equal specificity.
+  Use `>` when a container holds a child component that renders its own controls.
+- **`overflow-y: auto` computes `overflow-x` to `auto` as well.** An absolutely positioned
+  popover wider than such a container does not spill out of it — it makes that container
+  scroll sideways, and the content is unreachable. `Info` is `position: fixed` and placed
+  from `getBoundingClientRect`, which is what makes it safe inside the sources list column
+  and the chat header's scrolling panel. It closes on scroll because a fixed panel does
+  not travel with its anchor.
 - **New CSS goes on new class names — check `styles.css` first.** `.source` and `.dot`
   were already taken by the old sidebar footer and the brand dot; reusing them for the
   sources panel inherited `display: flex` and a monospace font, and every card laid out

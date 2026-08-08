@@ -1,3 +1,4 @@
+import type { RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 
 /** Milliseconds since `since`, ticking while `active`. Drives the live timers. */
@@ -54,7 +55,19 @@ export function ago(epochSeconds: number): string {
  * `onClose` is held in a ref so a caller passing an inline arrow does not resubscribe
  * both listeners on every render.
  */
-export function useDismiss<T extends HTMLElement>(open: boolean, onClose: () => void) {
+export function useDismiss<T extends HTMLElement>(
+  open: boolean,
+  onClose: () => void,
+  /**
+   * A second region to count as "inside".
+   *
+   * Most callers wrap trigger and panel in the one ref'd element and need nothing here.
+   * The source page's pipeline does not: it is opened from the actions row up in the
+   * page header, so without this a click there closes the panel on `mousedown` and
+   * reopens it on `click` — a visible flash between two events of the same gesture.
+   */
+  anchor?: RefObject<HTMLElement | null>,
+) {
   const ref = useRef<T>(null);
   const close = useRef(onClose);
   close.current = onClose;
@@ -62,7 +75,10 @@ export function useDismiss<T extends HTMLElement>(open: boolean, onClose: () => 
   useEffect(() => {
     if (!open) return;
     const outside = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) close.current();
+      const target = event.target as Node;
+      if (!ref.current || ref.current.contains(target)) return;
+      if (anchor?.current?.contains(target)) return;
+      close.current();
     };
     const escape = (event: KeyboardEvent) => {
       if (event.key === "Escape") close.current();
@@ -73,7 +89,7 @@ export function useDismiss<T extends HTMLElement>(open: boolean, onClose: () => 
       document.removeEventListener("mousedown", outside);
       document.removeEventListener("keydown", escape);
     };
-  }, [open]);
+  }, [open, anchor]);
 
   return ref;
 }

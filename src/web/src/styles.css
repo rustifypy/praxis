@@ -14,6 +14,10 @@
   --warn: #9a6b12;
   --code-bg: #edebe6;
   --radius: 10px;
+  /* One height for every control that shares a row. Buttons inherit the body's 1.6
+     line-height and inputs do not, so identical padding produced a 32px button beside a
+     27px input beside a 27px icon button — visible wherever two of them sat together. */
+  --control: 30px;
   --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --ease: cubic-bezier(0.22, 0.8, 0.3, 1);
@@ -68,8 +72,41 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-button {
+button,
+input,
+select,
+textarea {
   font: inherit;
+}
+
+/* Controls that sit on a row together: one height, one line-height, label centred.
+   Applied by selector rather than a utility class because these lists already exist —
+   see `--control`. Inputs get the height but not the flex, which breaks the caret. */
+.detail-primary > button,
+.detail-primary > a,
+.served-head button,
+.picker-bulk button,
+.picker-head > .link,
+.stage-cta button,
+.danger-row button,
+.modal footer button,
+.drawer footer button,
+.job-head button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--control);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.served-filter,
+.picker-filter,
+.picker-head select,
+.modal input {
+  min-height: var(--control);
+  line-height: 1.2;
 }
 
 /* Rail, then the column that belongs entirely to whichever mode the rail is on. Chat and
@@ -1393,12 +1430,13 @@ button {
   color: var(--accent);
 }
 
+/* Fixed, and placed by measurement in Info.tsx — an absolute panel is clipped by the
+   scrolling ancestors these icons live in, which makes those containers scroll sideways
+   rather than letting the panel spill. */
 .info-panel {
-  position: absolute;
-  z-index: 30;
-  top: calc(100% + 6px);
-  left: -8px;
-  width: min(46ch, 70vw);
+  position: fixed;
+  z-index: 60;
+  width: min(46ch, calc(100vw - 16px));
   padding: 11px 13px;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -1422,8 +1460,8 @@ button {
 .menu-button {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 27px;
+  width: var(--control);
+  height: var(--control);
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--panel);
@@ -1645,7 +1683,7 @@ button {
   margin-left: auto;
 }
 
-.detail-primary button,
+.detail-primary > button,
 .picker-bulk button,
 .stage-cta button,
 .danger-row button,
@@ -1664,7 +1702,7 @@ button {
     border-color 0.15s var(--ease);
 }
 
-.detail-primary button:hover:not(:disabled),
+.detail-primary > button:hover:not(:disabled),
 .picker-bulk button:hover:not(:disabled),
 .stage-cta button:hover:not(:disabled),
 .danger-row button:hover:not(:disabled) {
@@ -1678,7 +1716,7 @@ button.primary {
 }
 
 button.primary:disabled,
-.detail-primary button:disabled,
+.detail-primary > button:disabled,
 .danger-row button:disabled,
 .modal footer button:disabled,
 .stage-cta button:disabled {
@@ -1689,6 +1727,26 @@ button.primary:disabled,
 .danger-row button {
   border-color: color-mix(in srgb, var(--bad) 40%, var(--line));
   color: var(--bad);
+}
+
+/* Cube's own UI for this container, between the primary action and the overflow. Styled
+   as a control rather than as body-text link so the row keeps one baseline. */
+.cube-link {
+  padding: 5px 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12.5px;
+  text-decoration: none;
+  transition:
+    border-color 0.15s,
+    color 0.15s;
+}
+
+.cube-link:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 button.danger.solid {
@@ -1727,8 +1785,8 @@ button.danger.solid {
   display: flex;
   align-items: stretch;
   gap: 4px;
-  margin: 0 0 14px;
-  padding: 0;
+  margin: 0;
+  padding: 0 0 10px;
   list-style: none;
   overflow-x: auto;
 }
@@ -1802,11 +1860,16 @@ button.danger.solid {
   white-space: nowrap;
 }
 
+/* Closed until a stage is clicked. The accent edge is the same one marking the selected
+   step, which is what ties the panel to it — there is a gap between them, so a square
+   "attached" top edge would only look like a mistake. */
 .stage-panel {
   padding: 14px 16px 16px;
   border: 1px solid var(--line);
+  border-left: 2px solid var(--accent);
   border-radius: 10px;
   background: var(--raised);
+  animation: rise 0.16s var(--ease);
 }
 
 .stage-panel-head {
@@ -1816,14 +1879,32 @@ button.danger.solid {
   margin-bottom: 8px;
 }
 
+.stage-close {
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--faint);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.12s;
+}
+
+.stage-close:hover {
+  color: var(--ink);
+}
+
+/* The title takes the slack so the timestamp, the ⓘ and the close cluster on the right
+   as one group — two `margin-left: auto` siblings would split the gap between them. */
 .stage-panel-head h4 {
-  margin: 0;
+  margin: 0 auto 0 0;
   font-size: 13.5px;
   font-weight: 600;
 }
 
 .stage-when {
-  margin-left: auto;
   color: var(--faint);
   font-size: 11.5px;
   white-space: nowrap;
