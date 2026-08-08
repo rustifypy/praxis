@@ -115,7 +115,11 @@ disagreed with the address bar after a back button.
 `ServedModel` — that component answers *what can I ask about*, which is a question you
 have with a cursor in the composer, not one worth navigating to an admin page for. The
 same component still renders on the source page; it takes a `ServedModel` and a refresh
-callback and knows nothing about where it is mounted.
+callback and knows nothing about where it is mounted. It is **master–detail, not
+accordions**: the entity list is a fixed column and members render in the box beside it,
+because expanding in place pushed every row below down the page. The list stays in name
+order even while filtering — only the *default selection* follows the best match, since
+re-ranking rows under someone who is typing moves what they are reaching for.
 
 `SourceDetail` shows **five** stages where `store.STEPS` has four: `read` writes no step
 row, but hiding it inside "Build cubes" meant expanding the second of four steps offered

@@ -580,8 +580,9 @@ button {
   z-index: 40;
   top: calc(100% + 6px);
   left: 0;
-  width: min(620px, calc(100vw - 380px));
-  max-height: min(70vh, 640px);
+  /* Wide enough for the model browser's two columns — it is the main thing in here. */
+  width: min(880px, calc(100vw - 340px));
+  max-height: min(76vh, 700px);
   overflow-y: auto;
   padding: 14px;
   border: 1px solid var(--line);
@@ -2203,6 +2204,14 @@ button.danger.solid {
 @media (max-width: 980px) {
   .app { grid-template-columns: 52px 204px 1fr; }
   .src-panel { width: calc(100vw - 300px); }
+
+  /* Below this the detail box would be narrower than a member row, so the split stacks
+     and the list goes back to sitting above what it opens. */
+  .served-split { grid-template-columns: 1fr; }
+  .served-detail {
+    position: static;
+    max-height: none;
+  }
 }
 
 @media (max-width: 720px) {
@@ -2452,10 +2461,13 @@ button.danger.solid {
   margin-bottom: 18px;
 }
 
+/* Two rows: the label and its count, then what the section is for. A narrow list column
+   cannot fit "Views · the tables underneath · ⓘ · 11" on one line. */
 .served-section-head {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto auto 1fr;
   align-items: center;
-  gap: 7px;
+  column-gap: 6px;
   margin-bottom: 8px;
   padding-bottom: 6px;
   border-bottom: 1px solid var(--line);
@@ -2478,71 +2490,150 @@ button.danger.solid {
 }
 
 .served-section-sub {
+  grid-column: 1 / -1;
+  grid-row: 2;
   color: var(--faint);
-  font-size: 12px;
+  font-size: 11.5px;
 }
 
 .served-section-count {
-  margin-left: auto;
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
   color: var(--faint);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
-.served-entity {
+/* Master–detail. The list column is fixed and never reflows; opening an entity fills the
+   box beside it. Expanding in place pushed every row below down the page, which made
+   comparing two cubes a matter of finding your place again each time. */
+.served-split {
+  display: grid;
+  grid-template-columns: minmax(190px, 260px) 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.served-list {
+  min-width: 0;
+}
+
+.served-detail {
+  position: sticky;
+  top: 0;
+  min-width: 0;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 14px 16px 16px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--raised);
-  margin-bottom: 6px;
-  overflow: hidden;
 }
 
-.served-entity.view {
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
-}
-
-.served-entity-head {
+.served-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  padding: 10px 13px;
-  border: 0;
+  padding: 6px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
   background: none;
-  color: var(--ink);
+  color: var(--muted);
   font: inherit;
+  font-size: 13px;
   text-align: left;
   cursor: pointer;
+  transition:
+    background 0.13s,
+    color 0.13s;
 }
 
-.served-entity-head:hover {
+.served-row:hover {
   background: var(--panel);
+  color: var(--ink);
 }
 
-.served-name {
+.served-row.on {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--ink);
+}
+
+.served-row.on.view {
   font-weight: 600;
-  font-size: 14px;
 }
 
-.served-count {
+.served-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.served-row-counts {
+  flex: none;
   color: var(--faint);
-  font-size: 12px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.served-row-flag {
+  flex: none;
+  color: var(--warn);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.served-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 8px;
+}
+
+.served-detail-head h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.served-detail-id {
+  margin-left: auto;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.served-tag {
+  flex: none;
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+
+.served-tag.view {
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* Which cubes a view projects over, or which views reach a cube — the relationship that
    makes the two sections one model instead of two lists. */
-.served-from {
-  margin-left: auto;
-  flex: none;
-  max-width: 42%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--faint);
-  font-size: 11.5px;
+.served-rel {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12.5px;
 }
 
-.served-from.warn {
+.served-rel .warn {
   color: var(--warn);
 }
 
@@ -2550,11 +2641,6 @@ button.danger.solid {
   color: var(--faint);
   font-family: var(--mono);
   font-size: 11px;
-}
-
-.served-body {
-  padding: 4px 13px 14px;
-  border-top: 1px solid var(--line);
 }
 
 .served-desc {
