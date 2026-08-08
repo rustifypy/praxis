@@ -1,0 +1,45 @@
+# The infrastructure every source container shares. Hand-written and committed —
+# unlike the docker-compose.sources.yml this replaced, nothing generates it.
+#
+# Sources are NOT here. Each one is a plain container started from its row in
+# sources.db by `analyst source up <name>` — see src/analyst_agent/sources/docker.py.
+# That is why credentials no longer live in a file: the container is created from the
+# database, so there is nothing on disk to keep in sync.
+#
+#   make up     start Cube Store and create the network
+#   make down   stop it (source containers keep running; they restart with Docker)
+name: analyst
+
+networks:
+  analyst-net:
+    # Named explicitly. Compose would otherwise call it analyst_analyst-net, and
+    # `docker run --network analyst-net` would not find it.
+    name: analyst-net
+
+services:
+  ds-cubestore-router:
+    image: cubejs/cubestore:${CUBESTORE_TAG:-latest}
+    environment:
+      CUBESTORE_HTTP_PORT: 3030
+      CUBESTORE_WORKERS: ds-cubestore-worker:10001
+      CUBESTORE_REMOTE_DIR: /cube/data
+      CUBESTORE_META_PORT: 9999
+    networks: [analyst-net]
+    volumes:
+      - ds-cubestore:/cube/data
+
+  ds-cubestore-worker:
+    image: cubejs/cubestore:${CUBESTORE_TAG:-latest}
+    environment:
+      CUBESTORE_WORKER_PORT: 10001
+      CUBESTORE_SERVER_NAME: ds-cubestore-worker:10001
+      CUBESTORE_META_ADDR: ds-cubestore-router:9999
+      CUBESTORE_WORKERS: ds-cubestore-worker:10001
+      CUBESTORE_REMOTE_DIR: /cube/data
+    depends_on: [ds-cubestore-router]
+    networks: [analyst-net]
+    volumes:
+      - ds-cubestore:/cube/data
+
+volumes:
+  ds-cubestore:

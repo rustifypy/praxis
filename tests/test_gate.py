@@ -147,3 +147,25 @@ def test_limit_without_order_warns(catalog):
 def test_tier1_errors_returned_not_raised():
     parsed, errors = gate.parse({"measures": "not-a-list"})
     assert parsed is None and errors
+
+
+def test_no_limit_does_not_warn(catalog):
+    """The schema used to default `limit`, so this warning reached the agent on
+    every query it ever ran — and the prompt tells it to report warnings."""
+    r = check({"measures": ["orders.count"]}, catalog)
+    assert not any("without order" in w for w in r.warnings)
+
+
+def test_missing_values_reports_only_the_filter_branch():
+    """A filter is a Filter or a FilterGroup, so pydantic reports both branches'
+    failures. Only the branch matching the input's shape helps the agent retry."""
+    parsed, errors = gate.parse(
+        {
+            "measures": ["orders.count"],
+            "filters": [{"member": "orders.status", "operator": "equals"}],
+        }
+    )
+    assert parsed is None
+    assert len(errors) == 1
+    assert "requires values" in errors[0]
+    assert "FilterGroup" not in errors[0] and "function-after[" not in errors[0]

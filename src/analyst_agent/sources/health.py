@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from ..config import settings
 from .registry import Source
 
 
@@ -20,6 +21,11 @@ class Health:
 
     def __str__(self) -> str:
         return self.status if not self.detail else f"{self.status} — {self.detail}"
+
+    def as_dict(self) -> dict:
+        """For the wire. Structured, so the browser colours a dot from a boolean rather
+        than by matching on wording that could change."""
+        return {"healthy": self.ok, "status": self.status, "detail": self.detail}
 
 
 async def check(source: Source, timeout: float = 20.0) -> Health:
@@ -47,6 +53,39 @@ async def check(source: Source, timeout: float = 20.0) -> Health:
         "Cube reports the data source connection is down",
     )
     return Health(False, status, detail)
+
+
+@dataclass
+class Serving:
+    """What a source is exposing right now, from Cube's own `/v1/meta`.
+
+    A fact about the source, alongside its health — not a rendering concern. It is also
+    the only honest answer to "is there a model": the step records say what this portal
+    built, and a model can predate the portal or be edited by hand.
+    """
+
+    cubes: int
+    views: list[str]
+    described: int
+
+
+async def serving(source: Source, timeout: float = 10.0) -> Serving | None:
+    """The compiled entities, or None when Cube cannot say.
+
+    None rather than an error: a compile failure means `/v1/meta` has no cubes, and the
+    source is still up — that is a model problem, not a health problem.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            body = (await client.get(f"{source.url}{settings.cube_base_path}/v1/meta")).json()
+        entities = body.get("cubes") or []
+        return Serving(
+            cubes=sum(1 for e in entities if e.get("type") != "view"),
+            views=[e["name"] for e in entities if e.get("type") == "view"],
+            described=sum(1 for e in entities if e.get("description")),
+        )
+    except (httpx.RequestError, ValueError, KeyError, TypeError):
+        return None
 
 
 async def wait_until_ready(

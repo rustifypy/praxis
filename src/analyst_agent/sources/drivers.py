@@ -4,10 +4,15 @@ Field names are Cube's own `CUBEJS_DB_*` variables — this module adds no
 indirection of its own, so anything Cube documents works here verbatim.
 """
 
+import os
 from dataclasses import dataclass
+from pathlib import Path
 
-DEFAULT_IMAGE = "cubejs/cube:${CUBE_TAG:-latest}"
+DEFAULT_IMAGE = "cubejs/cube"
+IMAGE_ENV = "CUBE_TAG"
 LOCALHOST_NOTE = "A database on this Mac is host.docker.internal from inside the container."
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "0.0.0.0", "::1")
+"""Host values that cannot work from inside a container. The form offers a swap."""
 
 
 @dataclass(frozen=True)
@@ -30,6 +35,8 @@ class Driver:
     label: str
     fields: tuple[ConnField, ...]
     image: str = DEFAULT_IMAGE
+    tag: str = ""
+    """Pinned tag, for a driver that needs a different build. Empty means CUBE_TAG."""
     platform: str = ""
 
 
@@ -93,7 +100,7 @@ DRIVERS: dict[str, Driver] = {
                 comment="Not optional — the JDBC driver refuses to load without it.",
             ),
         ),
-        image="cubejs/cube:jdk",
+        tag="jdk",
         platform="linux/amd64",
     ),
 }
@@ -104,3 +111,55 @@ def get(name: str) -> Driver:
         return DRIVERS[name]
     except KeyError:
         raise KeyError(f"unknown driver {name!r} — one of {', '.join(DRIVERS)}") from None
+
+
+def image_for(spec: Driver) -> str:
+    """The image to run. Cube Store publishes no multi-arch `latest`, so CUBE_TAG exists."""
+    return f"{spec.image}:{spec.tag or os.environ.get(IMAGE_ENV) or 'latest'}"
+
+
+def credentials_for(spec: Driver, values: dict[str, str]) -> dict[str, str]:
+    """The complete `CUBEJS_DB_*` map for a source, from what the user supplied.
+
+    Adds the driver type and any field with a fixed value, so a caller only has to
+    collect what it prompted for. Empty values are dropped rather than passed as
+    `-e KEY=`: to some drivers an empty variable and an unset one are not the same
+    thing, and the credential files this replaced could only express the former.
+    """
+    out = {"CUBEJS_DB_TYPE": spec.key}
+    for field in spec.fields:
+        value = values.get(field.env, field.fixed) or field.fixed
+        if value != "":
+            out[field.env] = value
+    return out
+
+
+def split_mounts(spec: Driver, values: dict[str, str]) -> tuple[dict[str, str], dict[str, str]]:
+    """Separate the host paths out of a submitted form: (values, container path -> host path).
+
+    A `mount_to` field is typed as a path on this machine, but that is not what the
+    container is told: the file is bind-mounted at `mount_to` and the env var carries the
+    *container* path. So the value that becomes a credential is never the host path, and
+    the host path only ever reaches `docker run -v`.
+
+    Two callers — creating a source and editing one — and getting this wrong on either
+    means Cube looks for a key file at a path that does not exist inside the container.
+    """
+    kept = dict(values)
+    mounts: dict[str, str] = {}
+    for field in spec.fields:
+        if not field.mount_to:
+            continue
+        if host_path := (values.get(field.env) or "").strip():
+            mounts[field.mount_to] = str(Path(host_path).expanduser())
+            kept[field.env] = field.mount_to
+    return kept, mounts
+
+
+def missing_fields(spec: Driver, values: dict[str, str]) -> list[str]:
+    """Required connection fields with no value. The form offers them; HTTP has to check."""
+    return [
+        f.env
+        for f in spec.fields
+        if f.required and not f.fixed and not values.get(f.env, "").strip()
+    ]

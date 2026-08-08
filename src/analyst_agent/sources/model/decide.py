@@ -13,6 +13,7 @@ for business grouping.
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import cache
 
 from pydantic import BaseModel, Field
 
@@ -399,22 +400,38 @@ def validate_views(
 # --- the calls --------------------------------------------------------------
 
 
-async def enrich(schema: Schema, menu: Menu) -> Enrichment:
-    """One structured call per cube, then one for the views."""
-    out = Enrichment()
-    model = build_model()
+@cache
+def _cube_model():
+    """Built once. A wide schema is one call per table, and constructing a client for
+    each of four hundred tables is four hundred clients."""
+    return build_model().with_structured_output(CubeDecision)
 
-    cube_model = model.with_structured_output(CubeDecision)
-    for table in schema.tables:
-        decision = await cube_model.ainvoke(cube_prompt(table, menu))
-        out.cubes[table.name], rejected = validate_cube(decision, table, menu)
-        out.rejected += rejected
 
-    view_model = model.with_structured_output(ViewSet)
-    proposed = await view_model.ainvoke(views_prompt(menu.roots, out.cubes))
-    out.views, rejected = validate_views(proposed.views, menu.roots, out.cubes)
-    out.rejected += rejected
-    return out
+@cache
+def _view_model():
+    return build_model().with_structured_output(ViewSet)
+
+
+async def describe_table(table: Table, menu: Menu, enrichment: Enrichment) -> None:
+    """One table's descriptions and measures, recorded on `enrichment`.
+
+    Per table rather than per schema so the caller can report progress and, on a wide
+    schema, so a failure at table 300 does not discard the first 299.
+    """
+    decision = await _cube_model().ainvoke(cube_prompt(table, menu))
+    enrichment.cubes[table.name], rejected = validate_cube(decision, table, menu)
+    enrichment.rejected += rejected
+
+
+async def propose_views(roots: list[ViewRoot], enrichment: Enrichment) -> None:
+    """Choose views over the offered join paths, recorded on `enrichment`.
+
+    Reads the cube decisions already on `enrichment`: a view exposes members under the
+    names those chose, so proposing without them would offer includes that do not exist.
+    """
+    proposed = await _view_model().ainvoke(views_prompt(roots, enrichment.cubes))
+    enrichment.views, rejected = validate_views(proposed.views, roots, enrichment.cubes)
+    enrichment.rejected += rejected
 
 
 async def repair(enrichment: Enrichment, schema: Schema, errors: dict[str, str]) -> None:

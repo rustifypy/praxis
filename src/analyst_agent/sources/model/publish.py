@@ -15,8 +15,6 @@ reaches the container.
 """
 
 import asyncio
-import shutil
-import subprocess
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,7 +22,8 @@ from pathlib import Path
 import httpx
 import yaml
 
-from ..registry import COMPOSE_FILE, SCRATCH_DIR, Source, project_root
+from .. import docker
+from ..registry import Source, project_root
 from .decide import CubeDecision, Enrichment, MeasureDecision, ViewDecision, exposed_members
 
 RESTART_TIMEOUT_S = 90.0
@@ -143,18 +142,14 @@ def build_files(bodies: dict[str, dict], enrichment: Enrichment | None = None) -
 # --- getting it into the container -----------------------------------------
 
 
-def snapshot(source: Source, root: Path | None = None) -> Path:
-    """Copy the current model aside once, so a revert restores what was there first."""
-    root = root or project_root()
-    backup = root / SCRATCH_DIR / f"{source.name}-previous"
-    shutil.rmtree(backup, ignore_errors=True)
-    model_dir = source.model_dir(root)
-    if model_dir.exists():
-        shutil.copytree(model_dir, backup)
-    return backup
-
-
 def write(source: Source, files: dict[str, str], root: Path | None = None) -> None:
+    """Replace the model. Every `*.yml` goes first, so a cube that is no longer emitted
+    does not linger and keep compiling.
+
+    Destructive on purpose and with no undo of its own: the model directory is the
+    user's, and version control is what rolls it back. A rebuild that discards views is
+    a diff they can read, which is more than a one-deep snapshot ever told them.
+    """
     model_dir = source.model_dir(root or project_root())
     for existing in model_dir.rglob("*.yml"):
         existing.unlink()
@@ -164,22 +159,13 @@ def write(source: Source, files: dict[str, str], root: Path | None = None) -> No
         target.write_text(body)
 
 
-def restore(source: Source, backup: Path, root: Path | None = None) -> None:
-    model_dir = source.model_dir(root or project_root())
-    if not backup.exists():
-        return
-    shutil.rmtree(model_dir, ignore_errors=True)
-    shutil.copytree(backup, model_dir)
+async def restart(source: Source) -> bool:
+    """Cube Core does not hot-reload model files; only a restart loads what was written.
 
-
-def restart(source: Source, root: Path | None = None) -> bool:
-    result = subprocess.run(
-        ["docker", "compose", "-f", COMPOSE_FILE, "restart", source.service],
-        cwd=root or project_root(),
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode == 0
+    Async because this runs inside the web server: six seconds of blocking here would
+    freeze the SSE stream of any chat in progress.
+    """
+    return (await docker.restart(source.service)).ok
 
 
 async def install(
@@ -192,7 +178,7 @@ async def install(
 ) -> Validation:
     """Write the model, restart Cube, and report what Cube makes of it."""
     write(source, files)
-    if not restart(source):
+    if not await restart(source):
         return Validation(compile_error=f"could not restart {source.service}")
     return await check(source, members=members, every_measure=every_measure, enrichment=enrichment)
 

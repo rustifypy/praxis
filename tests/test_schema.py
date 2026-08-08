@@ -6,7 +6,14 @@ from analyst_agent.cube.schema import CubeQuery
 
 def test_minimal_query():
     q = CubeQuery(measures=["orders.count"])
-    assert q.to_payload() == {"measures": ["orders.count"], "limit": 1000, "offset": 0}
+    assert q.to_payload() == {"measures": ["orders.count"], "offset": 0}
+
+
+def test_absent_limit_stays_absent():
+    """An unset limit must not look like a requested one: `gate.semantic_check`
+    warns about a limit without an order, and a default here fired it on every query.
+    `gate.run` applies max_rows once the warning has been decided."""
+    assert CubeQuery(measures=["orders.count"]).limit is None
 
 
 def test_empty_query_rejected():

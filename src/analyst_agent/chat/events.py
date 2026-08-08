@@ -37,7 +37,7 @@ class Event(BaseModel):
 def emit(event: Event) -> None:
     """Push an event from inside a tool into the stream.
 
-    LangGraph's writer is a no-op when nobody is streaming, so `analyst ask` is
+    LangGraph's writer is a no-op when nobody is streaming, so `ainvoke` callers are
     unaffected. It raises only when there is no runnable context at all, which is how
     unit tests invoke a tool directly — swallow that rather than making tools
     untestable outside a graph.

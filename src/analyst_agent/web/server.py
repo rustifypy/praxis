@@ -25,6 +25,8 @@ from ..chat.store import ChatStore, checkpointer
 from ..config import settings
 from ..cube.catalog import Catalog
 from ..cube.client import CubeClient, mint_token
+from . import sources
+from .stream import sse
 
 STATIC = Path(__file__).parent / "static"
 COOKIE = "analyst_token"
@@ -53,6 +55,9 @@ class Message(BaseModel):
 async def lifespan(app: FastAPI):
     store = ChatStore()
     await store.init()
+    # Data sources: their own database, their own job runner. Deliberately not under
+    # DATA_DIR, so `--data-dir` can scope chat history for testing without hiding them.
+    await sources.init_state(app)
     async with checkpointer() as saver:
         app.state.store = store
         app.state.saver = saver
@@ -62,6 +67,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="analyst-agent web", lifespan=lifespan)
+app.include_router(sources.router)
 
 
 @app.middleware("http")
@@ -70,7 +76,7 @@ async def guard(request: Request, call_next):
         return await call_next(request)
     supplied = request.query_params.get("token") or request.cookies.get(COOKIE)
     if not supplied or not secrets.compare_digest(supplied, TOKEN):
-        return Response("Unauthorized. Open the URL printed by `analyst web`.", status_code=401)
+        return Response("Unauthorized. Open the URL printed by `analyst`.", status_code=401)
     response = await call_next(request)
     if request.query_params.get("token"):
         # Move it out of the query string so reloads and SSE carry it implicitly.
@@ -135,25 +141,19 @@ async def send(chat_id: str, body: Message, request: Request) -> StreamingRespon
     cancel = asyncio.Event()
     request.app.state.cancels[chat_id] = cancel
 
-    async def sse():
+    async def events():
         try:
             async for event in stream_turn(
                 chat_id, body.question, store, request.app.state.saver, identity(), cancel
             ):
-                yield f"data: {event.model_dump_json()}\n\n"
+                yield event
                 # A closed tab should not leave the agent burning model calls.
                 if await request.is_disconnected():
                     cancel.set()
         finally:
             request.app.state.cancels.pop(chat_id, None)
 
-    return StreamingResponse(
-        sse(),
-        media_type="text/event-stream",
-        # Without these a proxy or the browser will sit on the stream and the
-        # transcript arrives in one lump at the end.
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    return sse(events())
 
 
 @app.get("/api/catalog")

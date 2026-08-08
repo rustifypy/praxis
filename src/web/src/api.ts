@@ -15,13 +15,29 @@ export async function claimToken(): Promise<void> {
   window.history.replaceState({}, "", url.pathname);
 }
 
-async function json<T>(path: string, init?: RequestInit): Promise<T> {
+/**
+ * Every JSON call in the app.
+ *
+ * FastAPI puts its message in `detail`, and those messages are written to be read by a
+ * person — "port 4001 is already assigned", not "400". Unwrapping it here means both the
+ * chat and the sources panel show the same quality of error.
+ */
+export async function json<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
     headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
   });
-  if (!response.ok) throw new Error(`${init?.method ?? "GET"} ${path} → ${response.status}`);
-  return response.json() as Promise<T>;
+  const body = await response.text();
+  if (!response.ok) {
+    let message = `${init?.method ?? "GET"} ${path} → ${response.status}`;
+    try {
+      message = JSON.parse(body).detail ?? message;
+    } catch {
+      /* not JSON — keep the method, path and status */
+    }
+    throw new Error(message);
+  }
+  return (body ? JSON.parse(body) : {}) as T;
 }
 
 export interface CatalogEntity {

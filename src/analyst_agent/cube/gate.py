@@ -37,11 +37,33 @@ class GateResult:
 
 
 def parse(payload: dict) -> tuple[CubeQuery | None, list[str]]:
-    """Tier 1."""
+    """Tier 1.
+
+    A filter is a Filter or a FilterGroup, so pydantic tries both and reports both
+    failures: one missing `values` produced the real message plus two about
+    `FilterGroup` not accepting `member`/`operator`. These go straight into the
+    agent's retry prompt, so the dead branch is dropped and the internal
+    `function-after[...]` wrappers are stripped from the path.
+    """
     try:
         return CubeQuery.model_validate(payload), []
     except ValidationError as e:
-        return None, [f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in e.errors()]
+        return None, _messages(e)
+
+
+def _messages(e: ValidationError) -> list[str]:
+    out: list[str] = []
+    for err in e.errors():
+        raw = [str(p) for p in err["loc"]]
+        path = [p for p in raw if not p.startswith("function-after[")]
+        # A leaf filter naming `member` was never going to satisfy FilterGroup;
+        # complaining that FilterGroup rejects `member` only misdirects the retry.
+        if "FilterGroup" in " ".join(raw) and path and path[-1] in ("member", "operator", "values"):
+            continue
+        text = f"{'.'.join(path)}: {err['msg']}" if path else err["msg"]
+        if text not in out:
+            out.append(text)
+    return out
 
 
 def semantic_check(query: CubeQuery, catalog: Catalog) -> GateResult:
@@ -108,7 +130,10 @@ def semantic_check(query: CubeQuery, catalog: Catalog) -> GateResult:
                 "Prefer timeDimensions.dateRange."
             )
 
-    if query.limit and not query.order:
+    # `is not None`, so this fires on a limit the agent actually asked for. While the
+    # schema defaulted it, every query carried this warning and the prompt tells the
+    # agent to report warnings to the user.
+    if query.limit is not None and not query.order:
         warnings.append(
             "limit set without order — results may be silently truncated. Set an explicit order."
         )
@@ -124,7 +149,9 @@ async def run(payload: dict, catalog: Catalog, client: CubeClient, max_rows: int
     if not checked.ok:
         return checked
 
-    query.limit = min(query.limit, max_rows)
+    # Applied after semantic_check so the warning above sees what the agent asked for.
+    # An absent limit still caps at max_rows — the row ceiling is not optional.
+    query.limit = max_rows if query.limit is None else min(query.limit, max_rows)
 
     compiled = await client.compile(query)
     if not compiled.ok:

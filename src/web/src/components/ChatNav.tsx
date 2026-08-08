@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { ago } from "../hooks";
+import { ago, dayGroup } from "../hooks";
 import type { Chat } from "../types";
 
 /**
@@ -115,10 +115,16 @@ function Row({
   );
 }
 
-export function Sidebar({
+/**
+ * The chat mode's whole sidebar.
+ *
+ * Grouped by day and searchable, because the list only grows: `chats.map` is fine at ten
+ * and unusable at two hundred, and until now there was no way to find an old conversation
+ * except scrolling for its title.
+ */
+export function ChatNav({
   chats,
   activeId,
-  cubeUrl,
   onSelect,
   onCreate,
   onRename,
@@ -126,41 +132,70 @@ export function Sidebar({
 }: {
   chats: Chat[];
   activeId: string | null;
-  cubeUrl: string;
   onSelect: (id: string) => void;
   onCreate: () => void;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
 }) {
+  const [filter, setFilter] = useState("");
+
+  // Grouped in the order the server sent, which is newest first — so the buckets come
+  // out chronological without a second sort.
+  const groups = useMemo(() => {
+    const needle = filter.trim().toLowerCase();
+    const matching = needle
+      ? chats.filter((chat) => chat.title.toLowerCase().includes(needle))
+      : chats;
+    const out: { label: string; chats: Chat[] }[] = [];
+    for (const chat of matching) {
+      const label = dayGroup(chat.updated_at);
+      const last = out[out.length - 1];
+      if (last?.label === label) last.chats.push(chat);
+      else out.push({ label, chats: [chat] });
+    }
+    return out;
+  }, [chats, filter]);
+
   return (
-    <aside className="sidebar">
-      <div className="brand">
-        <span className="dot" />
-        analyst
-      </div>
+    <aside className="nav">
+      <header className="nav-head">
+        <h2>Chats</h2>
+        <button className="nav-add" onClick={onCreate} title="New chat  ⌘K" aria-label="New chat">
+          +
+        </button>
+      </header>
 
-      <button className="new-chat" onClick={onCreate}>
-        <span className="plus">+</span> New chat
-      </button>
+      {chats.length > 4 && (
+        <input
+          className="nav-filter"
+          placeholder="Search chats"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
+      )}
 
-      <nav className="chat-list">
-        {chats.map((chat) => (
-          <Row
-            key={chat.id}
-            chat={chat}
-            active={chat.id === activeId}
-            onSelect={() => onSelect(chat.id)}
-            onRename={(title) => onRename(chat.id, title)}
-            onDelete={() => onDelete(chat.id)}
-          />
+      <div className="nav-list">
+        {groups.map((group) => (
+          <div key={group.label} className="chat-group">
+            <h3>{group.label}</h3>
+            {group.chats.map((chat) => (
+              <Row
+                key={chat.id}
+                chat={chat}
+                active={chat.id === activeId}
+                onSelect={() => onSelect(chat.id)}
+                onRename={(title) => onRename(chat.id, title)}
+                onDelete={() => onDelete(chat.id)}
+              />
+            ))}
+          </div>
         ))}
-        {chats.length === 0 && <p className="empty">No chats yet.</p>}
-      </nav>
 
-      <footer className="source" title={cubeUrl}>
-        <span className="live-dot" />
-        {cubeUrl.replace(/^https?:\/\//, "")}
-      </footer>
+        {chats.length === 0 && <p className="empty">No chats yet.</p>}
+        {chats.length > 0 && groups.length === 0 && (
+          <p className="empty">Nothing matches “{filter}”.</p>
+        )}
+      </div>
     </aside>
   );
 }

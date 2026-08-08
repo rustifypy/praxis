@@ -52,12 +52,21 @@ async def load_catalog(client: CubeClient, refresh: bool = False) -> Catalog:
     return _catalogs[key]
 
 
+def forget_catalog() -> None:
+    """Drop the cached catalog so the next turn refetches it.
+
+    The cache lives for the life of the process, so a model rebuilt in the panel would
+    otherwise stay invisible to the agent until a restart.
+    """
+    _catalogs.pop(settings.api_root, None)
+
+
 def build_agent(session: Session, ctx: SecurityContext, checkpointer=None):
-    """The agent, shared by the CLI's single shot and the web's streamed turn.
+    """The agent, shared by `/ask`'s single shot and the web's streamed turn.
 
     Two construction sites would drift; middleware added for the browser would quietly
-    not apply to `analyst ask`. Pass a checkpointer to give the agent memory across
-    turns — without one it behaves exactly as it always has.
+    not apply to the other. Pass a checkpointer to give the agent memory across turns —
+    without one it behaves exactly as it always has.
     """
     model = build_model()
     return create_agent(
@@ -79,7 +88,7 @@ def build_agent(session: Session, ctx: SecurityContext, checkpointer=None):
 
 
 async def ask(question: str, ctx: SecurityContext | None = None) -> Answer:
-    """One question, no memory. The CLI and the /ask endpoint."""
+    """One question, no memory. The /ask endpoint."""
     ctx = ctx or SecurityContext()
     client = CubeClient(mint_token(ctx.as_claims()))
     try:

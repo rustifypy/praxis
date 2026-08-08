@@ -21,18 +21,13 @@ wheels/
 # Local config
 .env
 .env.cube
+# A rotation leaves a copy of .env behind. Plaintext, so never committable.
+.env.*-backup
 
-# Per-source credentials, written by `analyst source add`
-.env.sources/
-
-# Scratch dir for introspection probes
-.cube-probe/
-
-# Frontend. Only node_modules is ignored — src/analyst_agent/web/static/ is the
-# committed build output, and `analyst web` serves a 503 without it.
+# Frontend. Only node_modules and the tsc cache are ignored — the build output at
+# src/analyst_agent/web/static/ IS committed, and `analyst` serves a 503 without it.
 src/web/node_modules/
+src/web/tsconfig.tsbuildinfo
 
 /cube/
 grounding/
-
-.env.rotate-backup

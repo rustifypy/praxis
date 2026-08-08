@@ -13,8 +13,6 @@ dependencies = [
     "fastapi>=0.118",
     "uvicorn[standard]>=0.34",
     "pyjwt>=2.10",
-    "typer>=0.15",
-    "rich>=13.9",
     "rapidfuzz>=3.10",
     "langchain-openai>=1.4.1",
     "pyyaml>=6.0.3",
@@ -23,7 +21,7 @@ dependencies = [
 ]
 
 [project.scripts]
-analyst = "analyst_agent.cli:app"
+analyst = "analyst_agent.__main__:main"
 
 [dependency-groups]
 dev = [

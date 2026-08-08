@@ -1,1 +1,0 @@
-{"root":["./src/app.tsx","./src/api.ts","./src/events.ts","./src/hooks.ts","./src/main.tsx","./src/types.ts","./src/components/answer.tsx","./src/components/collapse.tsx","./src/components/composer.tsx","./src/components/copy.tsx","./src/components/sidebar.tsx","./src/components/thinking.tsx","./src/components/toolcall.tsx","./src/components/welcome.tsx"],"version":"5.9.3"}

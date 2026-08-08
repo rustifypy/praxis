@@ -15,11 +15,11 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-import aiosqlite
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ..agent.tools import QueryRecord
 from ..config import settings
+from ..db import connect
 from .events import Event
 
 SCHEMA = """
@@ -63,13 +63,8 @@ class ChatStore:
     def __init__(self, path: Path | None = None):
         self.path = path or settings.db_path
 
-    @asynccontextmanager
-    async def _db(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(self.path) as db:
-            db.row_factory = aiosqlite.Row
-            await db.execute("PRAGMA foreign_keys = ON")
-            yield db
+    def _db(self):
+        return connect(self.path)
 
     async def init(self) -> None:
         async with self._db() as db:

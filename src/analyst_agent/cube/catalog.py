@@ -1,6 +1,12 @@
 from dataclasses import dataclass, field
 
-from rapidfuzz import process
+from rapidfuzz import fuzz
+
+
+def _tokens(name: str) -> str:
+    """snake_case to space-separated, so token-set scoring can see the words."""
+    return name.replace("_", " ").lower()
+
 
 STRING_OPS = [
     "equals",
@@ -24,6 +30,13 @@ TIME_OPS = [
     "beforeOrOnDate",
     "afterDate",
     "afterOrOnDate",
+    # Cube's docs list these under number dimensions only, but it accepts them on a
+    # timestamp and answers correctly — verified against a live source. Omitting them
+    # rejected a working query. `afterDate` and friends remain the idiomatic form.
+    "gt",
+    "gte",
+    "lt",
+    "lte",
     "set",
     "notSet",
 ]
@@ -50,6 +63,14 @@ class MemberDoc:
     ai_context: str = ""
     granularities: list[str] = field(default_factory=list)
     valid_operators: list[str] = field(default_factory=list)
+    alias_member: str = ""
+    """For a view member, the cube member it re-exports — `sales.revenue` ->
+    `invoice_line.line_amount`. Empty on a cube's own members.
+
+    This is the only thing in `/v1/meta` that says what a view is made of. Without it a
+    view and a cube are two entities with different type strings, which is how they were
+    being presented; with it, a view is a projection over named cubes and a cube member
+    can be asked whether any view exposes it at all."""
 
     @property
     def search_text(self) -> str:
@@ -121,6 +142,7 @@ class Catalog:
                             ai_context=_ai_context(m),
                             granularities=grains,
                             valid_operators=list(ops),
+                            alias_member=m.get("aliasMember", "") or "",
                         )
                     )
             entities.append(entity)
@@ -130,8 +152,28 @@ class Catalog:
         return self.members.get(member_id)
 
     def nearest(self, member_id: str, limit: int = 3) -> list[str]:
-        hits = process.extract(member_id, list(self.members), limit=limit, score_cutoff=40)
-        return [h[0] for h in hits]
+        """Real members to suggest for one the agent invented.
+
+        Scored on the part after the dot. Scoring the whole id ranks by the shared
+        cube prefix instead — every member of `sales` scores alike, so `sales.revenue`
+        came back with three arbitrary `sales.` members and not the one it meant.
+        Underscores become spaces so `unit_price` and `price` share a token, and a
+        member of the cube the agent already named wins a tie.
+
+        Returning nothing is a correct answer: a name with no lexical neighbour is
+        better reported as such than padded out with misleading suggestions.
+        """
+        entity, _, wanted = member_id.rpartition(".")
+        scored = []
+        for candidate in self.members:
+            cand_entity, _, cand_member = candidate.rpartition(".")
+            score = fuzz.token_set_ratio(_tokens(wanted), _tokens(cand_member))
+            if entity and cand_entity == entity:
+                score += 10
+            if score >= 60:
+                scored.append((score, candidate))
+        scored.sort(key=lambda pair: (-pair[0], pair[1]))
+        return [candidate for _, candidate in scored[:limit]]
 
     def entity(self, name: str) -> Entity | None:
         return next((e for e in self.entities if e.name == name), None)

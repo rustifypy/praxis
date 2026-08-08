@@ -35,16 +35,27 @@ META = {
             "name": "revenue",
             "type": "view",
             "description": "Revenue and order volume.",
+            # Cube emits `aliasMember` on every view member — it is the only thing in
+            # /v1/meta that says which cube member a view re-exports.
             "measures": [
-                {"name": "revenue.count", "type": "count"},
-                {"name": "revenue.net_revenue", "type": "sum"},
+                {"name": "revenue.count", "type": "count", "aliasMember": "orders.count"},
+                {
+                    "name": "revenue.net_revenue",
+                    "type": "sum",
+                    "aliasMember": "orders.net_revenue",
+                },
             ],
             "dimensions": [
-                {"name": "revenue.status", "type": "string"},
+                {
+                    "name": "revenue.status",
+                    "type": "string",
+                    "aliasMember": "orders.status",
+                },
                 {
                     "name": "revenue.created_at",
                     "type": "time",
                     "granularities": [{"name": "month"}],
+                    "aliasMember": "orders.created_at",
                 },
             ],
         },
