@@ -31,7 +31,6 @@ class Settings(BaseSettings):
     max_rows: int = 5_000
     query_timeout_s: float = 60.0
 
-    grounding_dir: str = "grounding"
     # Chat history and the LangGraph checkpointer share one SQLite file here.
     data_dir: str = "~/.analyst"
     # Data sources deliberately do NOT live under data_dir: `analyst --data-dir`

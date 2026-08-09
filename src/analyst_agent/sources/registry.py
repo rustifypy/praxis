@@ -20,6 +20,15 @@ MODEL_ROOT = "cube/sources"
 """The only thing this tool writes into the working directory. Everything else it needs
 — sources.db, the job lock, the catalog probe's throwaway model — is machine-local under
 `~/.analyst`, because the working directory belongs to whoever installed this."""
+GROUNDING_ROOT = "grounding"
+"""Grounding sits inside the source's own directory, which is bind-mounted as Cube's
+model. Cube compiles every `*.yml` it finds anywhere under that mount, not just under
+`cubes/` and `views/` — a grounding file written as YAML takes the whole model to zero
+cubes and reports the compile error against the grounding file. Artefacts here are
+markdown only, which is what `grounding._load_dir` globbing `*.md` enforces."""
+ARTEFACT_DIRS = ("rules", "skills", "certified_queries")
+"""The directories `Grounding` reads. Scaffolding a different set would create folders
+nothing loads, so both sides take this list."""
 FIRST_PORT = 4001
 
 
@@ -67,6 +76,15 @@ class Source:
 
     def model_dir(self, root: Path | None = None) -> Path:
         return (root or project_root()) / MODEL_ROOT / self.name
+
+    def grounding_dir(self, root: Path | None = None) -> Path:
+        """Where this source's rules, skills and certified queries live.
+
+        Per source and not global, because grounding names members: a rule saying
+        "revenue" means `revenue.net_revenue` is nonsense against a warehouse that has
+        no revenue cube, and the agent was being told it for every source regardless.
+        """
+        return self.model_dir(root) / GROUNDING_ROOT
 
 
 def next_port(taken: Iterable[int] = ()) -> int:
@@ -122,14 +140,20 @@ def validate_new(
     return None
 
 
-def scaffold_model_dir(source: Source, root: Path | None = None) -> Path:
-    """Cube reads /cube/conf/model. Empty until the model generator writes into it.
+def scaffold_source_dirs(source: Source, root: Path | None = None) -> Path:
+    """Create everything a source owns on disk, and return the directory to bind-mount.
 
-    Created before the container starts: docker would otherwise create the bind-mount
-    target as root, and Cube could not read the model written into it later.
+    Cube reads /cube/conf/model, which is `model_dir` — empty until the model generator
+    writes into it. Made before the container starts: docker would otherwise create the
+    bind-mount target as root, and Cube could not read the model written into it later.
+
+    The grounding directories are made empty here for a different reason. `Grounding`
+    tolerates them being absent, so this is purely so they can be found: nobody writes a
+    rule into a folder they cannot see.
     """
     base = source.model_dir(root)
-    for sub in ("cubes", "views"):
+    grounding = (f"{GROUNDING_ROOT}/{artefact}" for artefact in ARTEFACT_DIRS)
+    for sub in ("cubes", "views", *grounding):
         (base / sub).mkdir(parents=True, exist_ok=True)
         (base / sub / ".gitkeep").touch()
     return base

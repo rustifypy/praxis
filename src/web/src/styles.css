@@ -88,7 +88,6 @@ textarea {
 .picker-bulk button,
 .picker-head > .link,
 .stage-cta button,
-.danger-row button,
 .modal footer button,
 .drawer footer button,
 .job-head button {
@@ -617,9 +616,12 @@ textarea {
   z-index: 40;
   top: calc(100% + 6px);
   left: 0;
-  /* Wide enough for the model browser's two columns — it is the main thing in here. */
-  width: min(880px, calc(100vw - 340px));
-  max-height: min(76vh, 700px);
+  /* A source switcher, so it is sized to the longest row in it — a name, a summary and
+     a CUBE_URL. It was 880px wide when it carried the model browser; hanging a panel
+     that size over a transcript to answer "which database am I on" was the whole
+     problem. The model and grounding are on the source page now. */
+  width: min(460px, calc(100vw - 340px));
+  max-height: min(60vh, 520px);
   overflow-y: auto;
   padding: 14px;
   border: 1px solid var(--line);
@@ -636,12 +638,6 @@ textarea {
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--faint);
-}
-
-.src-panel-model {
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
 }
 
 .src-switch-row {
@@ -1519,6 +1515,24 @@ textarea {
   cursor: not-allowed;
 }
 
+/* Ruled off from the routine actions above it, so Remove cannot be hit by momentum on
+   the way to Edit. The typed-name confirm is the real guard; this is the warning. */
+.menu-panel button.danger {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 6px 6px;
+  color: var(--bad);
+}
+
+.menu-panel button.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+}
+
+.menu-panel button.danger:disabled {
+  color: var(--faint);
+}
+
 .menu-panel small {
   color: var(--faint);
   font-size: 11px;
@@ -1686,7 +1700,6 @@ textarea {
 .detail-primary > button,
 .picker-bulk button,
 .stage-cta button,
-.danger-row button,
 .modal footer button,
 .drawer footer button {
   padding: 5px 11px;
@@ -1704,8 +1717,7 @@ textarea {
 
 .detail-primary > button:hover:not(:disabled),
 .picker-bulk button:hover:not(:disabled),
-.stage-cta button:hover:not(:disabled),
-.danger-row button:hover:not(:disabled) {
+.stage-cta button:hover:not(:disabled) {
   border-color: var(--muted);
 }
 
@@ -1717,17 +1729,12 @@ button.primary {
 
 button.primary:disabled,
 .detail-primary > button:disabled,
-.danger-row button:disabled,
 .modal footer button:disabled,
 .stage-cta button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 
-.danger-row button {
-  border-color: color-mix(in srgb, var(--bad) 40%, var(--line));
-  color: var(--bad);
-}
 
 /* Cube's own UI for this container, between the primary action and the overflow. Styled
    as a control rather than as body-text link so the row keeps one baseline. */
@@ -2284,7 +2291,7 @@ button.danger.solid {
    crushing the content — it is not a phone layout. */
 @media (max-width: 980px) {
   .app { grid-template-columns: 52px 204px 1fr; }
-  .src-panel { width: calc(100vw - 300px); }
+  .src-panel { width: min(460px, calc(100vw - 300px)); }
 
   /* Below this the detail box would be narrower than a member row, so the split stacks
      and the list goes back to sitting above what it opens. */
@@ -2299,8 +2306,6 @@ button.danger.solid {
   .sources { padding: 20px 16px 48px; }
   .detail { padding: 18px 16px 40px; }
   .step { min-width: 96px; }
-  .danger-row { flex-wrap: wrap; }
-  .danger-row button { margin-left: 0; }
 }
 
 /* ============================ one source per page ============================ */
@@ -2453,35 +2458,10 @@ button.danger.solid {
   font-weight: 600;
 }
 
-.danger-zone h3 {
-  color: var(--bad);
-}
 
-.danger-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--bad) 28%, var(--line));
-  border-radius: 10px;
-}
 
-.danger-row span {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 13px;
-}
 
-.danger-row small {
-  color: var(--muted);
-  font-size: 12px;
-}
 
-.danger-row button {
-  margin-left: auto;
-  flex: none;
-}
 
 /* ---------- what Cube is serving ---------- */
 
@@ -2811,4 +2791,172 @@ button.danger.solid {
   margin-top: 2px;
   color: var(--muted);
   font-size: 12.5px;
+}
+
+/* ---------- collapsible sections ---------- */
+
+/* Five sections open at once is a column of eighty rows, and getting from Views to
+   Certified queries meant scrolling past every cube in the model. Shut, the shape of a
+   whole source fits on one screen — which is why the count stays on the header. */
+.served-section-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  grid-column: 1;
+  grid-row: 1;
+  padding: 2px 4px 2px 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  cursor: pointer;
+  color: inherit;
+}
+
+.served-section-toggle:hover .served-caret {
+  color: var(--text);
+}
+
+.served-caret {
+  display: inline-block;
+  width: 9px;
+  color: var(--faint);
+  font-size: 10px;
+  line-height: 1;
+  transition: transform 120ms ease;
+}
+
+.served-section.open .served-caret {
+  transform: rotate(90deg);
+}
+
+/* A shut section is a header and nothing else, so the head's own bottom margin and rule
+   would leave it floating above a gap the width of the content it is hiding. */
+.served-section:not(.open) {
+  margin-bottom: 6px;
+}
+
+.served-section:not(.open) .served-section-head {
+  margin-bottom: 0;
+  padding-bottom: 4px;
+}
+
+/* ---------- grounding ---------- */
+
+/* Three kinds, coloured like views and cubes are. Rules take the accent because the
+   `always` half of them is in every prompt — the only grounding with a standing cost. */
+.served-section.rules .served-section-head h4 {
+  color: var(--accent);
+}
+
+.served-section.skills .served-section-head h4,
+.served-section.certified .served-section-head h4 {
+  color: var(--muted);
+}
+
+/* The row's one badge. Marking `agent_requested` too would put a badge on every row and
+   leave the expensive half indistinguishable from the free one. */
+.ground-always {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  cursor: help;
+}
+
+/* Where to go and write one. Absolute, and wrapped rather than truncated: this path is
+   the diagnosis when grounding is unexpectedly empty — it resolves from the directory the
+   portal was launched in — so hiding its middle defeats the point of showing it.
+   `display: block` because it renders as a span inside the section's empty paragraph. */
+.ground-path {
+  display: block;
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.ground-path code {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--code-bg);
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+/* The artefact body, as the markdown it is. Same treatment as a chat answer — these are
+   written to be read, and rendering them as a preformatted blob undoes the reason they
+   are markdown in the first place. */
+.ground-body {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.ground-body > :first-child {
+  margin-top: 0;
+}
+
+.ground-body > :last-child {
+  margin-bottom: 0;
+}
+
+.ground-body ul,
+.ground-body ol {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.ground-body li {
+  margin: 4px 0;
+}
+
+.ground-body code,
+.ground-body pre {
+  background: var(--code-bg);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.ground-body code {
+  padding: 1px 5px;
+}
+
+/* Certified queries are a fenced JSON block wide enough to force a sideways scroll, and
+   the detail box is `overflow-y: auto` — which computes `overflow-x` to `auto` as well,
+   so without this the whole box scrolls sideways instead of the code inside it. */
+.ground-body pre {
+  padding: 10px 12px;
+  overflow-x: auto;
+}
+
+.ground-body pre code {
+  padding: 0;
+  background: none;
+}
+
+.ground-body table {
+  display: block;
+  width: 100%;
+  margin: 10px 0;
+  border-collapse: collapse;
+  overflow-x: auto;
+  font-size: 12.5px;
+}
+
+.ground-body th,
+.ground-body td {
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  text-align: left;
+}
+
+.ground-body th {
+  background: var(--panel);
 }

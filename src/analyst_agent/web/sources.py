@@ -28,6 +28,7 @@ from ..agent.build import SecurityContext, forget_catalog
 from ..config import settings
 from ..cube.catalog import Catalog
 from ..cube.client import CubeClient, CubeError, mint_token
+from ..grounding import for_source
 from ..sources import docker, health, jobs, model
 from ..sources.drivers import (
     DRIVERS,
@@ -39,7 +40,7 @@ from ..sources.drivers import (
 )
 from ..sources.model import selection
 from ..sources.model.run import ACTIONS, StepFailed
-from ..sources.registry import Source, next_port, scaffold_model_dir, validate_new
+from ..sources.registry import Source, next_port, scaffold_source_dirs, validate_new
 from ..sources.store import SourceStore, merge_credentials, public
 from .stream import sse
 
@@ -321,6 +322,47 @@ async def source_model(name: str, request: Request) -> dict:
     }
 
 
+@router.get("/sources/{name}/grounding")
+async def source_grounding(name: str, request: Request) -> dict:
+    """The markdown this source grounds the agent with, exactly as the agent loads it.
+
+    Read through `Grounding` rather than by walking the directory. A viewer with its own
+    idea of what counts would show a `.yml` sitting there looking loaded — and that file
+    is not merely ignored, it fails the whole model's compile, because this directory is
+    inside the tree Cube mounts.
+
+    `root` is the absolute path as resolved, not the tidy relative form, because it is
+    resolved from the working directory the portal was launched in. When grounding is
+    unexpectedly empty, that path is the answer.
+    """
+    source = await _find(request, name)
+    loaded = for_source(source)
+    kinds = (
+        ("rule", loaded.rules),
+        ("skill", loaded.skills),
+        ("certified", loaded.certified),
+    )
+    return {
+        "root": str(source.grounding_dir()),
+        "exists": source.grounding_dir().is_dir(),
+        "artefacts": [
+            {
+                "kind": kind,
+                "name": artefact.name,
+                "file": artefact.file,
+                "description": artefact.description,
+                # Rules only, and defaulted the way `always_rules` defaults it: an
+                # untyped rule loads every turn, which is the expensive half.
+                "loading": artefact.meta.get("type", "always") if kind == "rule" else "",
+                "user_request": artefact.meta.get("user_request", ""),
+                "body": artefact.body,
+            }
+            for kind, artefacts in kinds
+            for artefact in artefacts
+        ],
+    }
+
+
 @router.post("/sources/{name}/check")
 async def check_now(name: str, request: Request) -> dict:
     """Probe now, ignoring `HEALTH_TTL_S`. Nothing else drops that entry without also
@@ -395,7 +437,7 @@ async def create(body: NewSource, request: Request) -> dict:
         credentials=credentials_for(spec, values),
     )
     await store.add(source)
-    scaffold_model_dir(source)
+    scaffold_source_dirs(source)
     return await _view(request, source, await docker.ours(), steps={})
 
 

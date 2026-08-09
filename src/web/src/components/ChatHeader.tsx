@@ -1,13 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 
 import { useDismiss } from "../hooks";
-import * as api from "../sources";
-import type { ServedModel as Model, SourceRow } from "../sources";
+import type { SourceRow } from "../sources";
 import { healthOf, servingSummary } from "../sources";
-import { ServedModel } from "./ServedModel";
 
 /**
- * Which source this conversation queries, and what it can be asked about.
+ * Which source this conversation queries, and how to change it.
  *
  * Chat had no header at all. The answer to "what am I querying?" was the sidebar footer,
  * rendering `CUBE_URL` as a bare `127.0.0.1:4001` — a port number the user cannot map
@@ -15,9 +13,11 @@ import { ServedModel } from "./ServedModel";
  * premise is governed access to one semantic layer, that is the wrong place for the one
  * fact that says which layer.
  *
- * The panel also hosts `ServedModel`, which is a chat-time component: "what can I ask
- * about" is the question you have with a cursor in the composer, and it was living at the
- * bottom of an admin page.
+ * The panel is a source *switcher* and nothing more. It briefly carried the whole served
+ * model and this source's grounding, and that was the wrong depth for a dropdown hanging
+ * over a conversation: clicking the chip to check which database you were on opened an
+ * admin screen on top of the transcript. Both live on the source page, one click further
+ * out via "Manage sources", where there is room for them and where you go deliberately.
  */
 export function ChatHeader({
   sources,
@@ -29,28 +29,10 @@ export function ChatHeader({
   onShowSources: (name?: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [model, setModel] = useState<Model | null>(null);
-  const [loading, setLoading] = useState(false);
   const ref = useDismiss<HTMLDivElement>(open, () => setOpen(false));
 
   const active = sources.find((source) => source.active) ?? null;
   const health = active ? healthOf(active) : null;
-
-  const load = useCallback(() => {
-    if (!active?.running) return;
-    setLoading(true);
-    void api
-      .servedModel(active.name)
-      .then(setModel)
-      .catch((err) => setModel({ serving: false, error: String(err), entities: [] }))
-      .finally(() => setLoading(false));
-  }, [active?.name, active?.running]);
-
-  // Lazily, on first open: reading /v1/meta on every page load would cost a request per
-  // launch for a panel most turns never open.
-  useEffect(() => {
-    if (open && !model) load();
-  }, [open, model, load]);
 
   if (!active) {
     return (
@@ -72,6 +54,9 @@ export function ChatHeader({
         <button className="src-chip" aria-expanded={open} onClick={() => setOpen(!open)}>
           <span className={`health-dot ${health?.tone}`} />
           <span className="src-chip-name">{active.name}</span>
+          {/* The size of the model, in the one line there is room for. It is what tells
+              you the source is actually built rather than merely connected, without
+              opening anything. */}
           <span className="src-chip-meta">
             {active.serving ? servingSummary(active.serving) : health?.label}
           </span>
@@ -112,20 +97,11 @@ export function ChatHeader({
                   )}
                 </div>
               ))}
+              {/* Where the model and this source's grounding are — deliberately a link
+                  out rather than another disclosure inside a dropdown. */}
               <button className="link" onClick={() => onShowSources(active.name)}>
                 Manage sources →
               </button>
-            </div>
-
-            <div className="src-panel-model">
-              <h4>What you can ask about</h4>
-              {active.running ? (
-                <ServedModel model={model} loading={loading} onRefresh={load} />
-              ) : (
-                <p className="served-empty">
-                  The container is stopped, so Cube cannot say what it would serve.
-                </p>
-              )}
             </div>
           </div>
         )}

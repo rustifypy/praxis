@@ -162,7 +162,7 @@ async def read_catalog(source: Source, timeout: float = BOOT_TIMEOUT_S) -> Catal
     #
     # Machine-local, next to sources.db and the job lock, rather than in the project:
     # this is a dependency, and the working directory belongs to whoever installed it —
-    # `cube/` and `grounding/` are theirs, and a scratch directory of ours has no business
+    # `cube/` is theirs, and a scratch directory of ours has no business
     # appearing beside them. Not a system tempdir either: this path is bind-mounted, and
     # Docker Desktop's file sharing covers `/Users` far more reliably than `/var/folders`.
     probe_dir = settings.sources_db_path.parent / PROBE_MODEL_DIR

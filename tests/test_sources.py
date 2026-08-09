@@ -9,7 +9,7 @@ PG = Source(name="shop", description="Orders.", driver="postgres", port=4001)
 
 
 def test_scaffold_creates_the_dirs_cube_mounts(tmp_path):
-    base = registry.scaffold_model_dir(PG, root=tmp_path)
+    base = registry.scaffold_source_dirs(PG, root=tmp_path)
     assert (base / "cubes").is_dir() and (base / "views").is_dir()
 
 

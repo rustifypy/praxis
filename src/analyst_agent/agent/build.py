@@ -6,7 +6,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from ..config import settings
 from ..cube.catalog import Catalog
 from ..cube.client import CubeClient, mint_token
-from ..grounding import Grounding
+from ..grounding import for_active_source
 from .content import text_of
 from .middleware import AuditLog, CompactionNotice
 from .model import build_model
@@ -95,7 +95,7 @@ async def ask(question: str, ctx: SecurityContext | None = None) -> Answer:
         session = Session(
             catalog=await load_catalog(client),
             client=client,
-            grounding=Grounding(settings.grounding_dir),
+            grounding=await for_active_source(),
             max_rows=settings.max_rows,
         )
         agent = build_agent(session, ctx)

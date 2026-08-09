@@ -19,7 +19,7 @@ from ..agent.content import reasoning_of, text_of
 from ..agent.tools import Session
 from ..config import settings
 from ..cube.client import CubeClient, mint_token
-from ..grounding import Grounding
+from ..grounding import for_active_source
 from .events import Event
 from .store import ChatStore
 
@@ -60,7 +60,7 @@ async def stream_turn(
         session = Session(
             catalog=await load_catalog(client),
             client=client,
-            grounding=Grounding(settings.grounding_dir),
+            grounding=await for_active_source(),
             max_rows=settings.max_rows,
         )
         # Seeded from the log so `explain_last_query` still answers "show me the SQL for

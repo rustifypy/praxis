@@ -8,6 +8,9 @@ export interface MenuItem {
   /** Shown greyed with the reason as its subtitle, rather than hidden. A control that
    *  vanishes teaches nothing; one that says why it is unavailable does. */
   disabled?: string;
+  /** Destructive. Rendered in the bad tone and ruled off from the routine actions above
+   *  it, so it cannot be hit by momentum on the way to Edit. */
+  danger?: boolean;
 }
 
 /**
@@ -40,6 +43,7 @@ export function Menu({ items, label = "More actions" }: { items: MenuItem[]; lab
             <button
               key={item.label}
               role="menuitem"
+              className={item.danger ? "danger" : undefined}
               disabled={Boolean(item.disabled)}
               onClick={() => {
                 setOpen(false);

@@ -186,6 +186,31 @@ export interface ServedModel {
   entities: ServedEntity[];
 }
 
+/** One markdown file under `cube/sources/<name>/grounding/`, as the agent loads it. */
+export interface GroundingArtefact {
+  kind: "rule" | "skill" | "certified";
+  /** From frontmatter, and what `load_grounding` is called with. */
+  name: string;
+  /** Path under the grounding directory — the file to go and edit. */
+  file: string;
+  description: string;
+  /** Rules only. `always` is in every system prompt; `agent_requested` is offered by
+   *  name and its body loads on demand. The difference is the whole cost model. */
+  loading: string;
+  /** Certified queries only: the phrasings it was written to match. */
+  user_request: string;
+  body: string;
+}
+
+export interface SourceGrounding {
+  /** Absolute, as resolved — not the tidy relative form. Grounding is the one agent
+   *  input that resolves from the directory the portal was launched in, so when it is
+   *  unexpectedly empty this path is the answer. */
+  root: string;
+  exists: boolean;
+  artefacts: GroundingArtefact[];
+}
+
 export interface Closure {
   tables: string[];
   /** Pulled in by foreign key because the picked tables reference them. */
@@ -222,6 +247,8 @@ export const catalog = (name: string) => json<CatalogInfo>(`/api/sources/${name}
 export const logs = (name: string) =>
   json<{ container: string; logs: string }>(`/api/sources/${name}/logs`);
 export const servedModel = (name: string) => json<ServedModel>(`/api/sources/${name}/model`);
+export const sourceGrounding = (name: string) =>
+  json<SourceGrounding>(`/api/sources/${name}/grounding`);
 
 /** Probe now rather than waiting out the server's 15s health cache. */
 export const checkNow = (name: string) => post(`/api/sources/${name}/check`) as Promise<SourceRow>;

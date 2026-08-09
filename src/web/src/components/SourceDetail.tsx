@@ -6,6 +6,7 @@ import type {
   CatalogInfo,
   JobState,
   ServedModel as Model,
+  SourceGrounding,
   SourceRow,
   StageName,
 } from "../sources";
@@ -55,6 +56,8 @@ export function SourceDetail({
   const [catalog, setCatalog] = useState<CatalogInfo | null>(null);
   const [model, setModel] = useState<Model | null>(null);
   const [loadingModel, setLoadingModel] = useState(false);
+  const [grounding, setGrounding] = useState<SourceGrounding | null>(null);
+  const [loadingGrounding, setLoadingGrounding] = useState(false);
   const [checking, setChecking] = useState(false);
   const [checkedAt, setCheckedAt] = useState(0);
   const [stage, setStage] = useState<StageName | null>(null);
@@ -90,11 +93,26 @@ export function SourceDetail({
       .finally(() => setLoadingModel(false));
   }, [source.name]);
 
+  const loadGrounding = useCallback(() => {
+    setLoadingGrounding(true);
+    void api
+      .sourceGrounding(source.name)
+      .then(setGrounding)
+      .catch(() => setGrounding({ root: "", exists: false, artefacts: [] }))
+      .finally(() => setLoadingGrounding(false));
+  }, [source.name]);
+
   // The catalog is cached in sources.db and reads no database, so fetching it on arrival
   // is cheap — and the stepper cannot draw the Read stage without it.
   useEffect(() => {
     loadCatalog();
   }, [loadCatalog, job?.done]);
+
+  // Four small files off local disk, and unlike the model it does not need the container
+  // to be up — grounding is on this machine, not inside Cube.
+  useEffect(() => {
+    loadGrounding();
+  }, [loadGrounding]);
 
   useEffect(() => {
     if (source.running) loadModel();
@@ -246,7 +264,21 @@ export function SourceDetail({
                 disabled: source.running ? undefined : "already stopped",
               },
               { label: logs === null ? "Container output" : "Hide output", onSelect: showLogs },
-              { label: "Edit connection", onSelect: onEdit, disabled: busy ? "a job is running" : undefined },
+              {
+                label: "Edit connection",
+                onSelect: onEdit,
+                disabled: busy ? "a job is running" : undefined,
+              },
+              {
+                label: "Remove source",
+                danger: true,
+                onSelect: () => setConfirmRemove(true),
+                disabled: source.active
+                  ? "point CUBE_URL elsewhere first — the portal queries this one"
+                  : busy
+                    ? "a job is running"
+                    : undefined,
+              },
             ]}
           />
         </span>
@@ -405,46 +437,29 @@ export function SourceDetail({
         <div className="panel-head">
           <h3>Serving</h3>
           <Info label="About the serving panel">
-            Read live from this source's <code>/v1/meta</code> and parsed by the same code
-            the agent queries through — so this is what a question can actually reach, not
-            what the YAML on disk says. The two differ whenever a build half-failed or a
-            file was edited by hand.
+            Everything the agent brings to a question. The model half is read live from this
+            source's <code>/v1/meta</code> and parsed by the same code the agent queries
+            through — so it is what a question can actually reach, not what the YAML on disk
+            says; the two differ whenever a build half-failed or a file was edited by hand.
+            Grounding is the markdown this source hands the agent <em>before</em> a question
+            does. It is read from local disk on every turn, so an edit takes effect on the
+            next message, where the model needs the container to restart.
           </Info>
         </div>
-        {source.running ? (
-          <ServedModel model={model} loading={loadingModel} onRefresh={loadModel} />
-        ) : (
-          <p className="served-empty">
-            The container is not running, so Cube cannot say what it would serve.
-          </p>
-        )}
-      </section>
-
-      <section className="detail-panel danger-zone">
-        <div className="panel-head">
-          <h3>Danger zone</h3>
-        </div>
-        <div className="danger-row">
-          <span>
-            <strong>Remove this source</strong>
-            <small>
-              Deletes the row, the container and <code>cube/sources/{source.name}/</code>.
-              Version control is the only way back.
-            </small>
-          </span>
-          <button
-            className="danger"
-            disabled={source.active || busy}
-            title={
-              source.active
-                ? "This is the source the portal queries — point CUBE_URL elsewhere first"
-                : undefined
-            }
-            onClick={() => setConfirmRemove(true)}
-          >
-            Remove
-          </button>
-        </div>
+        <ServedModel
+          model={model}
+          grounding={grounding}
+          loading={loadingModel || loadingGrounding}
+          onRefresh={() => {
+            loadModel();
+            loadGrounding();
+          }}
+          unavailable={
+            source.running
+              ? undefined
+              : "The container is not running, so Cube cannot say what it would serve."
+          }
+        />
       </section>
 
       {confirmRemove && (

@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 
 from ...config import settings
 from .. import docker, health
-from ..registry import Source, scaffold_model_dir
+from ..registry import Source, scaffold_source_dirs
 from ..store import STEPS, SourceStore
 from . import build, decide, publish, read, selection
 from .state import dump_enrichment, dump_schema, load_enrichment, load_schema
@@ -71,7 +71,7 @@ async def connect(source: Source, store: SourceStore, report: Report | None = No
     Recreating rather than starting is deliberate: a container's environment is fixed
     at creation, so this is also how an edited password takes effect.
     """
-    model_dir = scaffold_model_dir(source)
+    model_dir = scaffold_source_dirs(source)
     _say(report, "connect", {"message": f"starting {source.service}"})
 
     created = await docker.create(

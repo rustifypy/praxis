@@ -45,10 +45,19 @@ serves a portal nobody can authenticate against.
 ## Three subsystems
 
 **Query time** (`cube/`, `agent/`, `retrieval.py`, `grounding.py`) — the agent answers
-questions. It never writes SQL. It emits Cube JSON queries that pass a four-tier gate
+questions about **one** source: `CUBE_URL` picks it, `grounding.for_active_source` is
+the only place that resolves it, and its grounding is whatever that source carries.
+It never writes SQL. It emits Cube JSON queries that pass a four-tier gate
 (pydantic schema → local semantic checks against the cached catalog → `POST /v1/sql`
 which compiles without executing → `POST /v1/load`). Failures return as text the agent
 can act on, never exceptions. See README for the tier table.
+
+Grounding is **per source and has no global layer** — it names members, so one shared
+set is wrong the moment there are two warehouses, and the agent was being handed
+`revenue.net_revenue` definitions for a database with no revenue cube. It lives at
+`cube/sources/<name>/grounding/{rules,skills,certified_queries}`. A `CUBE_URL` with no
+source row behind it grounds on nothing rather than erroring, which is what
+`Grounding.is_empty` is for.
 
 **Model generation** (`sources/model/`) — builds the Cube data model a source exposes:
 
@@ -94,7 +103,8 @@ Jupyter does. One flat event stream is the contract between agent and browser:
 | `web/server.py` | routes, SSE, token auth, static mount |
 | `src/web/` | React source; **builds into `analyst_agent/web/static/`** |
 | `src/web/src/components/Rail.tsx` | the mode switch — chat or data, and nothing else |
-| `src/web/src/components/ChatHeader.tsx` | the active source, and what it can be asked |
+| `src/web/src/components/ChatHeader.tsx` | the active source, and switching it — nothing deeper |
+| `src/web/src/components/ServedModel.tsx` | the compiled model **and** this source's grounding, one list |
 
 Two invariants: **the event log is the transcript** — replaying a chat replays its
 events, and `Session` provenance is rebuilt from it (`replay_session`), so nothing lives
@@ -111,15 +121,46 @@ until the chat list stayed live and clickable while you were administering a dat
 The mode is read off the hash and nowhere else (`useHash`); a mirrored React copy
 disagreed with the address bar after a back button.
 
-`ChatHeader` is where "which source am I querying" lives, and its panel hosts
-`ServedModel` — that component answers *what can I ask about*, which is a question you
-have with a cursor in the composer, not one worth navigating to an admin page for. The
-same component still renders on the source page; it takes a `ServedModel` and a refresh
-callback and knows nothing about where it is mounted. It is **master–detail, not
-accordions**: the entity list is a fixed column and members render in the box beside it,
-because expanding in place pushed every row below down the page. The list stays in name
-order even while filtering — only the *default selection* follows the best match, since
-re-ranking rows under someone who is typing moves what they are reaching for.
+`ChatHeader` is where "which source am I querying" lives: the chip carries the name, the
+health dot and `servingSummary` — the size of the model, which is what says a source is
+*built* and not merely connected — and its panel is a source **switcher and nothing
+else**. It briefly hosted `ServedModel` too, on the reasoning that "what can I ask about"
+is a question you have with a cursor in the composer. That was the wrong depth for a
+dropdown: clicking the chip to check which database you were on opened an admin screen
+over the transcript. `ServedModel` lives on the source page only, one deliberate click
+away via "Manage sources"; the panel is sized to its own longest row now, not to that
+component.
+
+`ServedModel` is **master–detail, not accordions**: the entity list is a fixed column and
+members render in the box beside it, because expanding in place pushed every row below
+down the page. The list stays in name order even while filtering — only the *default
+selection* follows the best match, since re-ranking rows under someone who is typing moves
+what they are reaching for.
+
+**Its sections are collapsed by default** and there is no selection on arrival. Five
+sections open at once is a column of eighty rows; shut, the shape of a whole source fits
+on one screen, which is why the count stays on the header. Two consequences that are not
+preferences: a filter force-opens every section, because typing into a column of shut
+headers and watching only the counts change is a search that appears to do nothing; and
+the best-match selection now applies *only* under a filter, since a detail box
+volunteering the first view would make Views the one section that is never collapsed.
+Nothing else force-opens — collapsing a section while its row is in the detail box is
+allowed, and leaves the detail alone.
+
+**Grounding is sections of that same list, under Views and Cubes** (`Grounding.tsx`
+supplies the sections and the artefact detail; `Section.tsx` is the header chrome both
+halves share). It is the continuation of the same question — Views and Cubes say what a
+question can reach, grounding says what the agent already believes before the question —
+and as its own panel one of the two went unread. The two halves **fail independently**,
+which is the thing to keep straight when editing it: the model needs the container up and
+Cube compiling, grounding is markdown on this machine. So a Cube failure is a banner over
+empty Views and Cubes, never an early return over the whole list, and `unavailable` (a
+stopped container) is a separate prop from `model.serving === false` (Cube answered
+badly). Four early returns used to hide grounding for reasons that had nothing to do with
+it; they are the sections' empty copy now.
+
+The default selection stays on the model when there is one — an artefact only opens when
+nothing else survives the filter, or when there is no model at all.
 
 `SourceDetail` shows **five** stages where `store.STEPS` has four: `read` writes no step
 row, but hiding it inside "Build cubes" meant expanding the second of four steps offered
@@ -165,6 +206,16 @@ result.
   every `*_id` in a healthy model — 11 of 72 on chinook. Styling that as a warning reports
   a correct model as a dozen problems; the actionable case is a *cube* no view reaches at
   all, which is flagged on the entity instead.
+- **Cube compiles every `*.yml` anywhere under the model mount, not just `cubes/` and
+  `views/`.** Verified on a live source: a `grounding/certified_queries/probe.yml` took
+  chinook from 13 cubes to **0**, with `Compile errors: ... Unexpected YAML key: name.
+  Only 'cubes', 'views', and 'view_groups' are allowed here` — the error names the
+  grounding file, and every query against that source is down until it goes. A `.md` in
+  the same place is ignored entirely, which is why grounding is markdown and why
+  `_load_dir` globs `*.md`. There is no top-level Cube key for a saved query, so no
+  "Cube-compliant" YAML can hold one; the only free-form slot is `meta:`, which
+  `publish.write` regenerates. If grounding ever needs a structured format, that is a
+  decision to make grounding *generated* — not a way to keep hand-written files.
 - **Cube Core does not hot-reload model files.** Writing YAML has no effect until that
   container restarts (~6s). Verified empirically; the docs' hot-reload refers to Cube Cloud.
 - **Cube qualifies a single-identifier `sql:` but passes an expression through verbatim.**
@@ -180,8 +231,8 @@ result.
 - **Escape model/Cube/database text before `console.print`.** Rich reads `[...]` as
   markup and silently swallowed the gate's `[rule-id]` prefixes. Use `rich.markup.escape`.
 - **`cube/sources/` is the only thing written into the working directory.** That
-  directory belongs to whoever installed this — it is a dependency, and their `cube/` and
-  `grounding/` are theirs to version. Everything else machine-local goes under
+  directory belongs to whoever installed this — it is a dependency, and their `cube/` is
+  theirs to version. Everything else machine-local goes under
   `~/.analyst`: `sources.db`, the job lock, and `probe-model/` (the catalog probe's
   throwaway cubes, cleared on every read). There used to be a `.cube-probe/` in the
   project root holding the probe and model backups; both are gone. Do not put scratch

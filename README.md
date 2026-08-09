@@ -138,7 +138,7 @@ src/analyst_agent/
   cube/client.py       httpx client, JWT minting
   cube/gate.py         the four tiers
   retrieval.py         model search (lexical; swap for pgvector)
-  grounding.py         rules / skills / certified queries loader
+  grounding.py         one source's rules / skills / certified queries
   agent/tools.py       search_model, run_query, load_grounding, explain_last_query
   agent/content.py     text_of / reasoning_of — content is blocks, not a string
   chat/events.py       the Event schema and emit(); parent_id/depth reserved
@@ -151,7 +151,7 @@ src/analyst_agent/
   agent/build.py       create_agent wiring, caller identity for the audit log
   sources/drivers.py   connection shape per Cube driver
   sources/store.py     sources.db — the registry, credentials, steps, cached catalog
-  sources/registry.py  the Source dataclass, model dirs, name and port rules
+  sources/registry.py  the Source dataclass, its dirs, name and port rules
   sources/docker.py    docker run/stop/logs per source, all async
   sources/jobs.py      one job at a time: the lock, the buffer, the watchers
   sources/health.py    connection test via Cube's /readyz
@@ -161,8 +161,8 @@ src/analyst_agent/
   db.py                how this process opens SQLite, for both stores
   api.py  __main__.py  entrypoints
 
-cube/sources/<name>/   one Cube data model per source, mounted at /cube/conf/model
-grounding/             git-backed agent grounding
+cube/sources/<name>/   one source: its Cube model, mounted at /cube/conf/model,
+                       and its grounding
 ```
 
 `ungrouped` is absent from `CubeQuery` on purpose. It would return raw
@@ -170,15 +170,26 @@ un-aggregated rows and void the aggregate-only guarantee.
 
 ## Grounding
 
-Markdown with frontmatter, mirroring Cube's own `agents/` convention:
+Markdown with frontmatter, mirroring Cube's own `agents/` convention, under
+`cube/sources/<name>/grounding/`:
 
-- `grounding/rules/` — `type: always` loads every turn; `type: agent_requested`
-  loads on demand via `load_grounding`
-- `grounding/skills/` — reusable workflows, progressive disclosure by description
-- `grounding/certified_queries/` — canonical JSON queries, surfaced by
-  `search_model` when the question resembles the `user_request` pattern
+- `rules/` — `type: always` loads every turn; `type: agent_requested` loads on
+  demand via `load_grounding`
+- `skills/` — reusable workflows, progressive disclosure by description
+- `certified_queries/` — canonical JSON queries, surfaced by `search_model` when
+  the question resembles the `user_request` pattern
 
 Edit these instead of the system prompt. They are reviewed diffs in git.
+
+**Grounding belongs to a source, and there is no global layer.** It names members
+— "revenue" means `revenue.net_revenue` — so one shared set is wrong the moment
+there are two warehouses. `CUBE_URL` picks the source, and its grounding is
+whatever that source carries. A `CUBE_URL` with no source behind it grounds on
+nothing, and the agent answers from the system prompt alone.
+
+**Markdown only.** The directory is inside the tree Cube mounts as its model, and
+Cube compiles every `*.yml` it finds anywhere under that mount — one grounding
+file written as YAML takes the whole model to zero cubes.
 
 ## Commands
 
