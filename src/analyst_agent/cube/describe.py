@@ -23,11 +23,6 @@ def _join(parts: list[str]) -> str:
     return parts[0] if parts else ""
 
 
-def _range(value) -> str:
-    # Cube accepts either a named range ("last quarter") or a [from, to] pair.
-    return f"{value[0]} to {value[1]}" if isinstance(value, list) else str(value)
-
-
 def describe_query(query: dict, catalog: Catalog | None = None) -> str:
     measures = [_title(m, catalog) for m in query.get("measures") or []]
     groups = [_title(d, catalog) for d in query.get("dimensions") or []]
@@ -37,8 +32,9 @@ def describe_query(query: dict, catalog: Catalog | None = None) -> str:
         # A granularity groups the result; a bare dateRange only narrows it.
         if td.get("granularity"):
             groups.append(str(td["granularity"]))
-        if td.get("dateRange"):
-            notes.append(_range(td["dateRange"]))
+        # Cube accepts either a named range ("last quarter") or a [from, to] pair.
+        if value := td.get("dateRange"):
+            notes.append(f"{value[0]} to {value[1]}" if isinstance(value, list) else str(value))
 
     head = _join(measures) or _join(groups) or "query"
     if measures and groups:

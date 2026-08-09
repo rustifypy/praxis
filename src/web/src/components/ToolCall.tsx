@@ -5,34 +5,6 @@ import type { ToolEnd } from "../types";
 import { Collapse } from "./Collapse";
 import { Copy } from "./Copy";
 
-function Rows({ rows }: { rows: Record<string, unknown>[] }) {
-  const columns = Object.keys(rows[0] ?? {});
-  return (
-    <div className="rows">
-      <table>
-        <thead>
-          <tr>
-            {columns.map((c) => (
-              // Cube returns fully qualified member ids; the cube prefix repeats on
-              // every column and only costs width.
-              <th key={c}>{c.split(".").slice(1).join(".") || c}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr key={i}>
-              {columns.map((c) => (
-                <td key={c}>{String(row[c] ?? "")}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 /**
  * One step of the trace: what the agent did, in a sentence, evidence folded behind it.
  *
@@ -40,6 +12,11 @@ function Rows({ rows }: { rows: Record<string, unknown>[] }) {
  * something the agent did not run. A rejection is styled as a normal step rather than a
  * failure — the agent reads the reason and retries, and watching that happen is most of
  * the reason this trace exists.
+ *
+ * Rows are deliberately *not* here any more. This step is now about how an answer was
+ * reached — the query, the SQL, and what the gate said — while the data it returned is its
+ * own block below the answer. A rejected query still shows its reasons here, because it
+ * produced no data to have a block of.
  */
 export function ToolCall({
   tool,
@@ -83,9 +60,7 @@ export function ToolCall({
   else if (tool === "search_model") summary = `${end?.hits ?? 0} matches`;
   else summary = duration(ms);
 
-  const hasDetail = Boolean(
-    query || end?.sql || end?.errors?.length || end?.warnings?.length || end?.preview?.length,
-  );
+  const hasDetail = Boolean(query || end?.sql || end?.errors?.length || end?.warnings?.length);
 
   return (
     <div
@@ -121,19 +96,6 @@ export function ToolCall({
               {end.warnings.map((w, i) => (
                 <div key={i}>{w}</div>
               ))}
-            </div>
-          ) : null}
-
-          {end?.preview?.length ? (
-            <div className="panel">
-              <div className="panel-head">
-                <span>
-                  {end.preview.length}
-                  {(end.rows_total ?? 0) > end.preview.length && ` of ${end.rows_total}`} rows
-                </span>
-                <Copy value={JSON.stringify(end.preview, null, 2)} label="Copy JSON" />
-              </div>
-              <Rows rows={end.preview} />
             </div>
           ) : null}
 

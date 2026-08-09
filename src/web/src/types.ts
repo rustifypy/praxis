@@ -1,4 +1,4 @@
-export type EventType =
+type EventType =
   | "user"
   | "thinking"
   | "text"
@@ -29,11 +29,43 @@ export interface Chat {
   updated_at: number;
 }
 
+/** One column of a result set, computed server-side by `cube.shape.columns_of` — so the
+ *  table's order, headings and number formats are the same ones the chart reads. */
+export interface ResultColumn {
+  id: string;
+  label: string;
+  kind: "time" | "dimension" | "measure";
+  type: string;
+  /** Cube's own display format for a measure: `currency`, `percent`, or empty. */
+  format: string;
+  align: "left" | "right";
+}
+
+/**
+ * What to draw, derived server-side by `cube.visualize.chart_for` — or replaced by the
+ * agent's `set_chart`. Column ids only: the labels and number formats come from
+ * `ResultColumn`, and carrying a second copy here is how the two would drift.
+ *
+ * `null` is a normal outcome. Two dimensions crossed or forty categories is a table.
+ */
+export interface ChartSpec {
+  type: "line" | "bar" | "kpi";
+  y: string[];
+  x: string;
+  /** Column whose values split `y` into one line each. Empty for a single series. */
+  series: string;
+}
+
 export interface ToolEnd {
   ok: boolean;
+  chart?: ChartSpec | null;
   sql?: string;
   query?: unknown;
   rows_total?: number;
+  columns?: ResultColumn[];
+  /** Handle for the whole result set. Empty on the `/ask` path, which has no chat to
+   *  hang one on, so a result block always checks before offering "show all". */
+  result_id?: string;
   preview?: Record<string, unknown>[];
   duration_ms?: number;
   warnings?: string[];
@@ -58,6 +90,22 @@ export type Item =
       end?: ToolEnd;
       startedAt?: number;
       ms?: number;
+    }
+  /**
+   * A query's data, as its own block rather than a fold inside the trace step.
+   *
+   * `rows` is the head the event carried, which is what makes a replayed transcript
+   * render without a fetch; `rowCount` is how many there really are, and the difference
+   * is what "show all" closes by way of `resultId`.
+   */
+  | {
+      kind: "result";
+      resultId: string;
+      label: string;
+      columns: ResultColumn[];
+      rows: Record<string, unknown>[];
+      rowCount: number;
+      chart: ChartSpec | null;
     }
   | { kind: "compacted"; before: number; after: number }
   | { kind: "error"; message: string };

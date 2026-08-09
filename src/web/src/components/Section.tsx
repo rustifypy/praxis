@@ -3,23 +3,14 @@ import type { ReactNode } from "react";
 import { Info } from "./Info";
 
 /**
- * One collapsible group in a master–detail list column.
- *
- * Shared by the model and grounding halves of the Serving panel because both are lists of
- * things that fall into kinds, and the header is the only place the difference between the
- * kinds is explained. Two copies would be two places to say what a view is, or what
- * `always` costs.
- *
- * **Collapsed by default.** Five sections fully expanded is a column of eighty rows, and
- * getting from Views to Certified queries meant scrolling past every cube in the model.
- * Collapsed, the whole shape of a source fits on one screen with its counts, and opening
- * one is a click. The count is on the header precisely so a shut section still says how
- * much is inside it.
+ * One collapsible group in a master–detail list column, shared by the model and grounding
+ * halves of the Serving panel. The header is the only place the difference between the
+ * kinds is explained, and two copies would be two places to say what a view is.
  *
  * The heading is the button, not the whole header — the info popover is a button too, and
- * nesting one inside the other is invalid and swallows its clicks.
- *
- * `kind` is a class suffix, which is what colours the heading — see `.served-section.*`.
+ * nesting one inside the other is invalid and swallows its clicks. `kind` is a class
+ * suffix; it colours the heading, see `.served-section.*`. Open state is the caller's —
+ * see `ServedModel.isOpen`.
  */
 export function Section({
   kind,
@@ -57,9 +48,8 @@ export function Section({
           <h4>{title}</h4>
         </button>
         <Info label={`About ${title.toLowerCase()}`}>{info}</Info>
+        {/* The count stays when shut — that is what makes a collapsed column readable. */}
         <span className="served-section-count">{count}</span>
-        {/* Only when open. On a shut section it is a second line of explanation for
-            something you cannot see, on every one of five headers. */}
         {open && <span className="served-section-sub">{subtitle}</span>}
       </header>
       {open && (count === 0 ? empty : children)}

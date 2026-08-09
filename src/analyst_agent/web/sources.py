@@ -326,14 +326,12 @@ async def source_model(name: str, request: Request) -> dict:
 async def source_grounding(name: str, request: Request) -> dict:
     """The markdown this source grounds the agent with, exactly as the agent loads it.
 
-    Read through `Grounding` rather than by walking the directory. A viewer with its own
-    idea of what counts would show a `.yml` sitting there looking loaded — and that file
-    is not merely ignored, it fails the whole model's compile, because this directory is
-    inside the tree Cube mounts.
+    Read through `Grounding`, not by walking the directory: a viewer with its own idea of
+    what counts would show a `.yml` looking loaded, and that file fails the model's
+    compile rather than being ignored.
 
-    `root` is the absolute path as resolved, not the tidy relative form, because it is
-    resolved from the working directory the portal was launched in. When grounding is
-    unexpectedly empty, that path is the answer.
+    `root` is absolute as resolved, not the tidy relative form — it resolves from the
+    directory the portal was launched in, so when grounding is empty it is the answer.
     """
     source = await _find(request, name)
     loaded = for_source(source)

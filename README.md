@@ -60,9 +60,17 @@ model's reasoning — the panel fills while the agent plans, then collapses when
 answers.
 
 Every step shows up as a line you can expand: which members `search_model` found, the
-Cube JSON that went to the gate, the SQL Cube generated, the rows that came back, and
-the rejections in between. Tool labels are derived from the query itself, so the trace
-can never claim a query that did not run.
+Cube JSON that went to the gate, the SQL Cube generated, and the rejections in between.
+Tool labels are derived from the query itself, so the trace can never claim a query that
+did not run.
+
+The **data** is not in that trace. Each query's rows render as their own block below the
+answer they support — a formatted, sortable table with a chart above it where the query's
+shape suits one, and CSV beside it. Both the header and the chart are derived from the
+query in Python (`cube/shape.py`, `cube/visualize.py`), so they are free, testable, and
+cannot describe a column nobody fetched; **no chart is a normal outcome** and means the
+table is the better answer. Full result sets live in a `results` table keyed by a handle,
+which is what `Show all` and the CSV read.
 
 Bound to `127.0.0.1` with a token generated per launch. It is one person on one machine
 — there is no login and no user table.
@@ -139,12 +147,15 @@ src/analyst_agent/
   cube/gate.py         the four tiers
   retrieval.py         model search (lexical; swap for pgvector)
   grounding.py         one source's rules / skills / certified queries
-  agent/tools.py       search_model, run_query, load_grounding, explain_last_query
+  agent/tools.py       search_model, run_query, load_grounding, set_chart,
+                       explain_last_query
   agent/content.py     text_of / reasoning_of — content is blocks, not a string
   chat/events.py       the Event schema and emit(); parent_id/depth reserved
-  chat/store.py        SQLite chats + events + LangGraph checkpointer, one file
+  chat/store.py        SQLite chats + events + results + the checkpointer, one file
   chat/service.py      stream_turn() — one turn as a stream of events
   cube/describe.py     deterministic one-line labels for the tool trace
+  cube/shape.py        a result's header: column order, labels, format, alignment
+  cube/visualize.py    the chart a query's shape implies, and the guard on overrides
   web/server.py        portal routes, SSE, token auth
   web/static/          committed frontend build (make web-build)
   agent/model.py       QUERY_MODEL -> chat model (Azure endpoint/deployment wiring)
@@ -211,7 +222,19 @@ build output does not: `uv_build` ships only `src/analyst_agent`, so Vite writes
 
 ## Next
 
-- Swap `LexicalRetriever` for pgvector once the model outgrows fuzzy matching.
 - Add the eval harness: question -> golden JSON query, graded on result sets
-  (sort-invariant, 4 significant figures, column-name agnostic).
+  (sort-invariant, 4 significant figures, column-name agnostic). This is next, not last:
+  everything below changes what the agent answers, and there is currently no way to tell
+  whether a prompt or tool change helped.
+- Search dimension *values*, not just member names. The gate checks that
+  `sales.billing_country` exists and never that `"USA"` is a value it holds, so a wrong
+  literal comes back as "No data matched" and the agent either retries blind or reports
+  zero. A `search_values(member, text)` tool over a `dimensions: [member]` query closes it
+  with no vector store.
+- Deterministic post-processing — period deltas, ratios, share of total — over rows that
+  already passed the gate, so the model stops doing arithmetic in prose.
+- Pin a result as a saved report; 👍 on an answer writes a `certified_queries/` file.
+- Click a bar to drill: `drillMembers` is on `/v1/meta` measures and unparsed. Note a drill
+  query uses `measureFilter`, which pre-aggregations cannot serve.
+- Swap `LexicalRetriever` for pgvector once the model outgrows fuzzy matching.
 - Add the orchestrator and subagents once single-agent accuracy is measured.

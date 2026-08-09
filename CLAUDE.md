@@ -52,6 +52,15 @@ It never writes SQL. It emits Cube JSON queries that pass a four-tier gate
 which compiles without executing → `POST /v1/load`). Failures return as text the agent
 can act on, never exceptions. See README for the tier table.
 
+Cube itself moved off this format — the 2024 AI API emitted Cube JSON and D3 replaced it
+with the agent writing Semantic SQL, for the expressiveness a fixed schema cannot give.
+Do not follow them without deciding what happens to the gate: tier 2 can check operators,
+granularities and WHERE/HAVING mixing precisely *because* it is inspecting a `CubeQuery`,
+and none of it survives parsing SQL. The expressiveness gap is real — `CubeQuery` is
+`extra="forbid"` with no `ungrouped`, so a ratio or a period delta cannot be expressed and
+the model does that arithmetic in prose today. Deterministic post-processing over rows that
+already passed the gate is the way to close it without giving up the gate.
+
 Grounding is **per source and has no global layer** — it names members, so one shared
 set is wrong the moment there are two warehouses, and the agent was being handed
 `revenue.net_revenue` definitions for a database with no revenue cube. It lives at
@@ -105,6 +114,9 @@ Jupyter does. One flat event stream is the contract between agent and browser:
 | `src/web/src/components/Rail.tsx` | the mode switch — chat or data, and nothing else |
 | `src/web/src/components/ChatHeader.tsx` | the active source, and switching it — nothing deeper |
 | `src/web/src/components/ServedModel.tsx` | the compiled model **and** this source's grounding, one list |
+| `src/web/src/components/ResultBlock.tsx` | one query's data: the table, the chart above it, CSV |
+| `src/web/src/components/ResultChart.tsx` | line / bar / kpi as inline SVG, from a spec |
+| `src/web/src/format.ts` | how a result value renders — cells, axis ticks, sort order |
 
 Two invariants: **the event log is the transcript** — replaying a chat replays its
 events, and `Session` provenance is rebuilt from it (`replay_session`), so nothing lives
@@ -114,6 +126,32 @@ browser with its reasons attached.
 
 `parent_id`/`depth` are on every event and always `None`/`0`. They are reserved for the
 orchestrator's subagents so that adding nesting never changes the protocol.
+
+**Rows are not in the trace, and the trace is not where data is read.** A `run_query` step
+keeps the query, the SQL and the gate's reasons behind its caret; the rows it returned are
+their own transcript block below the answer. Three rules hold that together:
+
+*The event carries a head, the `results` table carries the whole thing.* `tool_end` holds
+`rows[:MAX_POINTS]` so a replayed transcript draws every table and chart with **no
+requests at all**, plus a `result_id` for the rest. `visualize.MAX_POINTS` is one constant
+for both the event's row count and the largest chart offered — a chart offered for more
+rows than the event holds would plot the first hundred of four hundred months as if that
+were the series. `preview_rows` (30, the model's copy) is a separate number because the
+model pays per token and the browser pays per event row.
+
+*The header and the chart are derived, never asked for.* `cube/shape.py` and
+`cube/visualize.py` are pure functions of (query, catalog, rows), the same argument
+`describe.py` makes for its sentence. `chart_for` returning `None` is a correct and common
+answer. `set_chart` lets the agent override, validated against that result's real columns
+by `validate_spec`, and it authors its own `tool_start`/`tool_end` like any other tool —
+which is why charts needed **no new `EventType`**.
+
+*An answer owns the results of its turn.* Tool events arrive before the prose, so
+`events.ts` lifts every `result` item from the turn in progress to sit after the new
+answer. Scoped to the turn, not to the tail: the agent reasons *after* reading a result, so
+items arrive as `[… tool, result, thinking, text]` and a rule that only moved trailing
+results left the table above the answer. The trace stays above; only data moves down, and a
+turn that produced no answer keeps its results where they are rather than hiding them.
 
 **The browser is two products, so it is two modes.** `Rail.tsx` owns the switch and the
 column beside it swaps whole — `ChatNav` or `DataNav`, never both. They shared one sidebar
@@ -275,6 +313,33 @@ result.
   from `getBoundingClientRect`, which is what makes it safe inside the sources list column
   and the chat header's scrolling panel. It closes on scroll because a fixed panel does
   not travel with its anchor.
+- **`.panel` is in the DOM with no rule behind it.** `ToolCall.tsx` renders
+  `<div className="panel">` and `styles.css` defines only `--panel` (a colour token),
+  `.panel-head` and `.panel-toggle`. Defining `.panel` retroactively restyles the tool
+  trace. This is the `.source`/`.dot` trap already sprung — the name is taken by markup
+  rather than by CSS, so grepping the stylesheet alone will not find it. (`.panel-head` is
+  also defined twice at equal specificity, so the sources-page copy wins on `gap` and
+  leaks a `margin-bottom` into the transcript.)
+- **`.answer.streaming > :last-child::after` is the streaming caret**, so anything appended
+  as the last child of `.answer` grows a blinking cursor. A result block is a sibling of
+  `.answer` inside `.row`, never a child. Relatedly, `.answer-tools` reserves its height
+  while invisible; harmless when an answer ended the transcript, but it opened a ~38px hole
+  once a result followed one — hence the `:has()` rule pulling `.res` up under an answer.
+- **Cube returns a grouped time dimension under two keys**, the bare member *and*
+  `member.grain` (`sales.invoiced_at` and `sales.invoiced_at.month`). `Object.keys(rows[0])`
+  therefore invents a duplicate column, which is why a result's header is computed by
+  `shape.columns_of` and stored beside the rows rather than recovered from them.
+- **`/v1/load`'s `annotation` object is a second source of member `format`** and is
+  discarded in `client.py`. Deliberately: `MemberDoc.format` comes off the cached `/v1/meta`
+  catalog, which is already threaded everywhere a query is built, while `annotation` would
+  have to be plumbed through both `LoadResult` and `GateResult` to reach the same place.
+- **A FastAPI path parameter matches a dotted filename**, so `/api/results/{id}.csv` is
+  swallowed by `/api/results/{result_id}` as `result_id="abc.csv"`. The CSV route is
+  `/api/results/{id}/csv` — the same lesson as `/sources/{name}/{action}`, one layer down.
+- **`ROWS` is a SQLite keyword**, so the `results` table stores its rows in a column named
+  `data` — which is also what `events` calls its JSON blob. Adding a *table* to `SCHEMA`
+  works on an existing `analyst.db`; adding a *column* silently does not, because
+  `CREATE TABLE IF NOT EXISTS` does not diff and there is no migration mechanism.
 - **New CSS goes on new class names — check `styles.css` first.** `.source` and `.dot`
   were already taken by the old sidebar footer and the brand dot; reusing them for the
   sources panel inherited `display: flex` and a monospace font, and every card laid out

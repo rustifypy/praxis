@@ -3,15 +3,11 @@
 Markdown with YAML-ish frontmatter, mirroring Cube's agents/ convention.
 Only merged files load, so every change to agent behaviour is a reviewed diff.
 
-Grounding belongs to a data source rather than to the installation. It names members —
-"revenue" means `revenue.net_revenue`, this skill groups by `revenue.channel` — so a
-single global set is wrong the moment there are two warehouses, and was being fed to
-every source regardless of whether those members existed. `for_active_source` is the
-only way the agent gets one, and there is no global layer behind it: a source's
-grounding is what it carries, or nothing.
+Grounding belongs to a data source, not to the installation: it names members, so one
+global set is wrong the moment there are two warehouses. `for_active_source` is the only
+way the agent gets one, and there is no global layer behind it.
 
-Markdown only, and not by preference. The directory is inside Cube's bind-mounted model
-tree, and Cube compiles any `*.yml` under it — see `registry.GROUNDING_ROOT`.
+Markdown only, and not by preference — see `registry.GROUNDING_ROOT`.
 """
 
 import json
@@ -28,8 +24,8 @@ class Artefact:
     meta: dict
     body: str
     file: str = ""
-    """The filename on disk. Frontmatter `name` falls back to the stem but does not have
-    to match it, so the panel cannot tell you which file to edit without this."""
+    """Path under the grounding directory. Frontmatter `name` falls back to the stem but
+    need not match it, so this is the only thing that says which file to edit."""
 
     @property
     def description(self) -> str:
@@ -145,31 +141,26 @@ def for_source(source: Source | None) -> Grounding:
 async def for_active_source() -> Grounding:
     """The grounding for whichever source `CUBE_URL` points at.
 
-    Opens the registry itself rather than taking a store. Both ways into the agent need
+    Opens the registry itself rather than taking a store: both ways into the agent need
     this — the browser's streamed turn and `/ask` — and threading a store through two
-    signatures is how the two would come to resolve grounding differently.
+    signatures is how they would come to resolve grounding differently.
 
-    Read per turn, not cached: `Grounding` re-reads the directory each time, which is
-    what makes editing a rule take effect on the next message. Cube's model needs a
-    container restart for the same edit; the asymmetry is deliberate but surprising.
+    Read per turn, not cached, which is what makes editing a rule take effect on the next
+    message. Cube's model needs a container restart for the same edit.
 
-    A `CUBE_URL` with no source row behind it — a hand-run container, Cube Cloud, a port
-    typo — yields empty grounding rather than an error. The agent still answers; it
-    answers without the business's definitions, which is why `is_empty` exists.
+    A `CUBE_URL` with no source row behind it yields empty grounding rather than an
+    error — the agent answers without the business's definitions, hence `is_empty`.
 
-    TODO: anchor this path absolutely, or serve it over the API. It is the only one of
-    the agent's three inputs that resolves from the working directory — the model comes
-    over HTTP, `sources.db` is an absolute path, and grounding walks up from `cwd` via
+    TODO: anchor this path absolutely, or serve it over the API. It is the only one of the
+    agent's three inputs that resolves from the working directory — the model comes over
+    HTTP and `sources.db` is an absolute path, while this walks up from `cwd` via
     `registry.project_root`. Launch the portal from anywhere but the project root and the
     model still answers while grounding silently resolves to a directory that does not
-    exist. The container does not have this problem because its mount was baked in at
-    `connect`; grounding re-resolves every turn. Storing the source's directory in its
-    `sources.db` row fixes this and the same latent bug in `publish.write`, which would
-    otherwise rebuild into a directory nothing is mounted on.
-
-    Serving it over HTTP is the other option but a worse one on its own: the agent runs
-    inside the portal process, so that is a network hop to read a local file, and the
-    per-turn re-read is what makes editing a rule take effect on the next message.
+    exist; the container escapes it only because its mount was baked in at `connect`.
+    Storing the source's directory in its `sources.db` row fixes this and the same latent
+    bug in `publish.write`, which would otherwise rebuild into an unmounted directory.
+    Serving it over HTTP does not fix it on its own — the agent runs inside the portal
+    process, so that is a network hop to read a local file.
     """
     store = SourceStore()
     await store.init()

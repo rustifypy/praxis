@@ -7,17 +7,14 @@ import { healthOf, servingSummary } from "../sources";
 /**
  * Which source this conversation queries, and how to change it.
  *
- * Chat had no header at all. The answer to "what am I querying?" was the sidebar footer,
- * rendering `CUBE_URL` as a bare `127.0.0.1:4001` — a port number the user cannot map
- * back to a source without opening the sources panel and comparing. For a product whose
- * premise is governed access to one semantic layer, that is the wrong place for the one
- * fact that says which layer.
+ * Chat had no header at all: "what am I querying?" was answered by the sidebar footer
+ * rendering `CUBE_URL` as a bare `127.0.0.1:4001`, a port number nobody can map back to a
+ * source without opening the sources panel and comparing.
  *
- * The panel is a source *switcher* and nothing more. It briefly carried the whole served
- * model and this source's grounding, and that was the wrong depth for a dropdown hanging
- * over a conversation: clicking the chip to check which database you were on opened an
- * admin screen on top of the transcript. Both live on the source page, one click further
- * out via "Manage sources", where there is room for them and where you go deliberately.
+ * The panel is a source *switcher* and nothing more. It briefly carried the served model
+ * and this source's grounding, which was the wrong depth for a dropdown over a live
+ * transcript — clicking the chip to check which database you were on opened an admin
+ * screen. Both live on the source page now, via "Manage sources".
  */
 export function ChatHeader({
   sources,

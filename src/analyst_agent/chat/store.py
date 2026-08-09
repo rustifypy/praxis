@@ -46,6 +46,25 @@ CREATE TABLE IF NOT EXISTS events (
 );
 
 CREATE INDEX IF NOT EXISTS events_by_chat ON events(chat_id, seq);
+
+-- A query's whole result set, which the event log deliberately does not carry: an event
+-- holds the first hundred rows so a replayed transcript renders without a fetch, and
+-- this holds all of them so the table, the CSV and any future drilldown have something
+-- to address. `columns` is the computed header, not a list of member ids — it is derived
+-- from the catalog at query time, and the read endpoint has no catalog to redo that with.
+-- `data` rather than `rows`: ROWS is a SQLite keyword, and TEXT-holding-JSON named `data`
+-- is what the events table already calls it.
+CREATE TABLE IF NOT EXISTS results (
+    id         TEXT PRIMARY KEY,
+    chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    turn_id    TEXT NOT NULL,
+    columns    TEXT NOT NULL,
+    data       TEXT NOT NULL,
+    row_count  INTEGER NOT NULL,
+    created_at REAL NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS results_by_chat ON results(chat_id);
 """
 
 
@@ -122,6 +141,7 @@ class ChatStore:
     async def delete(self, chat_id: str) -> None:
         async with self._db() as db:
             await db.execute("DELETE FROM events WHERE chat_id = ?", (chat_id,))
+            await db.execute("DELETE FROM results WHERE chat_id = ?", (chat_id,))
             await db.execute("DELETE FROM chats WHERE id = ?", (chat_id,))
             await db.commit()
 
@@ -166,6 +186,55 @@ class ChatStore:
             for r in rows
         ]
 
+    async def save_result(
+        self, chat_id: str, turn_id: str, columns: list[dict], rows: list[dict]
+    ) -> str:
+        """Keep a whole result set and return the handle the browser fetches it by.
+
+        Columns are named in the INSERT rather than relying on their order, which is what
+        `chats` and `events` do — those two cannot gain a column without breaking, and
+        there is no migration mechanism to fix them with.
+        """
+        result_id = uuid.uuid4().hex
+        async with self._db() as db:
+            await db.execute(
+                "INSERT INTO results (id, chat_id, turn_id, columns, data, row_count, "
+                "created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    result_id,
+                    chat_id,
+                    turn_id,
+                    json.dumps(columns, default=str),
+                    json.dumps(rows, default=str),
+                    len(rows),
+                    time.time(),
+                ),
+            )
+            await db.commit()
+        return result_id
+
+    async def result(self, result_id: str) -> dict | None:
+        """One stored result, whole. Paging is the caller's slice.
+
+        The rows are a single JSON blob, so there is no SQL that could return page two on
+        its own — and at `max_rows` = 5000 the decode is cheaper than a schema that stores
+        a row per row.
+        """
+        async with self._db() as db:
+            rows = await db.execute_fetchall("SELECT * FROM results WHERE id = ?", (result_id,))
+        if not rows:
+            return None
+        record = rows[0]
+        return {
+            "id": record["id"],
+            "chat_id": record["chat_id"],
+            "turn_id": record["turn_id"],
+            "columns": json.loads(record["columns"]),
+            "rows": json.loads(record["data"]),
+            "row_count": record["row_count"],
+            "created_at": record["created_at"],
+        }
+
     async def replay_session(self, chat_id: str) -> tuple[list[QueryRecord], list[dict]]:
         """Rebuild a Session's provenance from the log.
 
@@ -186,6 +255,9 @@ class ChatStore:
                         row_count=data.get("rows_total", 0),
                         duration_ms=data.get("duration_ms"),
                         warnings=data.get("warnings", []),
+                        # Absent on events written before results had a header; `set_chart`
+                        # then rejects for want of columns rather than raising.
+                        columns=data.get("columns", []),
                     )
                 )
             else:

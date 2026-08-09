@@ -62,6 +62,11 @@ async def stream_turn(
             client=client,
             grounding=await for_active_source(),
             max_rows=settings.max_rows,
+            # Result sets are kept beside the transcript, under this turn, so the table
+            # and the CSV have something to address after the stream has closed.
+            store=store,
+            chat_id=chat_id,
+            turn_id=turn_id,
         )
         # Seeded from the log so `explain_last_query` still answers "show me the SQL for
         # that" on turn three, and after a restart.

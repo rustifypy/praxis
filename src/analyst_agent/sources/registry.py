@@ -21,11 +21,10 @@ MODEL_ROOT = "cube/sources"
 — sources.db, the job lock, the catalog probe's throwaway model — is machine-local under
 `~/.analyst`, because the working directory belongs to whoever installed this."""
 GROUNDING_ROOT = "grounding"
-"""Grounding sits inside the source's own directory, which is bind-mounted as Cube's
-model. Cube compiles every `*.yml` it finds anywhere under that mount, not just under
-`cubes/` and `views/` — a grounding file written as YAML takes the whole model to zero
-cubes and reports the compile error against the grounding file. Artefacts here are
-markdown only, which is what `grounding._load_dir` globbing `*.md` enforces."""
+"""Inside the source's own directory, which is bind-mounted as Cube's model. Cube compiles
+every `*.yml` anywhere under that mount, not just under `cubes/` and `views/` — one
+written as YAML here takes the whole model to zero cubes, blaming the grounding file.
+Markdown only, which `grounding._load_dir` enforces by globbing `*.md`."""
 ARTEFACT_DIRS = ("rules", "skills", "certified_queries")
 """The directories `Grounding` reads. Scaffolding a different set would create folders
 nothing loads, so both sides take this list."""
@@ -78,12 +77,9 @@ class Source:
         return (root or project_root()) / MODEL_ROOT / self.name
 
     def grounding_dir(self, root: Path | None = None) -> Path:
-        """Where this source's rules, skills and certified queries live.
-
-        Per source and not global, because grounding names members: a rule saying
-        "revenue" means `revenue.net_revenue` is nonsense against a warehouse that has
-        no revenue cube, and the agent was being told it for every source regardless.
-        """
+        """This source's rules, skills and certified queries. Per source and not global,
+        because grounding names members — "revenue" means `revenue.net_revenue` is
+        nonsense against a warehouse with no revenue cube."""
         return self.model_dir(root) / GROUNDING_ROOT
 
 

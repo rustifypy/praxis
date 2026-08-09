@@ -1,4 +1,4 @@
-import type { AgentEvent, Chat } from "./types";
+import type { AgentEvent, Chat, ResultColumn } from "./types";
 
 /**
  * Trade the URL token for the cookie, then clean the address bar.
@@ -40,7 +40,7 @@ export async function json<T>(path: string, init?: RequestInit): Promise<T> {
   return (body ? JSON.parse(body) : {}) as T;
 }
 
-export interface CatalogEntity {
+interface CatalogEntity {
   name: string;
   view: boolean;
   members: number;
@@ -56,6 +56,22 @@ export const deleteChat = (id: string) => json(`/api/chats/${id}`, { method: "DE
 export const stopChat = (id: string) => json(`/api/chats/${id}/stop`, { method: "POST" });
 export const renameChat = (id: string, title: string) =>
   json(`/api/chats/${id}`, { method: "PATCH", body: JSON.stringify({ title }) });
+
+/** A page of a stored result set. Only reached by "show all" — the transcript renders the
+ *  head of the rows straight off the event, so opening a chat costs no extra request. */
+export const resultPage = (id: string, offset: number, limit: number) =>
+  json<{
+    id: string;
+    columns: ResultColumn[];
+    rows: Record<string, unknown>[];
+    row_count: number;
+    offset: number;
+  }>(`/api/results/${id}?offset=${offset}&limit=${limit}`);
+
+/** The CSV is a plain link, not a fetch: the token cookie authenticates it and the browser
+ *  handles the download. `csv` is a path segment because `{id}.csv` would be matched by the
+ *  bare `{result_id}` route and never reach this one. */
+export const resultCsvUrl = (id: string) => `/api/results/${id}/csv`;
 
 /**
  * Stream one turn.

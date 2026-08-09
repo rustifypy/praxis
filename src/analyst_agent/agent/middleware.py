@@ -14,25 +14,23 @@ class AuditLog(AgentMiddleware):
         super().__init__()
         self.user = user
 
-    def wrap_tool_call(self, request, handler):
-        result = handler(request)
+    def _record(self, request) -> None:
         log.info(
             "tool=%s user=%s args=%s",
             request.tool_call["name"],
             self.user,
             request.tool_call.get("args"),
         )
+
+    def wrap_tool_call(self, request, handler):
+        result = handler(request)
+        self._record(request)
         return result
 
     async def awrap_tool_call(self, request, handler):
-        """Required separately from the sync path — `ainvoke` never falls back to it."""
+        """Separate from the sync path — `ainvoke` never falls back to it."""
         result = await handler(request)
-        log.info(
-            "tool=%s user=%s args=%s",
-            request.tool_call["name"],
-            self.user,
-            request.tool_call.get("args"),
-        )
+        self._record(request)
         return result
 
 

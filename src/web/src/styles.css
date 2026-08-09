@@ -1133,43 +1133,367 @@ textarea {
   color: var(--warn);
 }
 
-.rows {
-  overflow: auto;
-  max-height: 320px;
+/* ---------- a query's data, below the answer it supports ----------
+   `res-`, not `rows-`: `.rows` was the preview table inside the trace fold and its
+   descendant selectors restyled any nested table, and `.row` — one letter away — is the
+   transcript's own wrapper. This block owns its table outright. */
+
+.res {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  overflow: hidden;
+}
+
+/* A result hugs the answer it supports. `.answer-tools` holds the hover copy button and
+   reserves its height while invisible — harmless when an answer was the last thing in the
+   transcript, but it opens a hole between a claim and the table proving it. Pulled back by
+   exactly the tokens that toolbar is built from, and only after an answer: a result that
+   no answer followed still sits on the normal rhythm. */
+.row:has(> .answer) + .row:has(> .res) {
+  margin-top: calc(-8px - var(--control));
+}
+
+.res-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.res-label {
+  color: var(--ink);
+  font-weight: 500;
+  /* The server's sentence for the query. Long ones truncate rather than wrap, so the row
+     height stays predictable and the count and buttons keep their place. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.res-count {
+  margin-left: auto;
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.res-more,
+.res-csv {
+  flex: none;
+  min-height: var(--control);
+  line-height: 1.2;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
   border: 1px solid var(--line);
   border-radius: 6px;
-  margin-top: 7px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: color 0.12s, border-color 0.12s;
 }
 
-.rows table {
-  border-collapse: collapse;
-  font-family: var(--mono);
+.res-more:hover:not(:disabled),
+.res-csv:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.res-more:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.res-failed {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--bad);
   font-size: 12.5px;
-  width: 100%;
 }
 
-.rows th,
-.rows td {
+/* Its own scroll container. `.row` is capped at 760px, so a wide result has to scroll
+   inside the block — letting it push the column wider would scroll the whole transcript
+   sideways. */
+.res-scroll {
+  overflow: auto;
+  max-height: 420px;
+}
+
+.res-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+
+.res-table th,
+.res-table td {
   border-bottom: 1px solid var(--line);
-  padding: 5px 11px;
+  padding: 6px 12px;
   text-align: left;
   white-space: nowrap;
 }
 
-.rows tbody tr {
+.res-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.res-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--raised);
+  padding: 0;
+  font-weight: 500;
+}
+
+.res-table tbody tr {
   transition: background 0.12s;
 }
 
-.rows tbody tr:hover {
+.res-table tbody tr:hover {
   background: var(--accent-soft);
 }
 
-.rows th {
-  position: sticky;
-  top: 0;
-  background: var(--raised);
+/* Numbers are tabular so digits line up down the column, which is most of what makes a
+   right-aligned measure readable. */
+.res-table td.res-num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.res-table th.res-num .res-sort {
+  justify-content: flex-end;
+}
+
+.res-sort {
+  width: 100%;
+  min-height: var(--control);
+  line-height: 1.2;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: none;
   color: var(--muted);
+  font: inherit;
   font-weight: 500;
+  cursor: pointer;
+  transition: color 0.12s;
+}
+
+.res-sort:hover {
+  color: var(--accent);
+}
+
+.res-arrow {
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.res-note {
+  margin: 0;
+  padding: 7px 12px;
+  border-top: 1px solid var(--line);
+  color: var(--faint);
+  font-size: 12px;
+}
+
+/* ---------- the chart above the table ----------
+   Eight categorical slots, assigned in fixed order and never cycled — `chart_for` caps
+   series at eight so a ninth is refused rather than repeated. Both columns were validated
+   against this app's own surfaces (--raised) for the lightness band, chroma floor,
+   colourblind separation of adjacent pairs, and contrast. Three light slots sit under 3:1
+   against white; the palette's relief rule is met by the table directly below every chart,
+   which is why the chart is never the only way to read a value. */
+
+:root {
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+  --grid: #eceae5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* The same eight hues stepped for the dark surface, not an automatic flip. */
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+    --grid: #26262c;
+  }
+}
+
+.res-chart {
+  padding: 12px 12px 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.res-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.res-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Identity rides a coloured mark beside the text, never the text itself — a light hue is
+   illegible as type on either surface. */
+.res-key {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+
+.res-plot {
+  position: relative;
+}
+
+.res-plot svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* Hairline and solid. Dashed reads as a threshold when it is only a grid. */
+.res-grid {
+  stroke: var(--grid);
+  stroke-width: 1;
+}
+
+.res-axis {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.res-cross {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.res-tick {
+  fill: var(--faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.res-tick-y {
+  text-anchor: end;
+}
+
+.res-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The ring is the surface colour, so a dot stays legible where it crosses a line or
+   another dot. Not a border — a stroke in any other colour would add ink that is not data. */
+.res-dot {
+  stroke: var(--raised);
+  stroke-width: 2;
+}
+
+.res-bar {
+  transition: opacity 0.12s;
+}
+
+.res-hit {
+  fill: transparent;
+}
+
+.res-tip {
+  position: absolute;
+  top: 4px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  min-width: 128px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--raised);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 12%);
+  font-size: 12px;
+  z-index: 2;
+}
+
+.res-tip-x {
+  margin-bottom: 4px;
+  color: var(--muted);
+}
+
+.res-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.res-tip-name {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.res-tip-value {
+  margin-left: auto;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* One row with no grouping: each measure is a figure, not a plot. */
+.res-kpis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 32px;
+  padding: 14px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.res-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.res-kpi-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Proportional figures, not tabular: equal-width digits read loose at this size, and
+   nothing here has to line up vertically. */
+.res-kpi-value {
+  color: var(--ink);
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.15;
 }
 
 /* ---------- notices ---------- */
@@ -2795,9 +3119,6 @@ button.danger.solid {
 
 /* ---------- collapsible sections ---------- */
 
-/* Five sections open at once is a column of eighty rows, and getting from Views to
-   Certified queries meant scrolling past every cube in the model. Shut, the shape of a
-   whole source fits on one screen — which is why the count stays on the header. */
 .served-section-toggle {
   display: inline-flex;
   align-items: center;
@@ -2829,8 +3150,8 @@ button.danger.solid {
   transform: rotate(90deg);
 }
 
-/* A shut section is a header and nothing else, so the head's own bottom margin and rule
-   would leave it floating above a gap the width of the content it is hiding. */
+/* A shut section is a header and nothing else, so its bottom margin would leave it
+   floating above a gap the width of the content it is hiding. */
 .served-section:not(.open) {
   margin-bottom: 6px;
 }
@@ -2867,10 +3188,8 @@ button.danger.solid {
   cursor: help;
 }
 
-/* Where to go and write one. Absolute, and wrapped rather than truncated: this path is
-   the diagnosis when grounding is unexpectedly empty — it resolves from the directory the
-   portal was launched in — so hiding its middle defeats the point of showing it.
-   `display: block` because it renders as a span inside the section's empty paragraph. */
+/* Wrapped rather than truncated: this path is the diagnosis when grounding is empty, so
+   hiding its middle defeats it. Block because it renders as a span inside a paragraph. */
 .ground-path {
   display: block;
   margin-top: 6px;
@@ -2887,9 +3206,7 @@ button.danger.solid {
   overflow-wrap: anywhere;
 }
 
-/* The artefact body, as the markdown it is. Same treatment as a chat answer — these are
-   written to be read, and rendering them as a preformatted blob undoes the reason they
-   are markdown in the first place. */
+/* The artefact body, treated like a chat answer — these are written to be read. */
 .ground-body {
   margin-top: 12px;
   padding-top: 12px;

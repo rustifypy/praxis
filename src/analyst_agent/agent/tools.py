@@ -1,5 +1,6 @@
 import json
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from typing import TYPE_CHECKING
 
 from langchain.tools import tool
 
@@ -8,8 +9,15 @@ from ..cube import gate
 from ..cube.catalog import Catalog
 from ..cube.client import CubeClient
 from ..cube.describe import describe_query
+from ..cube.shape import Column, columns_of
+from ..cube.visualize import MAX_POINTS, chart_for, validate_spec
 from ..grounding import Grounding
 from ..retrieval import LexicalRetriever, render
+
+if TYPE_CHECKING:
+    # Only for the annotation: chat.store imports QueryRecord from this module, so a real
+    # import here would be a cycle.
+    from ..chat.store import ChatStore
 
 
 @dataclass
@@ -19,6 +27,10 @@ class QueryRecord:
     row_count: int
     duration_ms: int | None
     warnings: list[str]
+    columns: list[dict] = field(default_factory=list)
+    """The header this result was rendered with. Kept so `set_chart` can be checked against
+    the columns that exist rather than the ones the model remembers — and rebuilt by
+    `replay_session`, so the check still works on turn three and after a restart."""
 
 
 @dataclass
@@ -31,9 +43,17 @@ class Session:
     max_rows: int = 5_000
     executed: list[QueryRecord] = field(default_factory=list)
     rejected: list[dict] = field(default_factory=list)
+    store: "ChatStore | None" = None
+    chat_id: str = ""
+    turn_id: str = ""
+    """Where a result set is kept, and under which chat and turn.
+
+    Absent on the `/ask` path, which has no chat to hang a result on: nothing is persisted
+    and no `result_id` is emitted, so a caller with no browser behaves exactly as before.
+    """
 
 
-def build_tools(session: Session, preview_rows: int = 30) -> list:
+def build_tools(session: Session, preview_rows: int = 30, event_rows: int = MAX_POINTS) -> list:
     retriever = LexicalRetriever(session.catalog)
 
     @tool
@@ -92,6 +112,17 @@ def build_tools(session: Session, preview_rows: int = 30) -> list:
             return result.as_message() + "\n\nFix the query and call run_query again."
 
         rows = result.rows or []
+        columns = [asdict(c) for c in columns_of(query, session.catalog)]
+        picked = chart_for(query, session.catalog, rows)
+        chart = asdict(picked) if picked else None
+        # The handle the browser fetches the whole result by. The event carries only a
+        # head of the rows — enough to render a table the moment a transcript replays,
+        # without putting a 5000-row payload through the event log on every reload.
+        result_id = ""
+        if session.store is not None and session.chat_id:
+            result_id = await session.store.save_result(
+                session.chat_id, session.turn_id, columns, rows
+            )
         emit(
             Event(
                 type="tool_end",
@@ -103,9 +134,19 @@ def build_tools(session: Session, preview_rows: int = 30) -> list:
                     "query": query,
                     "sql": result.sql,
                     "rows_total": len(rows),
-                    # The browser shows the same preview the model sees. Full result
-                    # sets stay out of the event log until charts land.
-                    "preview": rows[:preview_rows],
+                    "columns": columns,
+                    "result_id": result_id,
+                    # Derived, not asked for: the chart is free, instant on a replayed
+                    # transcript, and cannot plot a column nobody fetched. `None` is a
+                    # normal outcome — see visualize.chart_for.
+                    "chart": chart,
+                    # Two different limits on purpose: the model pays per token and reads
+                    # `preview_rows`, the browser pays per event row and renders
+                    # `event_rows`. They were one number, which meant making the table
+                    # feel complete would have cost the model 70 rows of context. The
+                    # browser's limit is `visualize.MAX_POINTS`, which is what lets a chart
+                    # be drawn from the event alone rather than fetched.
+                    "preview": rows[:event_rows],
                     "duration_ms": result.duration_ms,
                     "warnings": result.warnings,
                 },
@@ -118,6 +159,7 @@ def build_tools(session: Session, preview_rows: int = 30) -> list:
                 row_count=len(rows),
                 duration_ms=result.duration_ms,
                 warnings=result.warnings,
+                columns=columns,
             )
         )
         head = f"{len(rows)} rows in {result.duration_ms}ms."
@@ -148,6 +190,42 @@ def build_tools(session: Session, preview_rows: int = 30) -> list:
         return found.body
 
     @tool
+    def set_chart(spec: dict) -> str:
+        """Replace the chart drawn for the most recent result. Rarely needed — one is
+        already chosen from the query's shape. Keys: type (line, bar or kpi), x (a
+        dimension or time column id), y (a list of measure column ids), series (optional,
+        line only). Use the column ids exactly as run_query reported them."""
+        emit(
+            Event(
+                type="tool_start",
+                data={"tool": "set_chart", "label": f"Charting as {spec.get('type', '?')}"},
+            )
+        )
+        if not session.executed:
+            emit(Event(type="tool_end", data={"tool": "set_chart", "ok": False}))
+            return "No query has run yet, so there is nothing to chart."
+
+        columns = [Column(**c) for c in session.executed[-1].columns]
+        checked, errors = validate_spec(spec, columns)
+        if checked is None:
+            # A rejection is text the agent can act on, exactly as the query gate does.
+            emit(Event(type="tool_end", data={"tool": "set_chart", "ok": False, "errors": errors}))
+            listed = ", ".join(f"{c.id} ({c.kind})" for c in columns)
+            return (
+                "Chart rejected:\n"
+                + "\n".join(f"- {e}" for e in errors)
+                + f"\n\nColumns in this result: {listed}"
+            )
+
+        emit(
+            Event(
+                type="tool_end",
+                data={"tool": "set_chart", "ok": True, "chart": asdict(checked)},
+            )
+        )
+        return f"The result is now drawn as a {checked.type} chart."
+
+    @tool
     def explain_last_query() -> str:
         """Show the SQL Cube generated for the most recent successful query."""
         emit(
@@ -167,4 +245,4 @@ def build_tools(session: Session, preview_rows: int = 30) -> list:
         last = session.executed[-1]
         return f"```json\n{json.dumps(last.query, indent=2)}\n```\n\n```sql\n{last.sql}\n```"
 
-    return [search_model, run_query, load_grounding, explain_last_query]
+    return [search_model, run_query, load_grounding, set_chart, explain_last_query]

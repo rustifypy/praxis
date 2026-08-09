@@ -9,6 +9,7 @@ import type { ComposerHandle } from "./components/Composer";
 import { Composer } from "./components/Composer";
 import { DataNav } from "./components/DataNav";
 import { Rail } from "./components/Rail";
+import { ResultBlock } from "./components/ResultBlock";
 import { SourceDetail } from "./components/SourceDetail";
 import { Sources } from "./components/Sources";
 import { Thinking } from "./components/Thinking";
@@ -367,6 +368,19 @@ export default function App() {
                 return (
                   <div key={i} className="row">
                     <Answer text={item.text} live={item.live} />
+                  </div>
+                );
+              case "result":
+                return (
+                  <div key={i} className="row">
+                    <ResultBlock
+                      resultId={item.resultId}
+                      label={item.label}
+                      columns={item.columns}
+                      rows={item.rows}
+                      rowCount={item.rowCount}
+                      chart={item.chart}
+                    />
                   </div>
                 );
               case "compacted":

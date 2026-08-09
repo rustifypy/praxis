@@ -10,6 +10,8 @@ later, however localhost the setup is today.
 """
 
 import asyncio
+import csv
+import io
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -25,6 +27,7 @@ from ..chat.store import ChatStore, checkpointer
 from ..config import settings
 from ..cube.catalog import Catalog
 from ..cube.client import CubeClient, mint_token
+from ..cube.shape import Column, export_value
 from . import sources
 from .stream import sse
 
@@ -154,6 +157,51 @@ async def send(chat_id: str, body: Message, request: Request) -> StreamingRespon
             request.app.state.cancels.pop(chat_id, None)
 
     return sse(events())
+
+
+@app.get("/api/results/{result_id}")
+async def result(result_id: str, request: Request, offset: int = 0, limit: int = 200) -> dict:
+    """One page of a stored result set.
+
+    The transcript renders the head of the rows straight off the `tool_end` event, so this
+    is only reached by "show all" and by a sort over more rows than the event carried.
+    """
+    record = await request.app.state.store.result(result_id)
+    if record is None:
+        raise HTTPException(404, f"no result with id {result_id!r}")
+    rows = record["rows"]
+    return {
+        "id": record["id"],
+        "columns": record["columns"],
+        "rows": rows[offset : offset + limit],
+        "row_count": record["row_count"],
+        "offset": offset,
+    }
+
+
+# A segment, not `{result_id}.csv`: a bare path parameter matches "abc.csv" as the id
+# itself and shadows the route above it — the same way /sources/{name}/{action} swallowed
+# its siblings.
+@app.get("/api/results/{result_id}/csv")
+async def result_csv(result_id: str, request: Request) -> Response:
+    record = await request.app.state.store.result(result_id)
+    if record is None:
+        raise HTTPException(404, f"no result with id {result_id!r}")
+    buffer = io.StringIO()
+    # The stored header, so the file's columns are the table's columns in the table's
+    # order. Labels rather than member ids — a spreadsheet is read by a person. Note Cube
+    # returns a grouped time dimension under *two* keys, the grain and the bare member, so
+    # the header is what says which one belongs in the file.
+    columns = [Column(**c) for c in record["columns"]]
+    writer = csv.writer(buffer)
+    writer.writerow([c.label for c in columns])
+    for row in record["rows"]:
+        writer.writerow([export_value(row.get(c.id), c) for c in columns])
+    return Response(
+        buffer.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="result-{result_id[:8]}.csv"'},
+    )
 
 
 @app.get("/api/catalog")

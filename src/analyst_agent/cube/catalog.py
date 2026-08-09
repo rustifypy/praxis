@@ -63,6 +63,14 @@ class MemberDoc:
     ai_context: str = ""
     granularities: list[str] = field(default_factory=list)
     valid_operators: list[str] = field(default_factory=list)
+    format: str = ""
+    """Cube's own display format for a measure — `currency` or `percent`. What makes a
+    result table render 12404.5 as $12,404.50 without guessing from the column name.
+
+    `/v1/load` also returns this, per member, in its `annotation` object. We read it from
+    `/v1/meta` instead: the catalog is cached and already threaded everywhere a query is
+    built, while `annotation` would have to be plumbed through `LoadResult` and
+    `GateResult` to reach the same place."""
     alias_member: str = ""
     """For a view member, the cube member it re-exports — `sales.revenue` ->
     `invoice_line.line_amount`. Empty on a cube's own members.
@@ -142,6 +150,7 @@ class Catalog:
                             ai_context=_ai_context(m),
                             granularities=grains,
                             valid_operators=list(ops),
+                            format=m.get("format", "") or "",
                             alias_member=m.get("aliasMember", "") or "",
                         )
                     )

@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import { useDismiss } from "../hooks";
 
-export interface MenuItem {
+interface MenuItem {
   label: string;
   onSelect: () => void;
   /** Shown greyed with the reason as its subtitle, rather than hidden. A control that

@@ -9,7 +9,7 @@
 import { json } from "./api";
 
 export type StepName = "connect" | "cubes" | "describe" | "views";
-export const STEPS: StepName[] = ["connect", "cubes", "describe", "views"];
+const STEPS: StepName[] = ["connect", "cubes", "describe", "views"];
 
 export const STEP_LABEL: Record<StepName, string> = {
   connect: "Connect",
@@ -25,7 +25,7 @@ export const ACTION_LABEL: Record<string, string> = {
   read: "Read the database",
 };
 
-export const STEP_BLURB: Record<StepName, string> = {
+const STEP_BLURB: Record<StepName, string> = {
   connect: "Start this source's Cube container and check the database answers.",
   cubes: "Read the tables, then emit one cube each with its keys and joins.",
   describe: "One model call per table: descriptions, measures and disambiguation notes.",
@@ -51,7 +51,7 @@ export const STAGE_BLURB: Record<StageName, string> = {
   cubes: "Pick the tables to model, then emit one cube each with its keys and joins.",
 };
 
-export interface StepRecord {
+interface StepRecord {
   status?: "done" | "error";
   finished_at?: number;
   summary?: Record<string, unknown>;
@@ -97,7 +97,7 @@ export interface System {
   dev_mode?: boolean;
 }
 
-export interface DriverField {
+interface DriverField {
   env: string;
   label: string;
   default: string;
@@ -118,7 +118,7 @@ export interface DriverSpec {
   fields: DriverField[];
 }
 
-export interface TableInfo {
+interface TableInfo {
   name: string;
   columns: number;
   primary_key: string[];
@@ -159,7 +159,7 @@ export interface ServedMember {
   exposed_by: string[];
 }
 
-export interface ServedFolder {
+interface ServedFolder {
   name: string;
   members: string[];
 }

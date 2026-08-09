@@ -110,3 +110,37 @@ async def test_non_query_tool_events_are_not_provenance(store):
         chat.id, "t1", Event(type="tool_end", data={"tool": "search_model", "ok": True})
     )
     assert await store.replay_session(chat.id) == ([], [])
+
+
+COLUMNS = [
+    {"id": "orders.status", "label": "Status", "kind": "dimension", "align": "left"},
+    {"id": "orders.count", "label": "Count", "kind": "measure", "align": "right"},
+]
+
+
+async def test_a_saved_result_round_trips_whole(store):
+    """The point of the table: the rows the event log deliberately does not carry."""
+    chat = await store.create()
+    rows = [{"orders.status": f"s{i}", "orders.count": i} for i in range(250)]
+    result_id = await store.save_result(chat.id, "t1", COLUMNS, rows)
+
+    record = await store.result(result_id)
+    assert record["row_count"] == 250
+    assert record["rows"] == rows
+    assert record["columns"] == COLUMNS
+    assert (record["chat_id"], record["turn_id"]) == (chat.id, "t1")
+
+
+async def test_an_unknown_result_id_is_none_not_an_error(store):
+    assert await store.result("nope") is None
+
+
+async def test_deleting_a_chat_takes_its_results(store):
+    keep = await store.create()
+    drop = await store.create()
+    kept = await store.save_result(keep.id, "t1", COLUMNS, [{"orders.count": 1}])
+    dropped = await store.save_result(drop.id, "t1", COLUMNS, [{"orders.count": 2}])
+
+    await store.delete(drop.id)
+    assert await store.result(dropped) is None
+    assert await store.result(kept) is not None

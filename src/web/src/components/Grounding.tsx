@@ -5,23 +5,15 @@ import type { GroundingArtefact } from "../sources";
 import { Section } from "./Section";
 
 /**
- * Grounding, as sections of the Serving list rather than a panel of its own.
- *
- * It sits under Views and Cubes because it is the same question continued. Those two say
- * what a question can reach; these say what the agent already believes before the
- * question arrives — the definitions, the house method, the queries someone has checked.
- * Reading an answer you doubt means looking at both, and a separate panel made that two
- * places to look and one of them easy to forget.
+ * Grounding, as sections of the Serving list rather than a panel of its own — what the
+ * agent already believes before a question arrives.
  *
  * Read through the agent's own loader server-side, so this cannot list a file the agent
- * ignores: it is the `*.md` glob's output, not a directory listing. That matters more
- * here than it looks — a `.yml` in this directory is not ignored by Cube, it fails the
- * whole model's compile.
+ * ignores: it is the `*.md` glob's output, not a directory listing. A `.yml` in this
+ * directory is not ignored by Cube — it fails the whole model's compile.
  *
- * The one thing a row must carry is `always` versus `agent_requested`, because that is
- * not a category, it is a cost: an `always` rule is in the system prompt of every turn on
- * this source, and an `agent_requested` one is a name in a catalogue until something asks
- * for it.
+ * The one thing a row must carry is `always` versus `agent_requested`. That is not a
+ * category but a cost: an `always` rule is in the system prompt of every turn.
  */
 
 const KINDS = [

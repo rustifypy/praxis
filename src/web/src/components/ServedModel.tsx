@@ -6,28 +6,19 @@ import { Section } from "./Section";
 
 /**
  * Everything the agent brings to a question: what Cube compiled, and what this source
- * already told it.
+ * already told it. Not a YAML viewer — the files on disk are what was authored, this is
+ * what survived compilation.
  *
- * Deliberately not a YAML viewer for the model half — the files on disk are what was
- * authored, this is what survived compilation.
+ * Master–detail rather than accordions: expanding a cube in place pushed every row below
+ * it down the page, so comparing two meant losing your position twice. Views and cubes
+ * are separate sections because a view is the curated surface a question should reach and
+ * a cube is the table underneath. Grounding follows in the same column rather than in a
+ * panel of its own — it is the continuation of the same question, and split in two, one
+ * half went unread.
  *
- * Master–detail rather than accordions. Expanding a cube in place pushed every row below
- * it down the page, so comparing two of them meant losing your position twice; with
- * thirteen entities and seventy members the list never held still. The list is now a
- * fixed column and the members render in their own box beside it, so clicking through
- * entities moves nothing.
- *
- * Views and cubes are separated because they are not two flavours of the same thing. A
- * view is the curated surface a question should reach; a cube is the table underneath,
- * and reaching across two of them is the case the gate can only warn about. Grounding
- * follows them in the same column rather than in a panel of its own: it answers the
- * continuation of the same question, and split across two panels one of them goes
- * unread.
- *
- * The two halves fail independently, which is the one thing this component has to keep
- * straight. The model needs the container up and Cube compiling; grounding is markdown on
- * this machine and reads perfectly well when Cube is down. So a model failure is a banner
- * over an empty Views and Cubes, never over an empty list.
+ * The one thing to keep straight: **the two halves fail independently.** The model needs
+ * the container up and Cube compiling; grounding is markdown on this machine. So a model
+ * failure is a banner over empty Views and Cubes, never an early return over the list.
  */
 
 type Picked = { type: "entity"; id: string } | { type: "artefact"; id: string };
@@ -87,18 +78,12 @@ export function ServedModel({
   }, [grounding, needle]);
 
   /**
-   * What the box opens on under a filter, and only under a filter.
-   *
-   * With the sections shut by default there is nothing to open on arrival — a detail box
-   * volunteering the first view would make Views the one section that is never collapsed.
-   * A search is different: it has to land on the strongest match, because searching
-   * "revenue" and opening the one view that does not mention it is a worse answer than
-   * the list already gave. The *list* stays in name order regardless — re-ranking rows
-   * while someone types moves the thing they are reaching for.
-   *
-   * Entities win over grounding when both match: with a model present the model is what
-   * you came for, and an artefact opens when the filter has left nothing else — or when
-   * there is no model at all, which is what a stopped container looks like from here.
+   * What the box opens on under a filter, and only under a filter — volunteering the
+   * first view on arrival would make Views the one section that is never collapsed.
+   * A search does have to land on the strongest match: searching "revenue" and opening
+   * the one view that does not mention it is a worse answer than the list already gave.
+   * The *list* stays in name order regardless — re-ranking rows while someone types moves
+   * the thing they are reaching for. Entities win over grounding when both match.
    */
   const fallback: Picked | null = useMemo(() => {
     if (!needle) return null;
@@ -122,12 +107,10 @@ export function ServedModel({
     selected?.type === "artefact" ? artefacts.find((a) => a.file === selected.id) : null;
 
   /**
-   * Sections are shut until asked for, with one exception that is not a preference: a
-   * filter must reveal what it matched. Typing into a column of shut headers and watching
-   * only the counts change is a search that appears to do nothing.
-   *
-   * Nothing else forces a section open — collapsing one while its row is in the detail box
-   * is allowed, and leaves the detail alone. The two panes are not a single widget.
+   * Shut until asked for, with one exception that is not a preference: a filter must
+   * reveal what it matched, or typing into a column of shut headers appears to do
+   * nothing. Nothing else forces one open — collapsing a section while its row is in the
+   * detail box is allowed, and leaves the detail alone.
    */
   const isOpen = (section: string) => Boolean(needle) || expanded.has(section);
 
