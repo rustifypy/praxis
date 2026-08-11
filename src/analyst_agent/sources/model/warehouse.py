@@ -1,10 +1,4 @@
-"""What the warehouse says about itself: tables, columns, keys, statistics.
-
-The vocabulary the rest of the pipeline speaks. Keys come from the database
-catalog, never from column names — Cube's own scaffolder guesses the primary key
-from naming and drops the column when the guess misses, which is what produces
-`primary key for 'x' is required when join is defined`.
-"""
+"""What the warehouse says about itself: tables, columns, keys, statistics."""
 
 from dataclasses import dataclass, field
 

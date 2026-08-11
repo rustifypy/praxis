@@ -1,12 +1,4 @@
-"""The vocabulary of a data source, and the rules for naming and porting one.
-
-A source's data lives in `store.py` — this module is the shape it takes in memory, the
-paths it owns on disk, and the two rules that must read the same whether the caller is
-the CLI or an HTTP handler.
-
-Credentials are part of the `Source` now. There is no registry file and no per-source
-credential file; `docker.py` builds a container from this object and nothing else.
-"""
+"""The vocabulary of a data source, and the rules for naming and porting one."""
 
 import socket
 from collections.abc import Iterable
@@ -17,14 +9,13 @@ from ..config import settings
 from .drivers import Driver, get, missing_fields
 
 MODEL_ROOT = "cube/sources"
-"""The only thing this tool writes into the working directory. Everything else it needs
-— sources.db, the job lock, the catalog probe's throwaway model — is machine-local under
-`~/.analyst`, because the working directory belongs to whoever installed this."""
+"""The only thing this tool writes into the working directory. Everything else it needs —
+sources.db, the job lock, the catalog probe's throwaway model — is machine-local under.
+"""
 GROUNDING_ROOT = "grounding"
-"""Inside the source's own directory, which is bind-mounted as Cube's model. Cube compiles
-every `*.yml` anywhere under that mount, not just under `cubes/` and `views/` — one
-written as YAML here takes the whole model to zero cubes, blaming the grounding file.
-Markdown only, which `grounding._load_dir` enforces by globbing `*.md`."""
+"""Inside the source's own directory, which is bind-mounted as Cube's model. Cube compiles every
+`*.yml` anywhere under that mount, not just under `cubes/` and `views/` — one written as YAML.
+"""
 ARTEFACT_DIRS = ("rules", "skills", "certified_queries")
 """The directories `Grounding` reads. Scaffolding a different set would create folders
 nothing loads, so both sides take this list."""
@@ -66,29 +57,21 @@ class Source:
 
     @property
     def is_active(self) -> bool:
-        """Whether the agent queries this source. `CUBE_URL` decides, not the registry.
-
-        A property rather than a check at each call site: the CLI's `rm`, the delete
-        route and the panel all refuse or mark on this, and they must agree.
-        """
+        """Whether the agent queries this source. `CUBE_URL` decides, not the registry."""
         return self.url.rstrip("/") == settings.cube_url.rstrip("/")
 
     def model_dir(self, root: Path | None = None) -> Path:
         return (root or project_root()) / MODEL_ROOT / self.name
 
     def grounding_dir(self, root: Path | None = None) -> Path:
-        """This source's rules, skills and certified queries. Per source and not global,
-        because grounding names members — "revenue" means `revenue.net_revenue` is
-        nonsense against a warehouse with no revenue cube."""
+        """This source's rules, skills and certified queries. Per source and not global, because
+        grounding names members — "revenue" means `revenue.net_revenue` is nonsense against a.
+        """
         return self.model_dir(root) / GROUNDING_ROOT
 
 
 def next_port(taken: Iterable[int] = ()) -> int:
-    """First free port at or above 4001, skipping anything already listening.
-
-    Takes the assigned ports rather than reading them, for the same reason
-    `validate_name` does — one rule, callable from the CLI or an HTTP handler.
-    """
+    """First free port at or above 4001, skipping anything already listening."""
     assigned = set(taken)
     port = FIRST_PORT
     while port in assigned or port_in_use(port):
@@ -118,11 +101,7 @@ def validate_name(name: str, taken: Iterable[str] = ()) -> str | None:
 def validate_new(
     name: str, driver: str, port: int, values: dict[str, str], existing: list[Source]
 ) -> str | None:
-    """Everything that makes a proposed source invalid, or None. The first error wins.
-
-    Both the CLI and `POST /api/sources` ask this, so "what is a valid new source"
-    cannot come to mean two things.
-    """
+    """Everything that makes a proposed source invalid, or None. The first error wins."""
     if error := validate_name(name, [s.name for s in existing]):
         return error
     try:
@@ -137,16 +116,7 @@ def validate_new(
 
 
 def scaffold_source_dirs(source: Source, root: Path | None = None) -> Path:
-    """Create everything a source owns on disk, and return the directory to bind-mount.
-
-    Cube reads /cube/conf/model, which is `model_dir` — empty until the model generator
-    writes into it. Made before the container starts: docker would otherwise create the
-    bind-mount target as root, and Cube could not read the model written into it later.
-
-    The grounding directories are made empty here for a different reason. `Grounding`
-    tolerates them being absent, so this is purely so they can be found: nobody writes a
-    rule into a folder they cannot see.
-    """
+    """Create everything a source owns on disk, and return the directory to bind-mount."""
     base = source.model_dir(root)
     grounding = (f"{GROUNDING_ROOT}/{artefact}" for artefact in ARTEFACT_DIRS)
     for sub in ("cubes", "views", *grounding):

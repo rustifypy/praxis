@@ -1,14 +1,4 @@
-"""Stage 3 — the judgment the catalog cannot supply, and the guards on it.
-
-The model returns decisions as validated objects, never YAML, so it cannot rename
-a member, invent a join, or emit something Cube will reject. Everything it returns
-is then checked against the menu built in `build`, and dropped if it does not
-match. Trust nothing; verify against the schema we read from the database.
-
-Following Cube's own conventions: `description` on every public member,
-`ai_context` on views and members (cube-level context is not consumed), `folders`
-for business grouping.
-"""
+"""Stage 3 — the judgment the catalog cannot supply, and the guards on it."""
 
 import re
 from collections.abc import Callable
@@ -153,21 +143,13 @@ def cube_prompt(table: Table, menu: Menu) -> str:
     )
 
 
-def measures_for(enriched: dict[str, CubeDecision], cube: str) -> set[str]:
-    decision = enriched.get(cube)
-    return {m.name for m in decision.measures} if decision else set()
-
-
 def available_members(
     roots: list[ViewRoot], enriched: dict[str, CubeDecision]
 ) -> dict[str, set[str]]:
-    """join_path -> the members a view may include there.
-
-    One definition, used both to offer the choice and to check the reply. If these
-    ever disagree, the guard rejects members the prompt just advertised.
-    """
+    """join_path -> the members a view may include there."""
+    measures = {cube: {m.name for m in decision.measures} for cube, decision in enriched.items()}
     return {
-        path: {*members, *measures_for(enriched, path.split(".")[-1]), "count"}
+        path: {*members, *measures.get(path.split(".")[-1], ()), "count"}
         for root in roots
         for path, members in root.paths.items()
     }
@@ -227,13 +209,7 @@ SQL_WORDS = frozenset(
 
 
 def qualify_expression(expression: str, columns: set[str]) -> str | None:
-    """Prefix this table's columns with {CUBE}, or None if a foreign column is named.
-
-    Cube qualifies a `sql:` that is a single column name, but passes an expression
-    through to SQL verbatim. So a bare `quantity * unit_price` becomes ambiguous the
-    moment a join brings in another cube holding a column of that name — the failure
-    Cube's own documentation warns about. `{CUBE}` resolves to this cube's alias.
-    """
+    """Prefix this table's columns with {CUBE}, or None if a foreign column is named."""
     words = set(re.findall(IDENTIFIER, expression))
     if {w for w in words if w.upper() not in SQL_WORDS and w not in columns}:
         return None
@@ -309,13 +285,7 @@ def validate_cube(
 def validate_paths(
     view: ViewDecision, available: dict[str, set[str]]
 ) -> tuple[list[ViewCube], list[str]]:
-    """Keep a view to one root, and each cube to one path.
-
-    Cube does support multi-fact views (several fact tables disambiguated by prefix),
-    so this is our conservative default rather than a Cube limitation: combining fact
-    tables fans out, and a generator that silently double-counts is worse than one
-    that produces two views. Relax this deliberately, not by accident.
-    """
+    """Keep a view to one root, and each cube to one path."""
     rejected = [
         f"view {view.name}: unknown join_path {e.join_path!r}"
         for e in view.cubes
@@ -349,12 +319,7 @@ def validate_paths(
 
 
 def exposed_members(view: ViewDecision) -> list[tuple[str, str, str, str]]:
-    """(join_path, member, exposed name, alias) for every member a view publishes.
-
-    Cube rejects two members sharing a name, and its own answer is `alias` rather
-    than dropping one — so a colliding member is renamed and kept. A pure function of
-    the view, so the folder filter and the YAML writer stay in agreement.
-    """
+    """(join_path, member, exposed name, alias) for every member a view publishes."""
     out: list[tuple[str, str, str, str]] = []
     taken: set[str] = set()
     for entry in view.cubes:
@@ -413,35 +378,21 @@ def _view_model():
 
 
 async def describe_table(table: Table, menu: Menu, enrichment: Enrichment) -> None:
-    """One table's descriptions and measures, recorded on `enrichment`.
-
-    Per table rather than per schema so the caller can report progress and, on a wide
-    schema, so a failure at table 300 does not discard the first 299.
-    """
+    """One table's descriptions and measures, recorded on `enrichment`."""
     decision = await _cube_model().ainvoke(cube_prompt(table, menu))
     enrichment.cubes[table.name], rejected = validate_cube(decision, table, menu)
     enrichment.rejected += rejected
 
 
 async def propose_views(roots: list[ViewRoot], enrichment: Enrichment) -> None:
-    """Choose views over the offered join paths, recorded on `enrichment`.
-
-    Reads the cube decisions already on `enrichment`: a view exposes members under the
-    names those chose, so proposing without them would offer includes that do not exist.
-    """
+    """Choose views over the offered join paths, recorded on `enrichment`."""
     proposed = await _view_model().ainvoke(views_prompt(roots, enrichment.cubes))
     enrichment.views, rejected = validate_views(proposed.views, roots, enrichment.cubes)
     enrichment.rejected += rejected
 
 
 async def repair(enrichment: Enrichment, schema: Schema, errors: dict[str, str]) -> None:
-    """One bounded round per failing measure, using Cube's own error text.
-
-    Cube's compile errors name the member and the problem precisely — the reason the
-    validator is Cube rather than a checker of ours. A measure that still fails after
-    one attempt is dropped, not shipped: a model that compiles with fewer measures
-    beats one that breaks at query time. Records outcomes on the enrichment.
-    """
+    """One bounded round per failing measure, using Cube's own error text."""
     if not errors:
         return
 

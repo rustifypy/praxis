@@ -28,9 +28,9 @@ class QueryRecord:
     duration_ms: int | None
     warnings: list[str]
     columns: list[dict] = field(default_factory=list)
-    """The header this result was rendered with. Kept so `set_chart` can be checked against
-    the columns that exist rather than the ones the model remembers — and rebuilt by
-    `replay_session`, so the check still works on turn three and after a restart."""
+    """The header this result was rendered with, so `set_chart` is checked against the columns
+    that exist rather than the ones the model remembers. Rebuilt by `replay_session`.
+    """
 
 
 @dataclass
@@ -46,10 +46,8 @@ class Session:
     store: "ChatStore | None" = None
     chat_id: str = ""
     turn_id: str = ""
-    """Where a result set is kept, and under which chat and turn.
-
-    Absent on the `/ask` path, which has no chat to hang a result on: nothing is persisted
-    and no `result_id` is emitted, so a caller with no browser behaves exactly as before.
+    """Where a result set is kept, and under which chat and turn. Absent on the `/ask` path,
+    which has no chat to hang one on — nothing is persisted and no `result_id` is emitted.
     """
 
 

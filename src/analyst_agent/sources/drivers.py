@@ -1,8 +1,4 @@
-"""Connection shapes per Cube driver.
-
-Field names are Cube's own `CUBEJS_DB_*` variables — this module adds no
-indirection of its own, so anything Cube documents works here verbatim.
-"""
+"""Connection shapes per Cube driver."""
 
 import os
 from dataclasses import dataclass
@@ -119,13 +115,7 @@ def image_for(spec: Driver) -> str:
 
 
 def credentials_for(spec: Driver, values: dict[str, str]) -> dict[str, str]:
-    """The complete `CUBEJS_DB_*` map for a source, from what the user supplied.
-
-    Adds the driver type and any field with a fixed value, so a caller only has to
-    collect what it prompted for. Empty values are dropped rather than passed as
-    `-e KEY=`: to some drivers an empty variable and an unset one are not the same
-    thing, and the credential files this replaced could only express the former.
-    """
+    """The complete `CUBEJS_DB_*` map for a source, from what the user supplied."""
     out = {"CUBEJS_DB_TYPE": spec.key}
     for field in spec.fields:
         value = values.get(field.env, field.fixed) or field.fixed
@@ -135,16 +125,7 @@ def credentials_for(spec: Driver, values: dict[str, str]) -> dict[str, str]:
 
 
 def split_mounts(spec: Driver, values: dict[str, str]) -> tuple[dict[str, str], dict[str, str]]:
-    """Separate the host paths out of a submitted form: (values, container path -> host path).
-
-    A `mount_to` field is typed as a path on this machine, but that is not what the
-    container is told: the file is bind-mounted at `mount_to` and the env var carries the
-    *container* path. So the value that becomes a credential is never the host path, and
-    the host path only ever reaches `docker run -v`.
-
-    Two callers — creating a source and editing one — and getting this wrong on either
-    means Cube looks for a key file at a path that does not exist inside the container.
-    """
+    """Separate the host paths out of a submitted form: (values, container path -> host path)."""
     kept = dict(values)
     mounts: dict[str, str] = {}
     for field in spec.fields:

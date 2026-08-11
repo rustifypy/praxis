@@ -51,11 +51,8 @@ def _notice(state, result) -> None:
 
 
 class CompactionNotice(SummarizationMiddleware):
-    """Marks the point in the transcript where history was rewritten.
-
-    Without the marker the browser and the model diverge in silence: the user scrolls a
-    full conversation the agent can no longer see, then asks for "the same thing for
-    last year" about a turn that has been summarized away.
+    """Marks where history was rewritten. Without it the user scrolls a full conversation the
+    agent can no longer see, then asks for "the same for last year" about a summarized turn.
     """
 
     def before_model(self, state, runtime):

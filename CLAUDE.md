@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 make install                  # uv sync --all-groups
-make test                     # uv run pytest -q
+make test                     # uv run pytest -q — 292 tests, no containers, no model calls
 make lint                     # ruff check + ruff format --check
 make fmt                      # ruff format + ruff check --fix
 make up / make down           # the shared Cube Store (sources are their own containers)
@@ -15,6 +15,7 @@ make api                      # uvicorn on :8000
 
 uv run pytest tests/test_gate.py::test_valid_query_passes    # a single test
 uv run pytest tests/test_model_generation.py -q              # one file
+uv run pytest -q -k dashboard                                # by name
 
 make web-build                # build the frontend into the package (needs npm)
 make web                      # web-build, then serve
@@ -42,7 +43,7 @@ The launcher cannot be replaced by pointing uvicorn at the app. `web.server.TOKE
 minted at import and nothing else announces it, so `uvicorn analyst_agent.web.server:app`
 serves a portal nobody can authenticate against.
 
-## Three subsystems
+## Four subsystems
 
 **Query time** (`cube/`, `agent/`, `retrieval.py`, `grounding.py`) — the agent answers
 questions about **one** source: `CUBE_URL` picks it, `grounding.for_active_source` is
@@ -51,6 +52,12 @@ It never writes SQL. It emits Cube JSON queries that pass a four-tier gate
 (pydantic schema → local semantic checks against the cached catalog → `POST /v1/sql`
 which compiles without executing → `POST /v1/load`). Failures return as text the agent
 can act on, never exceptions. See README for the tier table.
+
+`gate.run` is all four tiers and is what a chat turn wants. The seam between 3 and 4 is
+also exposed as `check`/`execute`, for the callers that need to know a query is sound
+*without* running it — both are dashboard paths. `execute` takes the `GateResult` rather
+than the query, so the SQL and warnings tiers 2-3 produced survive into the executed
+result instead of being compiled twice.
 
 Cube itself moved off this format — the 2024 AI API emitted Cube JSON and D3 replaced it
 with the agent writing Semantic SQL, for the expressiveness a fixed schema cannot give.
@@ -100,6 +107,65 @@ it must be triggerable alone, and `cubes` runs it itself when nothing is cached.
 a foreign key whose target is absent (it was written that way for keys into another
 schema), and a deselected table is indistinguishable from that.
 
+**Dashboards** (`dashboards/`, `web/dashboards.py`, `src/web/src/components/{Dashboard,
+DashboardNav,Tile}.tsx`) — the same machinery pointed at a question someone asks
+repeatedly. A tile stores the *query*, not the rows. `dashboards/__init__.py` holds the
+three invariants; read it before changing anything here:
+
+1. **The row is the truth, and a tool event carries only intent.** A dashboard is mutable
+   state and the chat's contract is that the event log *is* the transcript; both cannot
+   be true of a layout the agent edits. So `tools._start`/`_end` are the only way these
+   tools reach the stream and **have no parameter that could carry a layout, a tile list
+   or a chart spec** — that is the enforcement, not a rule to remember. `EVENT_KEYS`
+   asserts it. Undo comes from `layouts` being append-only instead.
+2. **A refresh is atomic** — every tile compiles before any tile executes, which is what
+   `gate.check`/`execute` exist for. The cost is that three dead tiles break the whole
+   board, so the same compile pass runs when a dashboard *opens* (`web/dashboards._checks`)
+   and reports a member a model rebuild dropped as a banner.
+3. **A refresh re-executes; it does not rewrite.** Whether the window moves is a property
+   of the stored query — Cube resolves `"last 30 days"` at execution time and an absolute
+   range never moves. `tiles.window_warnings` says so at authoring time and
+   `LoadResult.resolved_ranges` is what lets a tile label the window it actually read.
+
+| module | role |
+|---|---|
+| `store.py` | `dashboards`/`tiles`/`layouts`/`runs`/`tile_results` in `analyst.db` |
+| `tiles.py` | what a valid tile is: `validate` at authoring, `outgrown` on every refresh |
+| `layout.py` | placement only; a partial layout is *completed*, never treated as hiding |
+| `run.py` | `validate` (tiers 1-3) and `refresh` (+ tier 4), the atomic pass |
+| `delta.py` | change since the previous refresh, single-row results only |
+| `insights.py` | one model call per refresh for the whole board, never per tile |
+| `tools.py` | the eight agent tools — which do **not** include refreshing |
+| `web/dashboards.py` | the HTTP surface; refresh lives here and nowhere else |
+
+**The agent authors and arranges; the page runs.** Refresh is a button, deliberately: an
+agent that could trigger one would turn "tidy up this dashboard" into two dozen warehouse
+queries. The consequence to state rather than let someone discover — a tile the agent just
+added has **no data** until someone refreshes, and the system prompt tells it to say so.
+
+Two failure states, kept apart because only one is fixable by editing a tile: `refused` is
+tiles that did not compile and nothing ran; `failed` is tiles that compiled and then broke
+against the warehouse. A dashboard renders its last `ok` run, so neither blanks the tiles.
+
+`tiles.CHART_TYPES` is `line|bar|kpi|table` — exactly what `ResultChart` draws. `area`,
+`stacked_bar` and `hbar` are absent on purpose: a validator that accepts a chart the
+renderer cannot draw makes the tile misrepresent itself. **Renderer branch first, tuple
+second.** (`tools.add_tile`'s docstring still advertises the wider list to the model; the
+validator refuses it, so the failure is a rejection rather than a wrong picture.)
+
+`store.py` will **never gain a column** — `CREATE TABLE IF NOT EXISTS` does not diff, so
+adding a table to a live `analyst.db` works and adding a column silently does not. Every
+column nothing reads yet (`tiles.time_member`, `tiles.deleted_at`, `tile_results.insight`)
+is there because the feature needing it would otherwise require deleting the database.
+Retention is the mirror image: a DELETE rather than a column, so the depth stays
+changeable — it is the *index* that could not be added later.
+
+Not built, each gated so nothing can author one prematurely: the three missing chart types
+above; **dragging tiles** (`POST /{id}/layout` exists and validates, no UI calls it, so
+rearranging is chat-only); per-tile insights (`tile_results.insight`, rejected as twelve
+model calls for a weaker result than the one cross-tile paragraph); promoting a tile to a
+`certified_queries/` file.
+
 **The web portal** (`chat/`, `web/`, `src/web/`) — `analyst` opens a browser the way
 Jupyter does. One flat event stream is the contract between agent and browser:
 
@@ -111,11 +177,13 @@ Jupyter does. One flat event stream is the contract between agent and browser:
 | `chat/service.py` | `stream_turn()` — one turn as an async iterator of events |
 | `web/server.py` | routes, SSE, token auth, static mount |
 | `src/web/` | React source; **builds into `analyst_agent/web/static/`** |
-| `src/web/src/components/Rail.tsx` | the mode switch — chat or data, and nothing else |
+| `src/web/src/components/Rail.tsx` | the mode switch — chat, boards or data, and nothing else |
 | `src/web/src/components/ChatHeader.tsx` | the active source, and switching it — nothing deeper |
 | `src/web/src/components/ServedModel.tsx` | the compiled model **and** this source's grounding, one list |
 | `src/web/src/components/ResultBlock.tsx` | one query's data: the table, the chart above it, CSV |
 | `src/web/src/components/ResultChart.tsx` | line / bar / kpi as inline SVG, from a spec |
+| `src/web/src/components/Dashboard.tsx` | one board: the grid, the insight, and **the only Refresh** |
+| `src/web/src/components/Tile.tsx` | one tile: its chart or table, its window, its delta |
 | `src/web/src/format.ts` | how a result value renders — cells, axis ticks, sort order |
 
 Two invariants: **the event log is the transcript** — replaying a chat replays its
@@ -153,11 +221,13 @@ items arrive as `[… tool, result, thinking, text]` and a rule that only moved 
 results left the table above the answer. The trace stays above; only data moves down, and a
 turn that produced no answer keeps its results where they are rather than hiding them.
 
-**The browser is two products, so it is two modes.** `Rail.tsx` owns the switch and the
-column beside it swaps whole — `ChatNav` or `DataNav`, never both. They shared one sidebar
-until the chat list stayed live and clickable while you were administering a database.
-The mode is read off the hash and nowhere else (`useHash`); a mirrored React copy
-disagreed with the address bar after a back button.
+**The browser is separate products, so it is separate modes.** `Rail.tsx` owns the switch
+and the column beside it swaps whole — `ChatNav`, `DashboardNav` or `DataNav`, never two.
+Chat and sources shared one sidebar until the chat list stayed live and clickable while you
+were administering a database. Boards sit between them because that is the order the work
+happens in: made in chat, bound to a source. The mode is read off the hash and nowhere else
+(`useHash`), as is which dashboard is open; a mirrored React copy disagreed with the address
+bar after a back button. A hash and not a router — three views do not justify one.
 
 `ChatHeader` is where "which source am I querying" lives: the chip carries the name, the
 health dot and `servingSummary` — the size of the model, which is what says a source is
@@ -230,6 +300,35 @@ result.
 
 ## Things that will cost you an hour
 
+- **`get_stream_writer()` fails two different ways, and a unit test hid the second.** With
+  no config at all it raises the documented `RuntimeError`. Calling a tool's own
+  `.ainvoke()` outside a graph produces a config that exists but holds no runtime, and the
+  lookup dies with `KeyError('__pregel_runtime')` — which sailed through the bare
+  `except RuntimeError` in `chat/events.py` and killed the call. Fourteen passing tests
+  missed it because the ones that assert on events **monkeypatch `emit`**, so the real
+  no-op path had no coverage until a script drove `add_tile` directly. When a fixture
+  replaces the thing under test, add one case without the fixture.
+- **`httpx` transport errors do not subclass `OSError`.** An `except OSError` around a Cube
+  call catches nothing useful — a plain `ConnectError` went straight through and 500'd the
+  whole dashboard page for a stopped container, which is the exact failure that branch
+  existed to prevent. The established pair here is `(CubeError, httpx.RequestError)`; grep
+  for an existing except-clause before writing a new one.
+- **A stored `dateRange` is not a window — Cube resolves it at execution time.** So
+  `"last 30 days"` moves on every refresh and `["2026-01-01", "2026-01-31"]` never does,
+  and nothing in the stored query distinguishes them. `LoadResult.resolved_ranges` reads
+  the range out of the query Cube *echoes back* (defensively — a body that does not look
+  right yields nothing, because a tile that cannot label its window is cosmetic and an
+  exception there would fail the query).
+- **A chart is chosen on the data, so it cannot be validated once.** `visualize.chart_for`
+  takes `rows` because bar count and series count are properties of the data, not the
+  query — guessing them from `limit` is how a query with no limit got three hundred bars.
+  Hence two entry points: `tiles.validate` when a tile is written, `tiles.outgrown` on
+  every refresh. A tile authored as twelve bars in January is four hundred by December and
+  nobody re-authors it.
+- **A head slice of a time series is the *oldest* rows.** `tiles.insight_slice` samples
+  across the whole span and forces the final bucket in, because an insight model handed
+  head-thirty will confidently describe a trend that has since reversed — the `MAX_POINTS`
+  lesson one layer up, with the model as the victim instead of the chart.
 - **A view's members are the cube's members again, so flattening every entity in
   `/v1/meta` counts the model twice.** The Serving panel reported "48 measures, 104
   dimensions" for a model with 72 members. Counts are over cubes only; a view's size is
@@ -384,7 +483,12 @@ result.
   same reason — the browser was matching on the word "down". Deleting the `analyst
   source` CLI was the same problem at a larger scale. `drivers.split_mounts` is the newest
   one: create and edit both have to turn a typed host path into a mount plus a container
-  path, and only one of them getting it right is a key file Cube cannot find.
+  path, and only one of them getting it right is a key file Cube cannot find. Dashboards
+  add two: `layout.validate` is what both the agent's `set_layout` and the browser's
+  `POST /{id}/layout` go through, and `run.source_mismatch` is the only thing standing
+  between a saved query and a number from the wrong warehouse — two sources can both have
+  `sales.revenue`, nothing downstream would error, and the tile would render a plausible
+  figure about a different database.
 - **A bind mount whose host path does not exist is not an error — docker creates an empty
   directory there.** For a key file that means Cube opens a folder and fails somewhere far
   away. `web.sources._paths` stats the file and 400s while the person is still looking at

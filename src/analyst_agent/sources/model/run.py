@@ -1,23 +1,4 @@
-"""The pipeline as four steps, each resumable from what the last one stored.
-
-    connect    start the container, wait for /readyz
-    cubes      read the catalog, select tables, emit cubes, install
-    describe   descriptions, measures and ai_context (LLM), install, repair
-    views      the view set (LLM), install, validate every measure across joins
-
-They run minutes or days apart, so nothing may survive only in memory. Each step
-writes what the next needs into `sources.db` through `state`: the catalog, the selected
-schema, the cube bodies, the enrichment decisions. `views` cannot be rebuilt from the
-YAML on disk — `views_prompt` needs the join graph and the cube decisions, and YAML has
-neither — which is what the stored state is for.
-
-Every trip into the container still goes through `publish.install`, so the
-write-restart-validate cycle is written once. `generate` runs all four in order for the
-CLI; the portal calls them one at a time.
-
-Progress goes out through `report`, called with a stage name and a dict. The CLI prints
-it; the web turns it into an event. Neither is assumed here.
-"""
+"""The pipeline as four steps, each resumable from what the last one stored."""
 
 import time
 from collections.abc import Callable
@@ -32,10 +13,7 @@ from .state import dump_enrichment, dump_schema, load_enrichment, load_schema
 from .warehouse import Schema
 
 Report = Callable[[str, dict], None]
-"""Progress sink, synchronous. `report("describe", {"done": 7, "total": 12, ...})`.
-
-The web's sink pushes onto an in-memory buffer and the CLI's prints; neither needs to
-await, and keeping it sync means the steps read as straight procedures."""
+"""Progress sink, synchronous. `report("describe", {"done": 7, "total": 12, ...})`."""
 
 
 class StepFailed(RuntimeError):
@@ -66,11 +44,7 @@ def _say(report: Report | None, stage: str, payload: dict) -> None:
 
 
 async def connect(source: Source, store: SourceStore, report: Report | None = None) -> StepResult:
-    """Create the container from this source's row and wait for Cube to say it is up.
-
-    Recreating rather than starting is deliberate: a container's environment is fixed
-    at creation, so this is also how an edited password takes effect.
-    """
+    """Create the container from this source's row and wait for Cube to say it is up."""
     model_dir = scaffold_source_dirs(source)
     _say(report, "connect", {"message": f"starting {source.service}"})
 
@@ -102,11 +76,7 @@ async def connect(source: Source, store: SourceStore, report: Report | None = No
 
 
 async def read_catalog(source: Source, store: SourceStore, report: Report | None = None) -> dict:
-    """Read every schema through a throwaway container and cache it on the source.
-
-    Separate from `cubes` because the picker sits between them: you cannot choose
-    tables before seeing them, and re-choosing must not boot another container.
-    """
+    """Read every schema through a throwaway container and cache it on the source."""
     _say(report, "cubes", {"message": "introspecting — one throwaway Cube container"})
     catalog = await read.read_catalog(source)
     if not catalog.schemas:
@@ -138,11 +108,7 @@ async def cubes(
     tables: list[str] | None = None,
     report: Report | None = None,
 ) -> StepResult:
-    """Emit and install the structural model for the selected tables.
-
-    `tables=None` takes everything in the schema. A selection is closed over foreign
-    keys first, so picking a fact table brings its dimensions with it.
-    """
+    """Emit and install the structural model for the selected tables."""
     # Reading is its own action so the picker has something to show before this runs,
     # but a first run with nothing cached should not fail with "read it first". One
     # place decides that, rather than each caller.
@@ -219,11 +185,7 @@ async def cubes(
 
 
 async def describe(source: Source, store: SourceStore, report: Report | None = None) -> StepResult:
-    """Descriptions, measures and ai_context, then install and repair what Cube refuses.
-
-    One model call per table, sequentially — this is the step that takes minutes, and
-    the only one where per-item progress means anything.
-    """
+    """Descriptions, measures and ai_context, then install and repair what Cube refuses."""
     schema, bodies = await _built(store, source.name)
 
     _say(report, "describe", {"message": "reading sample values"})
@@ -283,11 +245,7 @@ async def describe(source: Source, store: SourceStore, report: Report | None = N
 
 
 async def views(source: Source, store: SourceStore, report: Report | None = None) -> StepResult:
-    """Propose views over the join paths, install them, and probe across the joins.
-
-    Reads the cube decisions step 3 stored: a view exposes members by the names that
-    step chose, so without them the offered includes would not match the model.
-    """
+    """Propose views over the join paths, install them, and probe across the joins."""
     schema, bodies = await _built(store, source.name)
     state = await store.state(source.name)
     if "enrichment" not in state:
@@ -341,13 +299,7 @@ def _record(
     errors: dict | None = None,
     failure: str = "",
 ) -> dict:
-    """One step's stored record, as the panel renders it.
-
-    The only writer of this shape. `errors` are per-member problems from a step that
-    finished; `failure` is the step not finishing at all. Both make the row red, and
-    keeping them distinct is why the panel can say "1 measure dropped" rather than
-    calling a usable model broken.
-    """
+    """One step's stored record, as the panel renders it."""
     return {
         "status": "error" if errors or failure else "done",
         "finished_at": time.time(),
@@ -359,9 +311,9 @@ def _record(
 
 
 ACTIONS = ("connect", "read", "cubes", "describe", "views")
-"""Everything a job can run. `read` is the odd one: it produces the catalog the picker
-needs, so it must be triggerable on its own, but it records no step — the four in
-`store.STEPS` are the ones with a row in the panel."""
+"""Everything a job can run. `read` is the odd one: it produces the catalog the picker needs, so it
+must be triggerable on its own, but it records no step — the four in `store.STEPS` are the ones.
+"""
 
 
 async def action(
@@ -373,12 +325,7 @@ async def action(
     tables: list[str] | None = None,
     report: Report | None = None,
 ) -> StepResult:
-    """Run one action by name, recording success or failure on the source.
-
-    The single dispatcher. The CLI and the portal both decide *which* actions to run and
-    in what order; neither knows how to call one, so they cannot drift on the arguments,
-    on the order enforcement, or on what a failed step looks like in the database.
-    """
+    """Run one action by name, recording success or failure on the source."""
     if name not in ACTIONS:
         raise StepFailed(f"unknown action {name!r} — one of {', '.join(ACTIONS)}")
 
@@ -416,11 +363,7 @@ async def generate(
     enrich: bool = False,
     report: Report | None = None,
 ) -> dict[str, StepResult]:
-    """Every action in order. Stops at the first failure.
-
-    The portal runs them one at a time instead, because between reading the catalog and
-    choosing tables there is a person.
-    """
+    """Every action in order. Stops at the first failure."""
     planned = ["connect", "read", "cubes", *(["describe", "views"] if enrich else [])]
     return {
         name: await action(name, source, store, schema=schema, tables=tables, report=report)

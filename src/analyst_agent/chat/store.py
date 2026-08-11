@@ -1,11 +1,5 @@
-"""Chat history and the LangGraph checkpointer, sharing one SQLite file.
-
-The event log *is* the transcript. Replaying a chat replays its events, which means
-provenance — which query ran, what SQL, what the gate rejected — survives a server
-restart instead of dying with a per-request Session.
-
-Deltas never reach here. The service coalesces a turn's streamed fragments into one
-row per block before appending, so a reopened chat is a handful of reads.
+"""Chat history and the LangGraph checkpointer in one SQLite file. The event log *is* the
+transcript, so provenance survives a restart rather than dying with a per-request Session.
 """
 
 import json
@@ -189,11 +183,8 @@ class ChatStore:
     async def save_result(
         self, chat_id: str, turn_id: str, columns: list[dict], rows: list[dict]
     ) -> str:
-        """Keep a whole result set and return the handle the browser fetches it by.
-
-        Columns are named in the INSERT rather than relying on their order, which is what
-        `chats` and `events` do — those two cannot gain a column without breaking, and
-        there is no migration mechanism to fix them with.
+        """Keep a whole result set and return the handle the browser fetches it by. Columns are
+        named in the INSERT because there is no migration mechanism to fix an order with.
         """
         result_id = uuid.uuid4().hex
         async with self._db() as db:
@@ -214,11 +205,8 @@ class ChatStore:
         return result_id
 
     async def result(self, result_id: str) -> dict | None:
-        """One stored result, whole. Paging is the caller's slice.
-
-        The rows are a single JSON blob, so there is no SQL that could return page two on
-        its own — and at `max_rows` = 5000 the decode is cheaper than a schema that stores
-        a row per row.
+        """One stored result, whole; paging is the caller's slice. The rows are a single JSON blob,
+        so no SQL could return page two on its own.
         """
         async with self._db() as db:
             rows = await db.execute_fetchall("SELECT * FROM results WHERE id = ?", (result_id,))
@@ -236,10 +224,8 @@ class ChatStore:
         }
 
     async def replay_session(self, chat_id: str) -> tuple[list[QueryRecord], list[dict]]:
-        """Rebuild a Session's provenance from the log.
-
-        `explain_last_query` reads `session.executed[-1]`. Seeding it from the log is
-        what makes "show me the SQL for that" work on turn three, and after a restart.
+        """Rebuild a Session's provenance from the log, so `explain_last_query` still answers on
+        turn three and after a restart.
         """
         executed: list[QueryRecord] = []
         rejected: list[dict] = []

@@ -1,20 +1,5 @@
-"""Which chart a result should be drawn as, derived from the query that produced it.
-
-`describe.py` writes the sentence, `shape.py` writes the header, and this writes the
-picture — all three from the query itself rather than by asking the model. That is what
-makes a chart free, instant on a replayed transcript, and incapable of plotting a column
-nobody fetched.
-
-**Returning `None` is a correct answer and the common one.** Two dimensions crossed, forty
-categories, a raw timestamp per row — those are tables, and a chart drawn of them is worse
-than no chart. The agent can override with `set_chart` when it disagrees; the point of the
-default is that it is never wrong, not that it is always present.
-
-One measure per line or bar, deliberately. Revenue in thousands and order count in tens
-share an axis badly enough that the smaller series becomes a flat line on zero, and
-`format` does not separate them — two currency measures can differ by three orders of
-magnitude just as easily. So a multi-measure query plots its first measure and the spec
-says which; the table beside it carries them all.
+"""Which chart a result should be drawn as, derived from the query. **`None` is a correct and
+common answer**; one measure per line or bar, since mixed magnitudes flatten the smaller.
 """
 
 from dataclasses import dataclass, field
@@ -23,22 +8,19 @@ from .catalog import Catalog
 from .shape import Column, columns_of
 
 MAX_BARS = 25
-"""Above this a bar chart is a picket fence with unreadable labels. `order` plus `limit` is
-how a question asks for a top-N, and the answer to "revenue by customer" over 300 customers
-is the table."""
+"""Above this a bar chart is a picket fence. `order` plus `limit` is how a question asks for
+a top-N; the answer to "revenue by customer" over 300 customers is the table.
+"""
 
 MAX_SERIES = 8
-"""Distinct values a dimension may have before it stops being a legible set of lines.
-
-Also the size of the renderer's categorical palette, which is validated to eight slots and
-never cycles — so a ninth series is refused here rather than drawn in a repeated colour."""
+"""Distinct dimension values before lines stop being legible, and the palette's slot count
+— a ninth series is refused rather than drawn in a repeated colour.
+"""
 
 MAX_POINTS = 100
-"""Rows a chart may be drawn from, and the number of rows the `tool_end` event carries.
-
-One constant for both on purpose. The browser draws from the event so a replayed transcript
-needs no requests, and a chart offered for more rows than the event holds would quietly
-plot the first hundred of four hundred months as if that were the whole series."""
+"""Rows a chart may be drawn from, and the rows a `tool_end` event carries. One constant, or
+a chart would plot the first hundred of four hundred months as if it were the series.
+"""
 
 
 @dataclass
@@ -54,16 +36,9 @@ class ChartSpec:
     """Column whose values split `y` into one line each. Empty for a single series."""
 
 
-def _distinct(rows: list[dict], column: Column) -> int:
-    return len({str(row.get(column.id)) for row in rows})
-
-
 def chart_for(query: dict, catalog: Catalog, rows: list[dict]) -> ChartSpec | None:
-    """The chart for this result, or `None` when the table is the better answer.
-
-    `rows` is read for cardinality only — how many bars, how many series. Those are
-    properties of the data rather than the query, and guessing them from `limit` was how a
-    query with no limit at all got a chart with three hundred bars.
+    """The chart for this result, or `None` when the table is the better answer. `rows` is read
+    for cardinality only — guessing bar count from `limit` gave an unlimited query 300 bars.
     """
     columns = columns_of(query, catalog)
     axes = [c for c in columns if c.kind == "time"]
@@ -84,7 +59,7 @@ def chart_for(query: dict, catalog: Catalog, rows: list[dict]) -> ChartSpec | No
         if not dimensions:
             return ChartSpec(type="line", x=axis.id, y=[measures[0].id])
         series = dimensions[0]
-        count = _distinct(rows, series)
+        count = len({str(row.get(series.id)) for row in rows})
         # One distinct value is a single line that a legend would only clutter.
         if count == 1:
             return ChartSpec(type="line", x=axis.id, y=[measures[0].id])
@@ -105,11 +80,8 @@ def chart_for(query: dict, catalog: Catalog, rows: list[dict]) -> ChartSpec | No
 
 
 def validate_spec(spec: dict, columns: list[Column]) -> tuple[ChartSpec | None, list[str]]:
-    """Check an agent-authored spec against the columns the result actually has.
-
-    The same shape of guard as the query gate: a rejection comes back as text the agent can
-    act on, never an exception, and a chart is never drawn from a column id that was not in
-    the result. Nothing here trusts that the model read the header correctly.
+    """Check an agent-authored spec against the columns the result actually has. A rejection is
+    text the agent can act on, never an exception.
     """
     by_id = {c.id: c for c in columns}
     kind = str(spec.get("type", ""))

@@ -1,22 +1,4 @@
-"""Stage 1 — read the database, through Cube's own driver.
-
-Cube reports columns but not constraints, and it has no arbitrary-SQL endpoint —
-but a cube's `sql:` may be any SELECT. So one throwaway Cube container, holding
-nothing but probe cubes, answers all three questions:
-
-    GET  /playground/db-schema   tables, columns, types   (needs dev mode)
-    POST /v1/load                primary and foreign keys (pg_constraint)
-    POST /v1/load                cardinality, null rates  (pg_stats)
-
-No second database driver, no credentials of our own, and the live source
-container is never touched.
-
-**Every schema is read at once, not the one being modelled.** The catalog queries are
-two catalog reads whatever the table count, so reading everything costs the same as
-reading one schema — and it means the table picker is instant and offline, and
-re-picking never boots another container. The result is cached in `sources.db`; the
-selection that follows is a pure filter in `selection.py`.
-"""
+"""Stage 1 — read the database, through Cube's own driver."""
 
 import asyncio
 import shutil
@@ -129,11 +111,7 @@ class Catalog:
 
 
 async def read_catalog(source: Source, timeout: float = BOOT_TIMEOUT_S) -> Catalog:
-    """Start one throwaway Cube container, read every schema, remove it.
-
-    Credentials come from the source's row and go in as `-e`, the same way its own
-    container is started — there is no credential file to point `--env-file` at.
-    """
+    """Start one throwaway Cube container, read every schema, remove it."""
     if not docker.installed():
         raise RuntimeError("docker not found")
     if not source.credentials:

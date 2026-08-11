@@ -1,5 +1,5 @@
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 import jwt
@@ -13,12 +13,8 @@ MIN_SECRET_BYTES = 32
 
 
 def mint_token(security_context: dict, ttl_s: int = 900) -> str:
-    """Sign the security context Cube requires.
-
-    The same secret has to reach the container as CUBEJS_API_SECRET, so a short one
-    cannot be fixed on this side alone — both halves change together, then the
-    container restarts. Failing here is louder than a warning printed per request and
-    points at the actual fix.
+    """Sign the security context Cube requires. Refusing a short secret is louder than pyjwt
+    warning per request; the same value must reach the container as CUBEJS_API_SECRET.
     """
     if len(settings.cube_api_secret.encode()) < MIN_SECRET_BYTES:
         raise ValueError(
@@ -44,6 +40,9 @@ class CompileResult:
 class LoadResult:
     rows: list[dict]
     duration_ms: int
+    resolved_ranges: dict[str, list[str]] = field(default_factory=dict)
+    """The dateRange Cube resolved, per time dimension. Relative ranges resolve at execution
+    time, so this is the only thing that says whether a refresh moved a tile's window."""
 
 
 class CubeError(RuntimeError):
@@ -84,9 +83,20 @@ class CubeClient:
         if r.status_code != 200:
             raise CubeError(_error_text(r))
         body = r.json()
+
+        # The window Cube resolved, read off the query it echoes back. Defensively: a tile
+        # that cannot label its window is cosmetic, and raising here would fail the query.
+        ranges: dict[str, list[str]] = {}
+        for td in (body.get("query") or {}).get("timeDimensions") or []:
+            member = td.get("dimension")
+            window = td.get("dateRange")
+            if member and isinstance(window, list) and len(window) == 2:
+                ranges[str(member)] = [str(window[0]), str(window[1])]
+
         return LoadResult(
             rows=body.get("data", []),
             duration_ms=int((time.perf_counter() - started) * 1000),
+            resolved_ranges=ranges,
         )
 
 

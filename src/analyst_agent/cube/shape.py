@@ -1,14 +1,5 @@
-"""What a result set looks like, derived from the query that produced it.
-
-The same argument as `describe.py`: a Cube query is structured data, so its result's
-header is deterministic, free, testable, and cannot describe a column that was never
-requested. Nothing here asks the model anything.
-
-This is the one place that decides column order, labels, alignment and number format, and
-it has two callers — the stored result the browser renders, and `visualize.chart_for`,
-which picks a chart by reading these kinds rather than re-deriving them. One rule, one
-place: a header that disagreed with the chart's idea of which column held the measure
-would put the wrong series on the wrong axis.
+"""What a result set looks like, derived from the query. The one place deciding column order,
+labels, alignment and format — `visualize.chart_for` reads these kinds rather than re-deriving.
 """
 
 from dataclasses import dataclass
@@ -16,29 +7,23 @@ from dataclasses import dataclass
 from .catalog import Catalog
 
 GRAINS = ("year", "quarter", "month", "week", "day", "hour", "minute", "second")
-"""Cube's time granularities, longest period first. Mirrored by `GRAINS` in
-`src/web/src/format.ts`, which reads the same suffix to label an axis — the two are a pair,
-and a grain added to one belongs in the other."""
+"""Cube's granularities, longest first. Paired with `GRAINS` in `src/web/src/format.ts` —
+a grain added to one belongs in the other.
+"""
 
 
 @dataclass
 class Column:
-    """One column of a result set, ready to render.
-
-    `id` is the key in every row dict. Cube returns fully qualified member ids, and for a
-    time dimension grouped by a granularity it appends the grain — `invoice.date.month` —
-    so a column id cannot be assumed to name a member the catalog knows.
+    """One column, ready to render. `id` is the row-dict key: Cube appends the grain to a
+    grouped time dimension, so a column id need not name a member the catalog knows.
     """
 
     id: str
     label: str
     kind: str
-    """time | dimension | measure — what the column is *for*, not Cube's member kind.
-
-    `time` means a grouped `timeDimensions` entry, and nothing else: it is the one thing a
-    line chart can use as an x axis. A `dimensions` entry of type `time` has no grain, so
-    it is a detail column — `kind` is `dimension` and `type` is what says to format it as
-    a date."""
+    """time | dimension | measure — what the column is *for*, not Cube's member kind. `time` is
+    a grouped `timeDimensions` entry, the only thing a line chart can use as an x axis.
+    """
     type: str
     format: str
     """Cube's display format for a measure — `currency`, `percent`, or empty."""
@@ -46,10 +31,8 @@ class Column:
 
 
 def label_of(member_id: str, catalog: Catalog) -> str:
-    """A column heading: Cube's own short title, else the bare member name.
-
-    Deliberately not `describe._title`, which lowercases for use mid-sentence. A heading
-    keeps the case Cube was given.
+    """A column heading: Cube's short title, else the bare member name. Not `describe._title`,
+    which lowercases for mid-sentence use.
     """
     doc = catalog.get(member_id)
     if doc and doc.title:
@@ -58,13 +41,8 @@ def label_of(member_id: str, catalog: Catalog) -> str:
 
 
 def export_value(value: object, column: Column) -> str:
-    """One cell for a CSV.
-
-    Numbers stay raw — a spreadsheet wants 12404.50, not "$12,404.50", and grouping
-    separators would make the column text in half the world's locales. Dates lose the
-    `T00:00:00.000` that Cube pads every grain of a day or longer with, because a column
-    headed "Year" holding `2021-01-01T00:00:00.000` reads as a bug. What is left is still
-    ISO, so it parses everywhere.
+    """One CSV cell. Numbers stay raw for the spreadsheet, and a grain of a day or longer loses
+    the `T00:00:00.000` Cube pads it with.
     """
     if value is None:
         return ""
@@ -80,12 +58,8 @@ def export_value(value: object, column: Column) -> str:
 
 
 def columns_of(query: dict, catalog: Catalog) -> list[Column]:
-    """The header for `query`'s result, in the order a reader wants it.
-
-    Time axis, then the other dimensions, then the measures — labels before numbers, which
-    is the opposite of the order a Cube query lists them in. `describe_query` draws the
-    same line for its sentence ("revenue by month"), and the two agreeing is why a chart's
-    axis titles match the table's headings.
+    """The header for `query`'s result: time axis, then dimensions, then measures — labels
+    before numbers, the opposite of the order a Cube query lists them in.
     """
     times: list[Column] = []
     dimensions: list[Column] = []

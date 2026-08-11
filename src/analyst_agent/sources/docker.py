@@ -1,23 +1,4 @@
-"""Container lifecycle for one source, straight from its row in sources.db.
-
-There is no generated compose file. A source is `docker run` with its credentials as
-`-e`, which is why one INSERT plus one command is a working source and why nothing on
-disk can drift from the registry. The probe container in `model/read.py` has always
-worked this way; now the source containers do too.
-
-Every call is `create_subprocess_exec`, never `subprocess.run`. These run inside the
-web server while a chat is streaming, and a blocking `docker restart` would stall the
-event loop for the six seconds Cube takes to come back — freezing the transcript of a
-conversation that has nothing to do with the job.
-
-Two things about `docker run` that cost time to discover:
-
-  * **A container's environment cannot be changed.** Editing a password means remove
-    and recreate, which is why `create` removes any existing container first rather
-    than trying to start one.
-  * **`--network` needs a network that already exists.** Compose would have made one;
-    nothing does now, so `ensure_network` runs before every create.
-"""
+"""Container lifecycle for one source, straight from its row in sources.db."""
 
 import asyncio
 import shutil
@@ -95,11 +76,7 @@ async def ensure_network() -> Result:
 
 
 def argv(source: Source, model_dir: Path, *, api_secret: str, dev_mode: bool = False) -> list[str]:
-    """The full `docker run` argument list. Pure, so it can be asserted in a test.
-
-    Credentials go in as `-e`, which puts them in `docker inspect` — the accepted
-    trade for having no credential file and no compose file to regenerate.
-    """
+    """The full `docker run` argument list. Pure, so it can be asserted in a test."""
     spec = source.spec
     environment = {
         **credentials_for(spec, source.credentials),
@@ -134,11 +111,7 @@ def argv(source: Source, model_dir: Path, *, api_secret: str, dev_mode: bool = F
 
 
 async def create(source: Source, model_dir: Path, *, api_secret: str, dev_mode: bool = False):
-    """Replace this source's container with a fresh one built from its current row.
-
-    Removes first: a container's environment is fixed at creation, so this is also how
-    a credential edit takes effect.
-    """
+    """Replace this source's container with a fresh one built from its current row."""
     network = await ensure_network()
     if not network.ok:
         return network
@@ -171,11 +144,7 @@ async def logs(container: str, tail: int = 200) -> str:
 
 
 async def ours() -> dict[str, str]:
-    """Container name -> docker's state word, for every `cube-*` container.
-
-    Includes stopped ones: with no compose file, "the row exists but the container does
-    not" is a state the UI has to render, and so is "exists but exited".
-    """
+    """Container name -> docker's state word, for every `cube-*` container."""
     result = await run(
         "ps",
         "--all",
@@ -196,25 +165,12 @@ async def ours() -> dict[str, str]:
 
 
 async def cubestore_running() -> bool:
-    """Whether the shared Cube Store is up.
-
-    Matched on a substring, not anchored: compose prefixes container names with its
-    project, so the router is `analyst-ds-cubestore-router-1` while the name sources
-    resolve it by is the service alias on the network.
-
-    Sources still answer queries without it, but pre-aggregations fail — so the panel
-    says so rather than leaving it a mystery.
-    """
+    """Whether the shared Cube Store is up."""
     result = await run("ps", "--filter", f"name={CUBESTORE_HOST}", "--format", "{{.State}}")
     return result.ok and "running" in result.out
 
 
 def orphans(containers: dict[str, str], known: list[str]) -> list[str]:
-    """`cube-*` containers with no source row — usually a removal that half-finished.
-
-    Checks the prefix itself rather than trusting `ours()` to have filtered: this
-    decides what the UI offers to delete, and it must never name something that was
-    never ours.
-    """
+    """`cube-*` containers with no source row — usually a removal that half-finished."""
     expected = {f"{PREFIX}{name}" for name in known}
     return sorted(name for name in containers if name.startswith(PREFIX) and name not in expected)

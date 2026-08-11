@@ -1304,20 +1304,33 @@ textarea {
   font-size: 12px;
 }
 
-/* ---------- the chart above the table ----------
-   Eight categorical slots, assigned in fixed order and never cycled — `chart_for` caps
-   series at eight so a ninth is refused rather than repeated. Both columns were validated
-   against this app's own surfaces (--raised) for the lightness band, chroma floor,
-   colourblind separation of adjacent pairs, and contrast. Three light slots sit under 3:1
-   against white; the palette's relief rule is met by the table directly below every chart,
-   which is why the chart is never the only way to read a value. */
+/* ---------- the categorical palette ----------
+   Eight slots, assigned in fixed order and never cycled — `visualize.MAX_SERIES` caps
+   series at eight so a ninth is refused rather than repeated. The order is the
+   colourblind-safety mechanism and does not change; only a slot's lightness ever moves.
+   Both columns are validated against this app's own surfaces (--raised, the lightest in
+   each mode and so the worst case) for the lightness band, the chroma floor, adjacent-pair
+   separation under protanopia and deuteranopia, and contrast.
+
+   **Every slot clears 3:1 unaided, in both modes.** It did not always: aqua, yellow and
+   magenta sat at 2.82, 2.17 and 2.69 against white, and were legal only because a table
+   sits directly below every chart in the transcript supplying the relief. That made the
+   table load-bearing — and a dashboard tile has no table under it, so the three hues were
+   re-stepped down the lightness axis (hue and slot order held, chroma kept above the 0.10
+   floor) until they passed alone. One palette rather than a second one for tiles: two sets
+   of eight tokens would drift, and the stricter set is correct everywhere.
+
+   The cost, so it is not rediscovered as a bug: those three are slightly darker and less
+   saturated than the reference palette they came from, and adjacent tritan separation went
+   from 5.8 to 4.3. Tritan is reported but not gated — the standard measures protan and
+   deuteranopia, where the worst adjacent pair improved from 9.1 to 9.7. */
 
 :root {
   --series-1: #2a78d6;
   --series-2: #eb6834;
-  --series-3: #1baf7a;
-  --series-4: #eda100;
-  --series-5: #e87ba4;
+  --series-3: #3ba67a;
+  --series-4: #c98700;
+  --series-5: #dd719a;
   --series-6: #008300;
   --series-7: #4a3aa7;
   --series-8: #e34948;
@@ -1326,7 +1339,8 @@ textarea {
 
 @media (prefers-color-scheme: dark) {
   :root {
-    /* The same eight hues stepped for the dark surface, not an automatic flip. */
+    /* The same eight hues stepped for the dark surface, not an automatic flip. These
+       already cleared 3:1 against --raised unaided, so nothing here was re-stepped. */
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;
@@ -3276,4 +3290,290 @@ button.danger.solid {
 
 .ground-body th {
   background: var(--panel);
+}
+
+/* ---------- dashboards ----------
+   All new names, all prefixed. `.nav*` above is deliberately *reused* by DashboardNav —
+   that vocabulary is the shared sidebar chrome, and a `.nav-row-meta` beside the existing
+   `.nav-row-sub` is how two near-identical rules start to drift. Everything below has no
+   counterpart, so it gets its own prefix rather than borrowing `.panel` or `.res`. */
+
+.dash {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 18px 22px 40px;
+}
+
+.dash-fail {
+  padding: 28px 22px;
+  color: var(--bad);
+}
+
+.dash-fail.muted {
+  color: var(--faint);
+}
+
+.dash-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.dash-title h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.dash-meta {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.dash-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 7px;
+}
+
+/* `>` so a control rendered by a child component is not restyled by this row. That is the
+   `.detail-primary button` trap, which turned an overflow menu into bordered grey boxes. */
+.dash-actions > button {
+  min-height: var(--control);
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.dash-actions > button.primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+}
+
+.dash-actions > button.danger {
+  color: var(--bad);
+}
+
+.dash-actions > button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.dash-banner {
+  margin-bottom: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.dash-banner strong {
+  display: block;
+}
+
+.dash-banner.warn {
+  border-color: color-mix(in srgb, var(--warn) 40%, var(--line));
+  color: var(--warn);
+}
+
+.dash-banner.bad {
+  border-color: color-mix(in srgb, var(--bad) 40%, var(--line));
+  color: var(--bad);
+}
+
+.dash-banner.muted {
+  color: var(--faint);
+}
+
+/* The run's summary paragraph, stamped with when. An insight is a claim about numbers, so
+   one with no "as of" attached invites being quoted long after the data moved. */
+.dash-insight {
+  max-width: 74ch;
+  margin: 0 0 16px;
+  color: var(--ink);
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+
+.dash-insight-when {
+  color: var(--faint);
+}
+
+.dash-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.dash-cell {
+  min-width: 0;
+}
+
+.dash-tile {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+}
+
+.dash-tile-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px 6px;
+}
+
+.dash-tile-head h3 {
+  overflow: hidden;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The window Cube actually resolved. On every tile that filters by time, because it is the
+   only thing that says whether this tile's numbers moved with the refresh. */
+.dash-tile-window {
+  flex-shrink: 0;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+
+.dash-tile-chart {
+  padding: 2px 8px 8px;
+}
+
+.dash-tile-empty {
+  margin: 0;
+  padding: 18px 12px 22px;
+  color: var(--faint);
+  font-size: 12.5px;
+}
+
+.dash-tile-broken {
+  padding: 10px 12px 14px;
+  color: var(--bad);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.dash-tile-note {
+  margin: 0;
+  padding: 6px 12px 9px;
+  border-top: 1px solid var(--line);
+  color: var(--faint);
+  font-size: 11.5px;
+}
+
+/* Wide content scrolls inside its own box. The page body must never scroll sideways, and a
+   tile is the narrowest thing on it. */
+.dash-tile-table {
+  overflow-x: auto;
+}
+
+.dash-tile-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.dash-tile-table th,
+.dash-tile-table td {
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.dash-tile-table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.dash-tile-table th.right,
+.dash-tile-table td.right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-tile-more {
+  margin: 0;
+  padding: 6px 12px;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.dash-kpi-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px 26px;
+  padding: 6px 12px 16px;
+}
+
+.dash-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dash-kpi-value {
+  font-size: 25px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+
+.dash-kpi-label {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+/* An arrow and a sign both carry direction, so colour is never the only cue — the same rule
+   the chart palette follows, for the same reason. */
+.dash-delta {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-delta.up {
+  color: var(--ok);
+}
+
+.dash-delta.down {
+  color: var(--bad);
+}
+
+.dash-delta.flat {
+  color: var(--faint);
+}
+
+.dash-empty {
+  max-width: 46ch;
+  padding: 32px 0;
+  color: var(--faint);
+}
+
+.dash-empty h3 {
+  margin: 0 0 6px;
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.dash-empty p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
 }

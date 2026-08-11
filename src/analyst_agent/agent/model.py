@@ -12,11 +12,8 @@ RESPONSES_API_MIN_VERSION = "2025-03-01-preview"
 
 
 def build_model(**overrides) -> BaseChatModel:
-    """Resolve settings.query_model into a chat model.
-
-    Azure routes by deployment, not model name, so the endpoint/version/deployment
-    have to be passed explicitly — a provider-prefixed string alone can't carry them.
-    Any other provider prefix falls through to init_chat_model untouched.
+    """Resolve settings.query_model into a chat model. Azure routes by deployment, so
+    endpoint/version/deployment are explicit; other prefixes fall through to init_chat_model.
     """
     kwargs: dict = {}
     if settings.query_model.startswith(AZURE_PREFIX):

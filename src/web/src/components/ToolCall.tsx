@@ -58,6 +58,9 @@ export function ToolCall({
   else if (tool === "run_query")
     summary = `${end?.rows_total ?? 0} rows · ${duration(end?.duration_ms ?? ms)}`;
   else if (tool === "search_model") summary = `${end?.hits ?? 0} matches`;
+  // A dashboard tool's whole event is its note, so that is the summary. Everything else
+  // falls back to how long it took, which is all there is to say about it.
+  else if (end?.note) summary = end.note;
   else summary = duration(ms);
 
   const hasDetail = Boolean(query || end?.sql || end?.errors?.length || end?.warnings?.length);

@@ -1,18 +1,4 @@
-"""Stage 4 — write the model, and let Cube be the judge.
-
-Writing our own YAML checker would be a second, weaker opinion about what Cube
-accepts. So the candidate model goes to the source's own container and Cube says
-what is wrong, in errors precise enough to repair from, e.g.
-`primary key for 'album' is required when join is defined`.
-
-    restart          load the new files (Cube Core does not hot-reload)
-    GET  /v1/meta    compile errors, and the members that survived
-    POST /v1/sql     per member: compiles SQL without executing it, so no
-                     warehouse cost and no rows read
-
-`install` is the whole cycle — write, restart, ask — and is the only way the model
-reaches the container.
-"""
+"""Stage 4 — write the model, and let Cube be the judge."""
 
 import asyncio
 from copy import deepcopy
@@ -122,12 +108,7 @@ def view_body(view: ViewDecision) -> dict:
 
 
 def build_files(bodies: dict[str, dict], enrichment: Enrichment | None = None) -> dict[str, str]:
-    """The files to write. Without an enrichment this is the deterministic model.
-
-    Takes the bodies `emit_cubes` produced — the structural rules, including dropping
-    joins that have no primary key, live there and only there. Copies before layering,
-    so the same bodies can be enriched again after a repair.
-    """
+    """The files to write. Without an enrichment this is the deterministic model."""
     files = {
         f"cubes/{name}.yml": dump(
             {"cubes": [apply_cube(deepcopy(body), enrichment and enrichment.cubes.get(name))]}
@@ -143,12 +124,8 @@ def build_files(bodies: dict[str, dict], enrichment: Enrichment | None = None) -
 
 
 def write(source: Source, files: dict[str, str], root: Path | None = None) -> None:
-    """Replace the model. Every `*.yml` goes first, so a cube that is no longer emitted
-    does not linger and keep compiling.
-
-    Destructive on purpose and with no undo of its own: the model directory is the
-    user's, and version control is what rolls it back. A rebuild that discards views is
-    a diff they can read, which is more than a one-deep snapshot ever told them.
+    """Replace the model. Every `*.yml` goes first, so a cube that is no longer emitted does not
+    linger and keep compiling.
     """
     model_dir = source.model_dir(root or project_root())
     for existing in model_dir.rglob("*.yml"):
@@ -157,15 +134,6 @@ def write(source: Source, files: dict[str, str], root: Path | None = None) -> No
         target = model_dir / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(body)
-
-
-async def restart(source: Source) -> bool:
-    """Cube Core does not hot-reload model files; only a restart loads what was written.
-
-    Async because this runs inside the web server: six seconds of blocking here would
-    freeze the SSE stream of any chat in progress.
-    """
-    return (await docker.restart(source.service)).ok
 
 
 async def install(
@@ -178,7 +146,8 @@ async def install(
 ) -> Validation:
     """Write the model, restart Cube, and report what Cube makes of it."""
     write(source, files)
-    if not await restart(source):
+    # Cube Core does not hot-reload model files; only a restart loads what was written.
+    if not (await docker.restart(source.service)).ok:
         return Validation(compile_error=f"could not restart {source.service}")
     return await check(source, members=members, every_measure=every_measure, enrichment=enrichment)
 
@@ -190,18 +159,7 @@ async def check(
     members: bool = True,
     enrichment: Enrichment | None = None,
 ) -> Validation:
-    """Read compile errors from /v1/meta, then compile queries through /v1/sql.
-
-    `every_measure` tests each measure individually — a bad `sql:` expression only
-    fails when that measure is used, so a per-cube count would miss it.
-
-    `enrichment` adds a second probe per view measure, pairing it with a dimension
-    from a different join path. A measure queried on its own never joins, so tested
-    that way it can ship with an ambiguous column reference and fail on first real use.
-
-    `members=False` stops after the compile check. Used before enrichment, where the
-    model is about to be rewritten and revalidated anyway.
-    """
+    """Read compile errors from /v1/meta, then compile queries through /v1/sql."""
     out = Validation()
 
     # Poll /v1/meta until it serves a compiled model. Startup races look like errors
@@ -305,11 +263,7 @@ async def check(
 async def _probe(
     client: httpx.AsyncClient, source: Source, member: str, context: str, endpoint: str, query: dict
 ) -> tuple[str, str, str]:
-    """One coroutine per probe, so `check` can gather them.
-
-    `sql` compiles and runs nothing. `load` executes — needed because Cube compiles an
-    ambiguous column reference happily and only the database objects to it.
-    """
+    """One coroutine per probe, so `check` can gather them."""
     try:
         r = await client.post(f"{source.url}/cubejs-api/v1/{endpoint}", json={"query": query})
     except httpx.RequestError as exc:

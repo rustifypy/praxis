@@ -5,6 +5,8 @@ import { AddSource } from "./components/AddSource";
 import { Answer } from "./components/Answer";
 import { ChatHeader } from "./components/ChatHeader";
 import { ChatNav } from "./components/ChatNav";
+import { Dashboard } from "./components/Dashboard";
+import { DashboardNav } from "./components/DashboardNav";
 import type { ComposerHandle } from "./components/Composer";
 import { Composer } from "./components/Composer";
 import { DataNav } from "./components/DataNav";
@@ -19,7 +21,7 @@ import { applyEvent, buildTranscript } from "./events";
 import { useHash } from "./hooks";
 import * as sourcesApi from "./sources";
 import type { DriverSpec, JobState, SourceRow, System } from "./sources";
-import type { Chat, Item } from "./types";
+import type { Chat, DashboardRow, Item } from "./types";
 
 /** What the agent is doing right now, read off the tail of the transcript. */
 function statusOf(items: Item[], busy: boolean): string {
@@ -44,10 +46,20 @@ export default function App() {
   // Which mode the rail is on. A hash rather than a router: three views do not justify
   // one, and the hash is the only state — a mirrored React copy let the two disagree.
   const hash = useHash();
-  const view: "chat" | "sources" = hash.startsWith("#sources") ? "sources" : "chat";
+  const view: "chat" | "dashboards" | "sources" = hash.startsWith("#sources")
+    ? "sources"
+    : hash.startsWith("#boards")
+      ? "dashboards"
+      : "chat";
   const selected = hash.startsWith("#sources/")
     ? decodeURIComponent(hash.slice("#sources/".length))
     : null;
+  // Which dashboard is open, read off the hash for the same reason the mode is: a mirrored
+  // React copy disagreed with the address bar after a back button.
+  const openBoard = hash.startsWith("#boards/")
+    ? decodeURIComponent(hash.slice("#boards/".length))
+    : null;
+  const [dashboards, setDashboards] = useState<DashboardRow[]>([]);
   const [system, setSystem] = useState<System>({ ok: true });
   const [sources, setSources] = useState<SourceRow[]>([]);
   const [nextPort, setNextPort] = useState(4001);
@@ -70,6 +82,22 @@ export default function App() {
     pinned.current = true;
     setItems(buildTranscript(await api.chatEvents(id)));
   }, []);
+
+  const refreshDashboards = useCallback(async () => {
+    try {
+      setDashboards(await api.listDashboards());
+    } catch {
+      /* The page itself reports why; an empty list is the honest fallback. */
+    }
+  }, []);
+
+  const showBoards = useCallback(
+    (id?: string) => {
+      window.location.hash = id ? `#boards/${encodeURIComponent(id)}` : "#boards";
+      void refreshDashboards();
+    },
+    [refreshDashboards],
+  );
 
   const refreshSources = useCallback(async () => {
     // All three concurrently: /api/system spawns docker, and awaiting it after the
@@ -98,6 +126,7 @@ export default function App() {
         setCubeUrl(catalog.cube_url ?? "");
         setEntities(catalog.entities ?? []);
         if (loaded.length) await open(loaded[0].id);
+        await refreshDashboards();
       } catch (err) {
         setFatal(String(err));
       }
@@ -111,7 +140,7 @@ export default function App() {
         /* /api/system reports why; the panel says so itself. */
       }
     })();
-  }, [open, refreshSources]);
+  }, [open, refreshSources, refreshDashboards]);
 
   // Follow a running job, and re-attach to one already in flight after a refresh — the
   // server replays its buffer before going live, so both are the same code path.
@@ -233,10 +262,30 @@ export default function App() {
       <Rail
         view={view}
         jobRunning={Boolean(job && !job.done)}
-        onSelect={(next) => (next === "chat" ? (window.location.hash = "") : showSources())}
+        onSelect={(next) => {
+          if (next === "chat") window.location.hash = "";
+          else if (next === "dashboards") showBoards();
+          else showSources();
+        }}
       />
 
-      {view === "chat" ? (
+      {view === "dashboards" ? (
+        <DashboardNav
+          dashboards={dashboards}
+          selected={openBoard}
+          activeSource={sources.find((s) => s.active)?.name ?? ""}
+          onOpen={(id) => showBoards(id)}
+          onCreate={async () => {
+            try {
+              const made = await api.createDashboard("New dashboard");
+              await refreshDashboards();
+              showBoards(made.id);
+            } catch (err) {
+              window.alert(String(err));
+            }
+          }}
+        />
+      ) : view === "chat" ? (
         <ChatNav
           chats={chats}
           activeId={activeId}
@@ -286,7 +335,26 @@ export default function App() {
         />
       )}
 
-      {view === "sources" ? (
+      {view === "dashboards" ? (
+        <main className="main">
+          {openBoard ? (
+            <Dashboard
+              id={openBoard}
+              onRenamed={() => void refreshDashboards()}
+              onDeleted={() => {
+                void refreshDashboards();
+                showBoards();
+              }}
+            />
+          ) : (
+            <div className="dash-fail muted">
+              {dashboards.length
+                ? "Pick a dashboard on the left."
+                : "No dashboards yet. Create one, then ask in chat to add tiles to it."}
+            </div>
+          )}
+        </main>
+      ) : view === "sources" ? (
         <main className="main">
           {selected && sources.some((s) => s.name === selected) ? (
             <SourceDetail

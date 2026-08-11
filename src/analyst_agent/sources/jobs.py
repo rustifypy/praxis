@@ -1,22 +1,4 @@
-"""One job at a time, held in memory, watched over SSE.
-
-A job is not stored. It exists while it runs, its events go to whoever is watching, and
-what it achieved is written onto the source's `steps` as it goes. Refreshing the page
-re-attaches to a running job because the buffer lives here; restarting the server loses
-the narration but not the outcome, which is already in `sources.db`.
-
-**One at a time, machine-wide.** `model/read.py` names its probe container
-`analyst-probe` and removes it on entry and on exit, so two model generations destroy
-each other. A `flock` on a file next to sources.db is what stops that. The lock is
-machine-wide rather than per-process because the probe container is: two `analyst`
-processes, on different ports and different data directories, still share one docker
-daemon and one `analyst-probe`.
-
-**Cancelling does not roll anything back.** It sets an event and the job reports itself
-cancelled; whatever a step had already installed stays installed, and the model directory
-is version-controlled by whoever owns it, so `git checkout` is the way back. An earlier
-version of this docstring promised a rollback that was never implemented.
-"""
+"""One job at a time, held in memory, watched over SSE."""
 
 import asyncio
 import contextlib
@@ -41,12 +23,7 @@ class Busy(RuntimeError):
 
 @contextlib.contextmanager
 def hold(description: str):
-    """Take the machine-wide job lock, or raise `Busy` naming the current holder.
-
-    `flock` releases when the file closes, including on a crash, so a killed process
-    cannot leave the portal permanently locked. The description is written into the file
-    purely so the refusal can be specific.
-    """
+    """Take the machine-wide job lock, or raise `Busy` naming the current holder."""
     path = settings.sources_db_path.parent / LOCK_NAME
     path.parent.mkdir(parents=True, exist_ok=True)
     handle = path.open("a+")
@@ -117,11 +94,7 @@ class Runner:
         return self.job is not None and not self.job.done
 
     def emit(self, type: str, **data) -> Event:
-        """Append an event and hand it to every watcher. Never blocks on a slow reader.
-
-        A queue that has filled up belongs to a browser that stopped reading; dropping
-        its events is better than stalling the job for it.
-        """
+        """Append an event and hand it to every watcher. Never blocks on a slow reader."""
         job = self.job
         if job is None:
             return Event(type=type, data=data)
@@ -137,11 +110,7 @@ class Runner:
         return event
 
     async def watch(self) -> AsyncIterator[Event]:
-        """Every event of the current job: the buffer first, then live ones.
-
-        The replay is what makes a page refresh mid-job seamless, and it is the same
-        code path as a first connection — there is no separate catch-up route.
-        """
+        """Every event of the current job: the buffer first, then live ones."""
         job = self.job
         if job is None:
             return
@@ -179,11 +148,7 @@ class Runner:
         steps: list[str],
         work: Callable[[Job], Awaitable[None]],
     ) -> Job:
-        """Take the lock, publish a Job, and run `work` in the background.
-
-        Returns as soon as the job is visible, so the caller can answer the request and
-        let the browser subscribe — the whole point of a job rather than a long POST.
-        """
+        """Take the lock, publish a Job, and run `work` in the background."""
         if self.busy:
             raise Busy(f"{self.job.source}: {self.job.current or 'starting'}")
 

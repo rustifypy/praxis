@@ -1,24 +1,4 @@
-"""sources.db — the registry, credentials included.
-
-Deliberately not the chat database. `analyst --data-dir` points chat history at a
-scratch file for testing, and it must not take the data sources with it.
-
-Credentials live here rather than in a file per source because the container is started
-from this row: one INSERT is a source, and there is no registry file, no credential file
-and no generated compose file that can drift from it. They reach the container as
-`docker run -e`, which means `docker inspect cube-<name>` can read them — the trade for
-having nothing on disk to keep in sync. Nothing here is ever returned by an HTTP
-endpoint; see `web/sources.py`.
-
-Three columns hold JSON, and they are written separately on purpose:
-
-    credentials  the CUBEJS_DB_* map                      — changed by the user
-    steps        per-step status, timings, summaries       — changed by a job
-    state        the cached catalog, cube bodies, decisions — changed by a job
-
-A step finishing must not rewrite the credentials, and editing a password must not
-clobber a step that is running, so each has its own narrow update.
-"""
+"""sources.db — the registry, credentials included."""
 
 import json
 import time
@@ -104,11 +84,7 @@ class SourceStore:
         return [r["name"] for r in rows]
 
     async def all_steps(self) -> dict[str, dict]:
-        """Every source's step records, in one read.
-
-        `SELECT *` in `all()` already carries this column, but `Source` is the vocabulary
-        and does not hold job state — so this is the one extra query, not one per source.
-        """
+        """Every source's step records, in one read."""
         async with self._db() as db:
             rows = await db.execute_fetchall("SELECT name, steps FROM sources")
         return {r["name"]: json.loads(r["steps"]) for r in rows}
@@ -121,16 +97,7 @@ class SourceStore:
         credentials: dict[str, str] | None = None,
         mounts: dict[str, str] | None = None,
     ) -> None:
-        """Patch what a person can edit. Omitted arguments are left alone.
-
-        `credentials` replaces the whole map, so callers merge through
-        `merge_credentials` — only they know that a blank password field means
-        "unchanged" rather than "empty".
-
-        `mounts` travels with them: on a driver that needs a key file the credential
-        holds the container path and the mount holds the host path, so editing one
-        without the other points Cube at a file that is no longer mounted there.
-        """
+        """Patch what a person can edit. Omitted arguments are left alone."""
         sets: list[str] = []
         values: list[object] = []
         for column, value in (
@@ -169,13 +136,7 @@ class SourceStore:
         await self._save_blob(name, "steps", current)
 
     async def clear_steps_after(self, name: str, step: str) -> list[str]:
-        """Forget the steps that depend on `step`, and say which were forgotten.
-
-        Re-running an earlier step invalidates everything after it — `publish.write`
-        unlinks every YAML file, so the views on disk are gone the moment the cubes are
-        rewritten. Dropping their records too keeps the panel honest instead of showing a
-        green tick for output that no longer exists.
-        """
+        """Forget the steps that depend on `step`, and say which were forgotten."""
         current = await self.steps(name)
         dropped = invalidated_by(current, step)
         for s in dropped:
@@ -185,11 +146,7 @@ class SourceStore:
         return dropped
 
     async def state(self, name: str) -> dict:
-        """The cached catalog, cube bodies and enrichment decisions.
-
-        This is what makes the four steps independent: views need the probed schema and
-        the cube decisions, and neither can be recovered from the YAML on disk.
-        """
+        """The cached catalog, cube bodies and enrichment decisions."""
         return await self._blob(name, "state")
 
     async def save_state(self, name: str, patch: dict) -> None:
@@ -226,21 +183,12 @@ def _source(row: aiosqlite.Row) -> Source:
 
 
 def invalidated_by(steps: dict, step: str) -> list[str]:
-    """Which recorded steps re-running `step` would throw away, in order.
-
-    One rule, three readers: `clear_steps_after` performs it, the CLI warns from it, and
-    `public` ships it so the browser's confirmation says the same thing. Getting these
-    out of step is how a user loses an enriched model without being told.
-    """
+    """Which recorded steps re-running `step` would throw away, in order."""
     return [s for s in STEPS[STEPS.index(step) + 1 :] if steps.get(s, {}).get("status")]
 
 
 def public(source: Source, steps: dict, running: bool, health: dict) -> dict:
-    """A source as the browser may see it — every field except the credentials.
-
-    The one function that decides what leaves the process, so "no endpoint returns a
-    password" is enforced in a single place rather than per route.
-    """
+    """A source as the browser may see it — every field except the credentials."""
     return {
         "name": source.name,
         "description": source.description,
@@ -267,11 +215,7 @@ def public(source: Source, steps: dict, running: bool, health: dict) -> dict:
 
 
 def merge_credentials(existing: dict[str, str], supplied: dict[str, str]) -> dict[str, str]:
-    """Apply an edit. A key the caller left blank keeps its stored value.
-
-    The edit form cannot show a password it is never sent, so blank has to mean
-    "unchanged" — otherwise every description edit would wipe the credentials.
-    """
+    """Apply an edit. A key the caller left blank keeps its stored value."""
     out = dict(existing)
     for key, value in supplied.items():
         if value != "":

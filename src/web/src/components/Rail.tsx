@@ -1,11 +1,14 @@
 /**
- * The mode switch, and the only thing on screen in both modes.
+ * The mode switch, and the only thing on screen in every mode.
  *
  * Chat and sources are two products with opposite shapes — one is an unbounded list of
  * ephemeral conversations, the other a handful of heavily stateful objects with
  * destructive controls. They shared a sidebar, which meant the chat list stayed live and
  * clickable while you were administering a database. Splitting the mode out here lets the
  * column beside it belong entirely to whichever one you are in.
+ *
+ * Dashboards sit between them: made in chat, bound to a source, so the rail is in the order
+ * the work happens.
  */
 
 const CHAT = (
@@ -22,15 +25,24 @@ const DATA = (
   </svg>
 );
 
+const BOARD = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3.2" y="3.8" width="7.4" height="7.4" rx="1.5" />
+    <rect x="13.4" y="3.8" width="7.4" height="4.4" rx="1.5" />
+    <rect x="3.2" y="13.9" width="7.4" height="6.3" rx="1.5" />
+    <rect x="13.4" y="10.9" width="7.4" height="9.3" rx="1.5" />
+  </svg>
+);
+
 export function Rail({
   view,
   jobRunning,
   onSelect,
 }: {
-  view: "chat" | "sources";
+  view: "chat" | "dashboards" | "sources";
   /** Dotted onto the data icon, so a three-minute describe is visible from a chat. */
   jobRunning: boolean;
-  onSelect: (view: "chat" | "sources") => void;
+  onSelect: (view: "chat" | "dashboards" | "sources") => void;
 }) {
   return (
     <nav className="rail">
@@ -47,6 +59,17 @@ export function Rail({
       >
         {CHAT}
         <span className="rail-label">Chat</span>
+      </button>
+
+      <button
+        className={`rail-tab ${view === "dashboards" ? "active" : ""}`}
+        onClick={() => onSelect("dashboards")}
+        title="Dashboards"
+        aria-label="Dashboards"
+        aria-current={view === "dashboards"}
+      >
+        {BOARD}
+        <span className="rail-label">Boards</span>
       </button>
 
       <button

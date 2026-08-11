@@ -1,11 +1,5 @@
-"""The wire format between the agent and the browser.
-
-One flat event stream. Deltas go over the wire so the transcript fills as the agent
-works; the store coalesces them into one row per block so replaying a chat is cheap.
-
-`parent_id` and `depth` are reserved and always None/0 today. When the orchestrator and
-its subagents land, nested events fill them in and the renderer indents by depth — the
-schema does not change. Reserving two fields now is cheaper than migrating both ends.
+"""The wire format between agent and browser: one flat event stream, deltas over the wire and
+whole blocks to the store. `parent_id`/`depth` are reserved for subagents, None/0 today.
 """
 
 import uuid
@@ -35,15 +29,11 @@ class Event(BaseModel):
 
 
 def emit(event: Event) -> None:
-    """Push an event from inside a tool into the stream.
-
-    LangGraph's writer is a no-op when nobody is streaming, so `ainvoke` callers are
-    unaffected. It raises only when there is no runnable context at all, which is how
-    unit tests invoke a tool directly — swallow that rather than making tools
-    untestable outside a graph.
+    """Push an event from inside a tool into the stream. A no-op outside a graph, where
+    `get_stream_writer` raises `RuntimeError` or `KeyError('__pregel_runtime')`.
     """
     try:
         writer = get_stream_writer()
-    except RuntimeError:
+    except (RuntimeError, KeyError):
         return
     writer(event.model_dump())

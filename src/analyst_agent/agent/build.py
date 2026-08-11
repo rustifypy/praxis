@@ -6,6 +6,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from ..config import settings
 from ..cube.catalog import Catalog
 from ..cube.client import CubeClient, mint_token
+from ..dashboards.tools import DashboardContext, build_dashboard_tools
 from ..grounding import for_active_source
 from .content import text_of
 from .middleware import AuditLog, CompactionNotice
@@ -36,45 +37,41 @@ class Answer:
 # render into the transcript as if it were the agent's answer.
 COMPACTION_TAG = "compaction"
 
-_catalogs: dict[str, Catalog] = {}
+# Keyed by Cube url. Popped after a model rebuild — a rebuilt source is otherwise invisible
+# to the agent until a restart.
+CATALOGS: dict[str, Catalog] = {}
 
 
 async def load_catalog(client: CubeClient, refresh: bool = False) -> Catalog:
-    """The catalog, cached per Cube.
-
-    Cube Core does not hot-reload its model, so this only changes when a container
-    restarts — which is exactly what the refresh flag is for. Refetching it per turn
-    would put an HTTP round trip in front of every message in a chat.
+    """The catalog, cached per Cube. Cube Core does not hot-reload its model, so this changes
+    only when a container restarts — which is what `refresh` is for.
     """
     key = settings.api_root
-    if refresh or key not in _catalogs:
-        _catalogs[key] = Catalog.from_meta(await client.meta())
-    return _catalogs[key]
+    if refresh or key not in CATALOGS:
+        CATALOGS[key] = Catalog.from_meta(await client.meta())
+    return CATALOGS[key]
 
 
-def forget_catalog() -> None:
-    """Drop the cached catalog so the next turn refetches it.
-
-    The cache lives for the life of the process, so a model rebuilt in the panel would
-    otherwise stay invisible to the agent until a restart.
-    """
-    _catalogs.pop(settings.api_root, None)
-
-
-def build_agent(session: Session, ctx: SecurityContext, checkpointer=None):
-    """The agent, shared by `/ask`'s single shot and the web's streamed turn.
-
-    Two construction sites would drift; middleware added for the browser would quietly
-    not apply to the other. Pass a checkpointer to give the agent memory across turns —
-    without one it behaves exactly as it always has.
+def build_agent(
+    session: Session,
+    ctx: SecurityContext,
+    checkpointer=None,
+    dashboards: DashboardContext | None = None,
+):
+    """The agent, shared by `/ask` and the web's streamed turn — two construction sites would
+    drift. `dashboards` is optional: `/ask` has no store to author tiles into.
     """
     model = build_model()
     return create_agent(
         model=model,
-        tools=build_tools(session),
+        tools=[
+            *build_tools(session),
+            *(build_dashboard_tools(dashboards) if dashboards else []),
+        ],
         system_prompt=build_system_prompt(
             always_rules=session.grounding.always_rules,
             skill_catalog=session.grounding.catalog_lines(),
+            dashboards=dashboards is not None,
         ),
         middleware=[
             AuditLog(user=ctx.user_id),

@@ -1,14 +1,4 @@
-"""Stage 2 — everything derivable from the schema, with nothing invented.
-
-Two products, both pure functions of what the database said:
-
-  emit_cubes   the structural model: keys, joins, dimensions, `count`
-  build_menu   the choices the model layer may pick from
-
-A hallucinated join is a silently wrong number, so nothing here guesses. And a
-join path the LLM never saw cannot be hallucinated either, which is what turns
-the judgment step into a selection problem.
-"""
+"""Stage 2 — everything derivable from the schema, with nothing invented."""
 
 from dataclasses import dataclass, field
 
@@ -38,11 +28,7 @@ class Cubes:
 
 
 def primary_key_dimension(table: Table) -> dict | None:
-    """Cube allows one primary_key dimension, so a composite key is concatenated.
-
-    Kept `public: false` — it satisfies Cube's join requirement without adding a
-    meaningless member to what the agent searches.
-    """
+    """Cube allows one primary_key dimension, so a composite key is concatenated."""
     if not table.primary_key:
         return None
     if len(table.primary_key) == 1:
@@ -88,11 +74,7 @@ def joins(table: Table, schema: Schema, notes: list[str]) -> list[dict]:
 
 
 def dimensions(table: Table) -> list[dict]:
-    """Every non-key column. Key columns are join plumbing, not slicing dimensions.
-
-    A bare column name, matching what Cube's own generator emits. Cube resolves a
-    single-identifier `sql:` against this cube's alias, so joins stay unambiguous.
-    """
+    """Every non-key column. Key columns are join plumbing, not slicing dimensions."""
     return [
         {"name": c.name, "sql": c.name, "type": c.type}
         for c in table.columns
@@ -237,11 +219,7 @@ def view_roots(schema: Schema) -> list[ViewRoot]:
 
 
 async def build_menu(source: Source, schema: Schema) -> Menu:
-    """The candidates, plus real values for the low-cardinality text columns.
-
-    Sampling runs ordinary /v1/load queries against the model that already compiled —
-    the same path the agent uses, so nothing new can break here.
-    """
+    """The candidates, plus real values for the low-cardinality text columns."""
     menu = Menu(measures=measure_candidates(schema), roots=view_roots(schema))
 
     wanted: list[str] = []

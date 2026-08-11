@@ -1,9 +1,5 @@
-"""One-line human labels for Cube queries.
-
-The transcript shows what the agent did as a sentence rather than a JSON dump. The
-label is derived from the query itself, not asked of the model: a query is structured
-data, so the label is deterministic, free, testable, and cannot describe a query that
-was never run.
+"""One-line human labels for Cube queries, derived from the query rather than asked of the
+model — so a label cannot describe a query that was never run.
 """
 
 from .catalog import Catalog

@@ -1,8 +1,5 @@
-"""Semantic model retrieval.
-
-Phase 1 is lexical (rapidfuzz) so the scaffold runs with no vector store.
-Swap in pgvector by replacing LexicalRetriever with a class exposing the same
-`search(question, limit)`.
+"""Semantic model retrieval, lexical (rapidfuzz) so the scaffold needs no vector store.
+Swap in pgvector by replacing LexicalRetriever with the same `search(question, limit)`.
 """
 
 from rapidfuzz import fuzz

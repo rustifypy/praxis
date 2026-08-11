@@ -1,4 +1,11 @@
-import type { AgentEvent, Chat, ResultColumn } from "./types";
+import type {
+  AgentEvent,
+  Chat,
+  DashboardDetail,
+  DashboardRow,
+  RefreshOutcome,
+  ResultColumn,
+} from "./types";
 
 /**
  * Trade the URL token for the cookie, then clean the address bar.
@@ -110,3 +117,28 @@ export async function* sendMessage(
     }
   }
 }
+
+// --- dashboards ---------------------------------------------------------------------
+
+export const listDashboards = () => json<DashboardRow[]>("/api/dashboards");
+
+export const createDashboard = (title: string) =>
+  json<{ id: string }>("/api/dashboards", { method: "POST", body: JSON.stringify({ title }) });
+
+export const dashboard = (id: string) => json<DashboardDetail>(`/api/dashboards/${id}`);
+
+export const renameDashboard = (id: string, title: string) =>
+  json(`/api/dashboards/${id}`, { method: "PATCH", body: JSON.stringify({ title }) });
+
+export const deleteDashboard = (id: string) =>
+  json(`/api/dashboards/${id}`, { method: "DELETE" });
+
+/** A plain POST, not a stream: the refresh is atomic, so there is no partial state to show. */
+export const refreshDashboard = (id: string) =>
+  json<RefreshOutcome>(`/api/dashboards/${id}/refresh`, { method: "POST" });
+
+export const saveLayout = (id: string, spec: unknown, note: string) =>
+  json<{ version: number }>(`/api/dashboards/${id}/layout`, {
+    method: "POST",
+    body: JSON.stringify({ spec, note }),
+  });

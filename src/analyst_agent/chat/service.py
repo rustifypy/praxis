@@ -1,11 +1,5 @@
-"""One turn of a chat, as a stream of events.
-
-Tool events arrive already authored — the tools write them through LangGraph's stream
-writer, so a gate rejection reaches the browser with its reasons intact instead of
-being inferred from a tool-call chunk. Only token deltas need interpreting here, and
-only to separate reasoning from answer text.
-
-Deltas go over the wire; whole blocks go to the store.
+"""One turn of a chat, as a stream of events. Tool events arrive already authored by the
+tools, so only token deltas are interpreted here — and only to split reasoning from text.
 """
 
 import asyncio
@@ -19,6 +13,8 @@ from ..agent.content import reasoning_of, text_of
 from ..agent.tools import Session
 from ..config import settings
 from ..cube.client import CubeClient, mint_token
+from ..dashboards.store import DashboardStore
+from ..dashboards.tools import DashboardContext
 from ..grounding import for_active_source
 from .events import Event
 from .store import ChatStore
@@ -45,10 +41,8 @@ async def stream_turn(
     buffer = {"thinking": "", "text": ""}
 
     async def flush() -> None:
-        """Persist what has streamed so far, in transcript order.
-
-        Reasoning always precedes answer text within a model call, so draining in this
-        order is enough to keep the stored order faithful to the live one.
+        """Reasoning precedes answer text within a model call, so draining in this order keeps the
+        stored order faithful to the live one.
         """
         for kind in ("thinking", "text"):
             if buffer[kind]:
@@ -72,7 +66,20 @@ async def stream_turn(
         # that" on turn three, and after a restart.
         session.executed, session.rejected = await store.replay_session(chat_id)
 
-        agent = build_agent(session, ctx, checkpointer=saver)
+        # The tools that author dashboards. `grounding.source` is the active source's name,
+        # already resolved by `for_active_source` — one lookup, and a new dashboard binds to
+        # the same source the answers in this chat came from.
+        agent = build_agent(
+            session,
+            ctx,
+            checkpointer=saver,
+            dashboards=DashboardContext(
+                store=DashboardStore(),
+                catalog=session.catalog,
+                source_name=session.grounding.source,
+                owner_id=ctx.user_id,
+            ),
+        )
         async for mode, payload in agent.astream(
             {"messages": [{"role": "user", "content": question}]},
             config={"configurable": {"thread_id": chat_id}},

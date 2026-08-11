@@ -71,6 +71,9 @@ export interface ToolEnd {
   warnings?: string[];
   errors?: string[];
   hits?: number;
+  /** What a dashboard tool did, in a few words — the whole of what those tools say, since
+   *  they may not put state in an event. Used as the trace step's summary. */
+  note?: string;
 }
 
 /**
@@ -109,3 +112,102 @@ export type Item =
     }
   | { kind: "compacted"; before: number; after: number }
   | { kind: "error"; message: string };
+
+/** `results` is keyed by tile id rather than nested, because a tile always exists and its
+ *  data may not — an unrefreshed dashboard has every tile and no results. */
+export interface DashboardRow {
+  id: string;
+  title: string;
+  source_name: string;
+  tiles: number;
+  refreshed_at: number | null;
+  updated_at: number;
+}
+
+export interface TileRow {
+  id: string;
+  title: string;
+  query: unknown;
+  chart: TileChart;
+  time_member: string;
+}
+
+/** `table` has no axes — it draws whatever columns the query returned. */
+export interface TileChart {
+  type: "line" | "bar" | "kpi" | "table";
+  y?: string[];
+  x?: string;
+  series?: string;
+}
+
+export interface TileDelta {
+  column: string;
+  label: string;
+  value: number;
+  previous: number;
+  change: number;
+  /** Null when the previous value was zero; the absolute change is still shown. */
+  percent: number | null;
+}
+
+export interface TileResultRow {
+  /** Why this tile draws a table instead of its chart. Recomputed server-side on every read,
+   *  so a reload cannot resurrect a chart the shape outgrew. */
+  degraded: string;
+  columns: ResultColumn[];
+  rows: Record<string, unknown>[];
+  row_count: number;
+  /** What Cube resolved each dateRange to. The only thing saying whether a refresh moved
+   *  this tile's window — two tiles can differ under the same click. */
+  resolved_ranges: Record<string, string[]>;
+  duration_ms: number | null;
+  /** The run happened and its rows were pruned. Count survives, data does not. */
+  pruned: boolean;
+  deltas: TileDelta[];
+  compared_at: number | null;
+}
+
+export interface LayoutItem {
+  tile: string;
+  span: number;
+}
+
+export interface DashboardDetail {
+  id: string;
+  title: string;
+  source_name: string;
+  tiles: TileRow[];
+  layout: { columns: number; items: LayoutItem[] };
+  layout_version: number | null;
+  history: { version: number; note: string; created_at: number }[];
+  run: {
+    id: string;
+    status: string;
+    insight: string;
+    started_at: number;
+    finished_at: number | null;
+  } | null;
+  results: Record<string, TileResultRow>;
+  /** Why refreshing would answer from the wrong database, or null. */
+  mismatch: string | null;
+  /** Tiles that no longer compile. `available` is false when the container is down, which is
+   *  not the same as nothing being broken. */
+  checks: { available: boolean; reason: string; broken: { tile_id: string; title: string; errors: string[] }[] };
+}
+
+export interface RefreshOutcome {
+  ok: boolean;
+  status: string;
+  run_id: string;
+  error: string;
+  insight: string;
+  tiles: {
+    tile_id: string;
+    title: string;
+    ok: boolean;
+    errors: string[];
+    warnings: string[];
+    row_count: number;
+    degraded: string;
+  }[];
+}

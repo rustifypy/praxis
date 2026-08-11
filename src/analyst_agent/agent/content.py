@@ -1,9 +1,5 @@
-"""Message content is a list of typed blocks, not a string.
-
-The Responses API returns reasoning, tool calls and answer text as separate blocks in
-one message. Every consumer wants a different slice: the CLI and the HTTP API want the
-answer, the web transcript wants the reasoning alongside it. Reading `.content` directly
-anywhere else is a bug — it is a list.
+"""Message content is a list of typed blocks, not a string — the Responses API returns
+reasoning, tool calls and text separately. Reading `.content` directly elsewhere is a bug.
 """
 
 # Chat Completions and the Responses API label answer text differently.
@@ -23,11 +19,7 @@ def text_of(content: str | list) -> str:
 
 
 def reasoning_of(content: str | list) -> str:
-    """The reasoning summary, or "" when the turn produced none.
-
-    Empty is normal, not an error: the model reasons on planning calls but answered
-    from a tool result without reasoning again in testing.
-    """
+    """The reasoning summary, or "" when the turn produced none. Empty is normal."""
     if isinstance(content, str):
         return ""
     out: list[str] = []

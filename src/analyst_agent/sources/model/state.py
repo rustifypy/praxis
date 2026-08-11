@@ -1,20 +1,4 @@
-"""What one step leaves behind for the next, as JSON.
-
-The four steps run minutes or days apart, so nothing may survive only in memory:
-
-    catalog      every schema and table the probe read, before any selection
-    schema       the selected tables, as a Schema — what `emit_cubes` was given
-    bodies       the emitted cube bodies, which enrichment layers onto
-    enrichment   the model's decisions, which the views step and any repair need
-    selection    the schema name and table names the user picked
-
-`views` cannot be rebuilt from the YAML on disk — `views_prompt` needs the join graph
-and the cube decisions, and YAML has neither. So the round-trip here is load-bearing:
-if it loses a field, a re-run silently produces a different model. It has a test.
-
-`Schema` is dataclasses and `Enrichment` holds pydantic models, which is why this is
-hand-written rather than one `asdict`.
-"""
+"""What one step leaves behind for the next, as JSON."""
 
 from dataclasses import asdict
 

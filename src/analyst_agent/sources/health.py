@@ -1,8 +1,4 @@
-"""Connection testing via Cube's own /readyz.
-
-Cube runs the driver's connection test behind /readyz, so a source is verified
-by the same code path that will serve queries — no second database client here.
-"""
+"""Connection testing via Cube's own /readyz."""
 
 import asyncio
 from dataclasses import dataclass
@@ -57,12 +53,7 @@ async def check(source: Source, timeout: float = 20.0) -> Health:
 
 @dataclass
 class Serving:
-    """What a source is exposing right now, from Cube's own `/v1/meta`.
-
-    A fact about the source, alongside its health — not a rendering concern. It is also
-    the only honest answer to "is there a model": the step records say what this portal
-    built, and a model can predate the portal or be edited by hand.
-    """
+    """What a source is exposing right now, from Cube's own `/v1/meta`."""
 
     cubes: int
     views: list[str]
@@ -70,11 +61,7 @@ class Serving:
 
 
 async def serving(source: Source, timeout: float = 10.0) -> Serving | None:
-    """The compiled entities, or None when Cube cannot say.
-
-    None rather than an error: a compile failure means `/v1/meta` has no cubes, and the
-    source is still up — that is a model problem, not a health problem.
-    """
+    """The compiled entities, or None when Cube cannot say."""
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             body = (await client.get(f"{source.url}{settings.cube_base_path}/v1/meta")).json()
@@ -91,11 +78,7 @@ async def serving(source: Source, timeout: float = 10.0) -> Serving | None:
 async def wait_until_ready(
     source: Source, attempts: int = 12, every: float = 5.0, down_tolerance: int = 2
 ) -> tuple[Health, int]:
-    """Poll while the container boots. Returns the last health and attempts used.
-
-    A DOWN is retried `down_tolerance` times — a warehouse can still be waking up —
-    then reported, so bad credentials fail in seconds rather than a full timeout.
-    """
+    """Poll while the container boots. Returns the last health and attempts used."""
     health = Health(False, "unreachable")
     downs = 0
     for attempt in range(1, attempts + 1):

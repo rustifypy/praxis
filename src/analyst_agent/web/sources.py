@@ -1,18 +1,4 @@
-"""The sources surface: what exists, what is running, and one job at a time.
-
-Credentials go in and never come out. `store.public` is the only thing that shapes a
-source for the browser, so "no endpoint returns a password" is one function rather than
-a rule per route.
-
-A source has three states the compose version never had to render, because nothing
-declarative starts a container any more: no container at all, a container that is up but
-whose database is unreachable, and healthy. `_view` resolves all three against
-`docker ps` on every read, so the panel cannot show a green dot for something that is
-not there.
-
-Container actions live under `/container/{action}` rather than `/{action}`: a path
-parameter that broad would swallow `/read` and `/logs` depending on registration order.
-"""
+"""The sources surface: what exists, what is running, and one job at a time."""
 
 import asyncio
 import shutil
@@ -24,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from ..agent.build import SecurityContext, forget_catalog
+from ..agent.build import CATALOGS, SecurityContext
 from ..config import settings
 from ..cube.catalog import Catalog
 from ..cube.client import CubeClient, CubeError, mint_token
@@ -97,13 +83,7 @@ def runner_of(request: Request) -> jobs.Runner:
 
 
 async def _probe(cache: dict, source: Source, running: bool) -> dict:
-    """Cached health and served entities: is it up, and what is it actually serving?
-
-    The served entities are the truth about the model, and the step records are only what
-    this portal did. They can disagree — a model generated before the portal existed, or
-    YAML edited by hand — and a panel showing only the step records would then be quietly
-    wrong. So both are reported.
-    """
+    """Cached health and served entities: is it up, and what is it actually serving?"""
     if not running:
         return {"health": health.Health(False, "stopped").as_dict(), "serving": None}
     hit = cache.get(source.name)
@@ -130,11 +110,7 @@ async def _view(request: Request, source: Source, containers: dict[str, str], st
 
 @router.get("/system")
 async def system(request: Request) -> dict:
-    """Whether this feature can work at all, in one call.
-
-    Checked up front because every operation here is a live docker call: a closed Docker
-    Desktop should disable the panel with one honest line, not fail eight buttons apart.
-    """
+    """Whether this feature can work at all, in one call."""
     if not docker.installed():
         return {"ok": False, "reason": "docker is not installed on this machine"}
     info = await docker.daemon()
@@ -157,14 +133,7 @@ async def system(request: Request) -> dict:
 
 @router.get("/drivers")
 async def drivers() -> dict:
-    """The connection form, described by the driver specs themselves.
-
-    A non-empty `mount_to` marks a field the container needs a *file* for, and names
-    where it is mounted. It is typed rather than picked: a browser file input yields the
-    file's contents and never its path, and the path on this machine is what the bind
-    mount needs. The server checks the file is there — see `_paths`. The form also needs
-    the container path itself, to find the current host path in a source's `mounts`.
-    """
+    """The connection form, described by the driver specs themselves."""
     return {
         "local_hosts": list(LOCAL_HOSTS),
         "localhost_note": LOCALHOST_NOTE,
@@ -215,11 +184,7 @@ async def source_logs(name: str, request: Request, tail: int = 200) -> dict:
 
 @router.get("/sources/{name}/catalog")
 async def source_catalog(name: str, request: Request) -> dict:
-    """The cached catalog, for the picker. Never reads the database.
-
-    Selection is offered from what one probe already read, which is why re-picking is
-    instant and why choosing a schema does not start a container.
-    """
+    """The cached catalog, for the picker. Never reads the database."""
     store = store_of(request)
     await _find(request, name)
     state = await store.state(name)
@@ -240,12 +205,7 @@ async def source_catalog(name: str, request: Request) -> dict:
 
 @router.get("/sources/{name}/model")
 async def source_model(name: str, request: Request) -> dict:
-    """What Cube has compiled, read live from this source's own `/v1/meta`.
-
-    Parsed by `Catalog.from_meta` — the agent's own parser — so the page cannot disagree
-    with the gate. Not an error when Cube will not answer: a model that fails to compile
-    leaves this empty while the container stays healthy.
-    """
+    """What Cube has compiled, read live from this source's own `/v1/meta`."""
     source = await _find(request, name)
     client = CubeClient(
         mint_token(SecurityContext(user_id="local").as_claims()),
@@ -324,15 +284,7 @@ async def source_model(name: str, request: Request) -> dict:
 
 @router.get("/sources/{name}/grounding")
 async def source_grounding(name: str, request: Request) -> dict:
-    """The markdown this source grounds the agent with, exactly as the agent loads it.
-
-    Read through `Grounding`, not by walking the directory: a viewer with its own idea of
-    what counts would show a `.yml` looking loaded, and that file fails the model's
-    compile rather than being ignored.
-
-    `root` is absolute as resolved, not the tidy relative form — it resolves from the
-    directory the portal was launched in, so when grounding is empty it is the answer.
-    """
+    """The markdown this source grounds the agent with, exactly as the agent loads it."""
     source = await _find(request, name)
     loaded = for_source(source)
     kinds = (
@@ -373,12 +325,7 @@ async def check_now(name: str, request: Request) -> dict:
 
 @router.post("/sources/{name}/closure")
 async def closure(name: str, body: RunStep, request: Request) -> dict:
-    """What a tick-list actually models, and what it gives up.
-
-    Computed server-side so the warning the UI shows and the selection the job uses come
-    from one implementation — a picker that disagreed with the pipeline would be worse
-    than no picker at all.
-    """
+    """What a tick-list actually models, and what it gives up."""
     # Only the requested schema is rebuilt: this fires on every checkbox tick, and
     # `cached_catalog` would reconstruct every Column of every schema each time.
     raw = (await store_of(request).state(name)).get("catalog") or {}
@@ -399,12 +346,7 @@ async def closure(name: str, body: RunStep, request: Request) -> dict:
 
 
 def _paths(spec, values: dict[str, str]) -> tuple[dict[str, str], dict[str, str]]:
-    """Split host paths out of a form, refusing one that is not there.
-
-    A missing bind-mount source is not an error docker reports: it creates an empty
-    *directory* at that path and mounts that, so Cube fails later reading a key file
-    that is a folder. Catching the typo in the form is the only cheap moment.
-    """
+    """Split host paths out of a form, refusing one that is not there."""
     kept, mounts = split_mounts(spec, values)
     for container_path, host_path in mounts.items():
         if not Path(host_path).is_file():
@@ -441,11 +383,7 @@ async def create(body: NewSource, request: Request) -> dict:
 
 @router.patch("/sources/{name}")
 async def edit(name: str, body: EditSource, request: Request) -> dict:
-    """Change the description or the credentials.
-
-    Credentials take effect on the next `connect`: a container's environment is fixed
-    when it is created, so that step recreates it rather than restarting it.
-    """
+    """Change the description or the credentials."""
     store = store_of(request)
     source = await _find(request, name)
     merged = mounts = None
@@ -463,11 +401,7 @@ async def edit(name: str, body: EditSource, request: Request) -> dict:
 
 @router.delete("/sources/{name}")
 async def remove(name: str, request: Request, keep_model: bool = False) -> dict:
-    """Remove the row, the container, and unless kept the model files.
-
-    Refuses the source the agent is pointed at: deleting what every open chat is
-    querying is never what someone means by tidying up.
-    """
+    """Remove the row, the container, and unless kept the model files."""
     source = await _find(request, name)
     if source.is_active:
         raise HTTPException(
@@ -537,12 +471,7 @@ async def job_stream(request: Request) -> StreamingResponse:
 
 @router.post("/sources/{name}/actions/{name_of_action}")
 async def run_action(name: str, name_of_action: str, body: RunStep, request: Request) -> dict:
-    """Start a job that runs one action, and answer as soon as it exists.
-
-    Not when it finishes: describing a wide schema takes minutes, and the browser watches
-    `/api/job/stream` meanwhile. Which action to run is this route's only decision — how
-    to run it, in what order, and what a failure records all live in `model/run.action`.
-    """
+    """Start a job that runs one action, and answer as soon as it exists."""
     if name_of_action not in ACTIONS:
         raise HTTPException(404, f"no such action {name_of_action!r} — one of {', '.join(ACTIONS)}")
     source = await _find(request, name)
@@ -573,7 +502,7 @@ async def run_action(name: str, name_of_action: str, body: RunStep, request: Req
             cache.pop(source.name, None)
             # A rebuilt model must not stay invisible to the agent's cached catalog.
             if source.is_active:
-                forget_catalog()
+                CATALOGS.pop(settings.api_root, None)
             job.current = ""
         runner.emit(
             "step_end",

@@ -1,13 +1,4 @@
-"""The portal's HTTP surface.
-
-Localhost, one user, no login — a token in the URL, the way Jupyter does it. The token
-proves the request came from the browser we opened rather than another process on the
-machine; it is not an identity system.
-
-Identity is resolved here and never read from a client header. `user_id` is signed into
-the Cube JWT, so trusting a header would be the hole under any row-level security added
-later, however localhost the setup is today.
-"""
+"""The portal's HTTP surface."""
 
 import asyncio
 import csv
@@ -28,7 +19,7 @@ from ..config import settings
 from ..cube.catalog import Catalog
 from ..cube.client import CubeClient, mint_token
 from ..cube.shape import Column, export_value
-from . import sources
+from . import dashboards, sources
 from .stream import sse
 
 STATIC = Path(__file__).parent / "static"
@@ -58,6 +49,9 @@ class Message(BaseModel):
 async def lifespan(app: FastAPI):
     store = ChatStore()
     await store.init()
+    # Dashboards share `analyst.db` with the transcript but keep their own store: adding a
+    # table to a live database works, so this is safe against an existing file.
+    await dashboards.init_state(app)
     # Data sources: their own database, their own job runner. Deliberately not under
     # DATA_DIR, so `--data-dir` can scope chat history for testing without hiding them.
     await sources.init_state(app)
@@ -71,6 +65,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="analyst-agent web", lifespan=lifespan)
 app.include_router(sources.router)
+app.include_router(dashboards.router)
 
 
 @app.middleware("http")
@@ -161,11 +156,7 @@ async def send(chat_id: str, body: Message, request: Request) -> StreamingRespon
 
 @app.get("/api/results/{result_id}")
 async def result(result_id: str, request: Request, offset: int = 0, limit: int = 200) -> dict:
-    """One page of a stored result set.
-
-    The transcript renders the head of the rows straight off the `tool_end` event, so this
-    is only reached by "show all" and by a sort over more rows than the event carried.
-    """
+    """One page of a stored result set."""
     record = await request.app.state.store.result(result_id)
     if record is None:
         raise HTTPException(404, f"no result with id {result_id!r}")

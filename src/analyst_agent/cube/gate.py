@@ -5,8 +5,8 @@
 3. compile   — POST /v1/sql, Cube's own compiler, nothing executed
 4. execute   — POST /v1/load
 
-Tiers 1-2 are free and local. Tier 3 costs one HTTP call and no warehouse
-compute. Failures return text for the agent to act on, never exceptions.
+Failures return text for the agent to act on, never exceptions. `run` is all four tiers;
+`check`/`execute` expose the seam for callers that must compile without executing.
 """
 
 from dataclasses import dataclass, field
@@ -26,6 +26,11 @@ class GateResult:
     sql: str | None = None
     rows: list[dict] | None = None
     duration_ms: int | None = None
+    query: CubeQuery | None = None
+    """The parsed, limit-capped query, set once tier 1 passes. `execute` reads it rather than
+    re-parsing the payload."""
+    resolved_ranges: dict[str, list[str]] = field(default_factory=dict)
+    """Tier 4 only — see `client.LoadResult.resolved_ranges`."""
 
     def as_message(self) -> str:
         parts = []
@@ -37,33 +42,25 @@ class GateResult:
 
 
 def parse(payload: dict) -> tuple[CubeQuery | None, list[str]]:
-    """Tier 1.
-
-    A filter is a Filter or a FilterGroup, so pydantic tries both and reports both
-    failures: one missing `values` produced the real message plus two about
-    `FilterGroup` not accepting `member`/`operator`. These go straight into the
-    agent's retry prompt, so the dead branch is dropped and the internal
-    `function-after[...]` wrappers are stripped from the path.
+    """Tier 1. A filter is a Filter or a FilterGroup, so pydantic reports failures for both;
+    the dead branch is dropped before it reaches the agent's retry.
     """
     try:
         return CubeQuery.model_validate(payload), []
     except ValidationError as e:
-        return None, _messages(e)
-
-
-def _messages(e: ValidationError) -> list[str]:
-    out: list[str] = []
-    for err in e.errors():
-        raw = [str(p) for p in err["loc"]]
-        path = [p for p in raw if not p.startswith("function-after[")]
-        # A leaf filter naming `member` was never going to satisfy FilterGroup;
-        # complaining that FilterGroup rejects `member` only misdirects the retry.
-        if "FilterGroup" in " ".join(raw) and path and path[-1] in ("member", "operator", "values"):
-            continue
-        text = f"{'.'.join(path)}: {err['msg']}" if path else err["msg"]
-        if text not in out:
-            out.append(text)
-    return out
+        out: list[str] = []
+        for err in e.errors():
+            raw = [str(p) for p in err["loc"]]
+            path = [p for p in raw if not p.startswith("function-after[")]
+            # A leaf filter naming `member` was never going to satisfy FilterGroup;
+            # complaining that FilterGroup rejects `member` only misdirects the retry.
+            leaf_field = bool(path) and path[-1] in ("member", "operator", "values")
+            if leaf_field and "FilterGroup" in " ".join(raw):
+                continue
+            text = f"{'.'.join(path)}: {err['msg']}" if path else err["msg"]
+            if text not in out:
+                out.append(text)
+        return None, out
 
 
 def semantic_check(query: CubeQuery, catalog: Catalog) -> GateResult:
@@ -140,7 +137,8 @@ def semantic_check(query: CubeQuery, catalog: Catalog) -> GateResult:
     return GateResult(ok=not errors, errors=errors, warnings=warnings)
 
 
-async def run(payload: dict, catalog: Catalog, client: CubeClient, max_rows: int) -> GateResult:
+async def check(payload: dict, catalog: Catalog, client: CubeClient, max_rows: int) -> GateResult:
+    """Tiers 1-3. An ok result carries the parsed query and Cube's SQL, and executed nothing."""
     query, errors = parse(payload)
     if query is None:
         return GateResult(ok=False, errors=errors)
@@ -161,18 +159,36 @@ async def run(payload: dict, catalog: Catalog, client: CubeClient, max_rows: int
             warnings=checked.warnings,
         )
 
+    return GateResult(ok=True, warnings=checked.warnings, sql=compiled.sql, query=query)
+
+
+async def execute(checked: GateResult, client: CubeClient) -> GateResult:
+    """Tier 4. Takes the `GateResult` so tiers 2-3's SQL and warnings survive into the
+    executed result rather than being compiled twice."""
+    if not checked.ok or checked.query is None:
+        raise ValueError("execute() takes a GateResult that passed check()")
     try:
-        loaded = await client.load(query)
+        loaded = await client.load(checked.query)
     except CubeError as e:
-        return GateResult(ok=False, errors=[f"Execution failed: {e}"], sql=compiled.sql)
+        return GateResult(ok=False, errors=[f"Execution failed: {e}"], sql=checked.sql)
 
     return GateResult(
         ok=True,
         warnings=checked.warnings,
-        sql=compiled.sql,
+        sql=checked.sql,
         rows=loaded.rows,
         duration_ms=loaded.duration_ms,
+        query=checked.query,
+        resolved_ranges=loaded.resolved_ranges,
     )
+
+
+async def run(payload: dict, catalog: Catalog, client: CubeClient, max_rows: int) -> GateResult:
+    """All four tiers. What a chat turn wants: one query, executed or explained."""
+    checked = await check(payload, catalog, client, max_rows)
+    if not checked.ok:
+        return checked
+    return await execute(checked, client)
 
 
 def _check_where_having(nodes: list[FilterNode], catalog: Catalog, errors: list[str]) -> None:

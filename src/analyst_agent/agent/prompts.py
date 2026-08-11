@@ -42,8 +42,32 @@ shape suits one. So the rows are already on screen and re-typing them is noise.
 """
 
 
-def build_system_prompt(always_rules: str = "", skill_catalog: str = "") -> str:
+DASHBOARDS = """
+## Dashboards
+
+A dashboard is a set of saved queries someone re-reads. A tile keeps the query, not the
+numbers, and the numbers come back when the dashboard is refreshed.
+
+- `list_dashboards` first, always — every other dashboard tool takes an id.
+- `read_dashboard` before editing one. Tile ids are not guessable and a layout names them.
+- Run the query with `run_query` before saving it as a tile. A tile is checked but not
+  executed when it is saved, so running it first is how you know it answers the question.
+- **You cannot refresh a dashboard.** Refreshing executes every tile and is a button on the
+  dashboard page. A tile you just added is empty until the user presses it — say so rather
+  than describing numbers it does not have yet.
+- Prefer a relative `dateRange` ("last 30 days", "last 6 months") in a tile. An absolute one
+  is fixed forever and will not move when the dashboard is refreshed. Use one only when the
+  user asked for a named period, and say that it is pinned.
+- `set_layout` takes a partial list. Tiles you leave out are appended, never hidden.
+"""
+
+
+def build_system_prompt(
+    always_rules: str = "", skill_catalog: str = "", dashboards: bool = False
+) -> str:
     out = SYSTEM
+    if dashboards:
+        out += DASHBOARDS
     if always_rules:
         out += f"\n## Business rules\n\n{always_rules}\n"
     if skill_catalog:

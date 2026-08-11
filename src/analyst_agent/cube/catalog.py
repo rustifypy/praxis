@@ -2,12 +2,6 @@ from dataclasses import dataclass, field
 
 from rapidfuzz import fuzz
 
-
-def _tokens(name: str) -> str:
-    """snake_case to space-separated, so token-set scoring can see the words."""
-    return name.replace("_", " ").lower()
-
-
 STRING_OPS = [
     "equals",
     "notEquals",
@@ -64,21 +58,13 @@ class MemberDoc:
     granularities: list[str] = field(default_factory=list)
     valid_operators: list[str] = field(default_factory=list)
     format: str = ""
-    """Cube's own display format for a measure — `currency` or `percent`. What makes a
-    result table render 12404.5 as $12,404.50 without guessing from the column name.
-
-    `/v1/load` also returns this, per member, in its `annotation` object. We read it from
-    `/v1/meta` instead: the catalog is cached and already threaded everywhere a query is
-    built, while `annotation` would have to be plumbed through `LoadResult` and
-    `GateResult` to reach the same place."""
+    """Cube's display format for a measure. Read off the cached `/v1/meta` rather than
+    `/v1/load`'s `annotation`, which would need plumbing through `LoadResult` and `GateResult`.
+    """
     alias_member: str = ""
-    """For a view member, the cube member it re-exports — `sales.revenue` ->
-    `invoice_line.line_amount`. Empty on a cube's own members.
-
-    This is the only thing in `/v1/meta` that says what a view is made of. Without it a
-    view and a cube are two entities with different type strings, which is how they were
-    being presented; with it, a view is a projection over named cubes and a cube member
-    can be asked whether any view exposes it at all."""
+    """For a view member, the cube member it re-exports. The only thing in `/v1/meta` that
+    says what a view is made of — without it a view and a cube differ by a type string.
+    """
 
     @property
     def search_text(self) -> str:
@@ -161,31 +147,23 @@ class Catalog:
         return self.members.get(member_id)
 
     def nearest(self, member_id: str, limit: int = 3) -> list[str]:
-        """Real members to suggest for one the agent invented.
-
-        Scored on the part after the dot. Scoring the whole id ranks by the shared
-        cube prefix instead — every member of `sales` scores alike, so `sales.revenue`
-        came back with three arbitrary `sales.` members and not the one it meant.
-        Underscores become spaces so `unit_price` and `price` share a token, and a
-        member of the cube the agent already named wins a tie.
-
-        Returning nothing is a correct answer: a name with no lexical neighbour is
-        better reported as such than padded out with misleading suggestions.
+        """Real members to suggest for one the agent invented, or nothing. Scored on the part after
+        the dot: scoring the whole id ranks by shared cube prefix.
         """
         entity, _, wanted = member_id.rpartition(".")
         scored = []
         for candidate in self.members:
             cand_entity, _, cand_member = candidate.rpartition(".")
-            score = fuzz.token_set_ratio(_tokens(wanted), _tokens(cand_member))
+            # snake_case to spaces, so token-set scoring can see the words.
+            score = fuzz.token_set_ratio(
+                wanted.replace("_", " ").lower(), cand_member.replace("_", " ").lower()
+            )
             if entity and cand_entity == entity:
                 score += 10
             if score >= 60:
                 scored.append((score, candidate))
         scored.sort(key=lambda pair: (-pair[0], pair[1]))
         return [candidate for _, candidate in scored[:limit]]
-
-    def entity(self, name: str) -> Entity | None:
-        return next((e for e in self.entities if e.name == name), None)
 
     def views_containing(self, member_ids: list[str]) -> list[str]:
         wanted = set(member_ids)

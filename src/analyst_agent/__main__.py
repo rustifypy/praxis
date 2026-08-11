@@ -1,12 +1,5 @@
-"""Launch the portal: `analyst`, or `python -m analyst_agent`.
-
-A launcher, not a CLI. `cli.py` was one — typer and rich for a single command, and both
-were direct dependencies nothing else in the tree used.
-
-It cannot be replaced by pointing uvicorn at the app. `web.server.TOKEN` is minted at
-import and nothing else announces it, so `uvicorn analyst_agent.web.server:app` serves a
-portal no one can authenticate against. Printing the URL next to the port this module
-picked is also what stops the two disagreeing.
+"""Launch the portal: `analyst`, or `python -m analyst_agent`. A launcher, not a CLI, and not
+replaceable by uvicorn — `web.server.TOKEN` is minted at import and nothing else prints it.
 """
 
 import argparse

@@ -33,7 +33,7 @@ def test_a_cubes_own_members_have_no_alias(catalog):
 def test_alias_members_name_the_cubes_a_view_is_built_from(catalog):
     """The relationship the sources panel splits views from cubes on: `revenue` projects
     over `orders` alone, so `customers` is not reachable through it."""
-    view = catalog.entity("revenue")
+    view = next(v for v in catalog.views if v.name == "revenue")
     assert {m.alias_member.rpartition(".")[0] for m in view.members} == {"orders"}
 
 

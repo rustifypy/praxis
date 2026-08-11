@@ -1,13 +1,5 @@
-"""One source's grounding artefacts: rules, skills, certified queries.
-
-Markdown with YAML-ish frontmatter, mirroring Cube's agents/ convention.
-Only merged files load, so every change to agent behaviour is a reviewed diff.
-
-Grounding belongs to a data source, not to the installation: it names members, so one
-global set is wrong the moment there are two warehouses. `for_active_source` is the only
-way the agent gets one, and there is no global layer behind it.
-
-Markdown only, and not by preference — see `registry.GROUNDING_ROOT`.
+"""One source's grounding — rules, skills, certified queries — as markdown with frontmatter.
+Per source, not per installation: it names members, so one global set is wrong with two.
 """
 
 import json
@@ -62,11 +54,8 @@ def _load_dir(root: Path | None, name: str) -> list[Artefact]:
 
 
 class Grounding:
-    """What one source's grounding directory holds, or nothing at all.
-
-    `root=None` is the real state a source can be in, not a test convenience: a fresh
-    source has empty directories, and a `CUBE_URL` pointing outside the registry has no
-    directory at all. `source` records which one this came from so a caller can say so.
+    """What one source's grounding holds, or nothing at all. `root=None` is a real state: a
+    fresh source, or a `CUBE_URL` with no row behind it.
     """
 
     def __init__(self, root: str | Path | None = None, source: str = ""):
@@ -78,11 +67,7 @@ class Grounding:
 
     @property
     def is_empty(self) -> bool:
-        """No artefacts at all — the agent is answering on the system prompt alone.
-
-        Worth asking before an answer is trusted: nothing about a missing rule is
-        visible in the answer it changes.
-        """
+        """No artefacts at all — the agent is answering on the system prompt alone."""
         return not (self.rules or self.skills or self.certified)
 
     @property
@@ -139,28 +124,14 @@ def for_source(source: Source | None) -> Grounding:
 
 
 async def for_active_source() -> Grounding:
-    """The grounding for whichever source `CUBE_URL` points at.
+    """The grounding for whichever source `CUBE_URL` points at, read per turn so editing a rule
+    takes effect on the next message. Opens the registry itself: both entry points need this.
 
-    Opens the registry itself rather than taking a store: both ways into the agent need
-    this — the browser's streamed turn and `/ask` — and threading a store through two
-    signatures is how they would come to resolve grounding differently.
-
-    Read per turn, not cached, which is what makes editing a rule take effect on the next
-    message. Cube's model needs a container restart for the same edit.
-
-    A `CUBE_URL` with no source row behind it yields empty grounding rather than an
-    error — the agent answers without the business's definitions, hence `is_empty`.
-
-    TODO: anchor this path absolutely, or serve it over the API. It is the only one of the
-    agent's three inputs that resolves from the working directory — the model comes over
-    HTTP and `sources.db` is an absolute path, while this walks up from `cwd` via
-    `registry.project_root`. Launch the portal from anywhere but the project root and the
-    model still answers while grounding silently resolves to a directory that does not
-    exist; the container escapes it only because its mount was baked in at `connect`.
-    Storing the source's directory in its `sources.db` row fixes this and the same latent
-    bug in `publish.write`, which would otherwise rebuild into an unmounted directory.
-    Serving it over HTTP does not fix it on its own — the agent runs inside the portal
-    process, so that is a network hop to read a local file.
+    TODO: this is the only agent input resolved from the working directory
+    (`registry.project_root`), while the model comes over HTTP and `sources.db` is absolute.
+    Launch the portal from anywhere else and grounding silently resolves to a missing
+    directory. Storing the source's directory in its `sources.db` row fixes this and the same
+    latent bug in `publish.write`.
     """
     store = SourceStore()
     await store.init()
