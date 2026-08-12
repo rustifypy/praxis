@@ -1,8 +1,9 @@
 import httpx
+import pytest
 import respx
 
 from analyst_agent.cube import gate
-from analyst_agent.cube.client import CubeClient
+from analyst_agent.cube.client import CubeClient, CubeError
 
 ROOT = "http://cube.test/cubejs-api"
 
@@ -52,6 +53,33 @@ async def test_gate_run_happy_path(catalog):
     assert result.ok
     assert result.rows == [{"orders.count": 42}]
     assert result.sql == "SELECT 1"
+
+
+@respx.mock
+async def test_a_200_carrying_an_error_is_not_an_empty_result():
+    """Cube reports some failures as 200 with an `error` key and no `data`, so reading rows
+    off the body turns a failed query into one that matched nothing."""
+    respx.post(f"{ROOT}/v1/load").mock(
+        return_value=httpx.Response(200, json={"error": "Values required for filter orders.status"})
+    )
+    with pytest.raises(CubeError, match="Values required"):
+        await client().load(gate.parse({"measures": ["orders.count"]})[0])
+
+
+@respx.mock
+async def test_the_gate_reports_a_200_error_as_a_failed_execution(catalog):
+    """The whole point of raising: `execute` already turns a CubeError into a refusal the
+    agent can act on, where empty rows would have been answered as fact."""
+    respx.post(f"{ROOT}/v1/sql").mock(
+        return_value=httpx.Response(200, json={"sql": {"sql": ["SELECT 1", []]}})
+    )
+    respx.post(f"{ROOT}/v1/load").mock(
+        return_value=httpx.Response(200, json={"error": "Primary key not found"})
+    )
+    result = await gate.run({"measures": ["orders.count"]}, catalog, client(), max_rows=100)
+    assert not result.ok
+    assert "Primary key not found" in result.errors[0]
+    assert result.rows is None
 
 
 @respx.mock

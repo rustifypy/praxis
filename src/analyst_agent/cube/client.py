@@ -84,6 +84,13 @@ class CubeClient:
             raise CubeError(_error_text(r))
         body = r.json()
 
+        # Cube answers 200 with an `error` key for some failures rather than a status code, and
+        # such a body carries no `data` — so reading rows off it yields [] and a failed query
+        # looks like one that matched nothing. `publish._probe`, `read` and `build.build_menu`
+        # each learned this and check it by hand; this is the same check, where the rows are.
+        if isinstance(body, dict) and body.get("error"):
+            raise CubeError(_error_text(r))
+
         # The window Cube resolved, read off the query it echoes back. Defensively: a tile
         # that cannot label its window is cosmetic, and raising here would fail the query.
         ranges: dict[str, list[str]] = {}
