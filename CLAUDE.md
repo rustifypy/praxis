@@ -24,17 +24,15 @@ make serve                    # analyst — opens the portal in a browser
 uv run analyst --no-browser --port 8481                # portal without opening a tab
 ```
 
-**There is no CLI.** `__main__.py` is a launcher — argparse, three flags, `uvicorn.run` —
-and `analyst` starts the portal and nothing else. `cli.py` held `catalog`, `ask` and
-`check`; all three were deleted, as `analyst source` was before them, but for a different
-reason worth keeping straight. `source` went because it was a *second implementation* of
-the connection form and its confirmations. The query commands were thin wrappers over the
-same code the web uses, and went because each resolved its target through
-`settings.api_root` — the single global `CUBE_URL` — so none survives more than one Cube
-container without a `--source` flag and a `SourceStore` lookup a launcher has no reason to
-hold. Add capability to `web/sources.py` and the panel; do not reintroduce a CLI.
+**`__main__.py` is a launcher** — argparse, three flags, `uvicorn.run` — and `analyst`
+starts the portal and nothing else. **The portal is the only surface**: add capability to
+`web/sources.py` and the panel, never a second entry point beside it. Two of them means the
+connection form and the four steps' confirmations get written twice, and anything resolving
+its target through `settings.api_root` — the single global `CUBE_URL` — cannot survive more
+than one Cube container without a `--source` flag and a `SourceStore` lookup a launcher has
+no reason to hold.
 
-Deleting `cli.py` dropped `typer` and `rich` from the dependency list — nothing else used
+`typer` and `rich` are deliberately absent from the dependency list — nothing here needs
 either. That is why the launcher prints with `print(..., flush=True)` rather than
 `console.print`: stdout is block-buffered when it is not a tty, so a redirected log would
 hold the token in the buffer for the life of the server.
@@ -513,7 +511,8 @@ branch, at a time).
   answer. `service.py` keeps only `AIMessageChunk` and skips anything tagged
   `COMPACTION_TAG` — the summarizing model runs inside the graph like any other call.
 - **`get_stream_writer()` raises outside a runnable context**, which is how unit tests
-  invoke a tool directly. It is a no-op under `ainvoke`, so the CLI is unaffected.
+  invoke a tool directly. It is a no-op under `ainvoke`, so a caller that invokes a tool
+  that way is unaffected.
   `chat.events.emit` swallows exactly that `RuntimeError`.
 - **A method named `list` shadows the builtin for every annotation later in the class
   body**, and `list[dict]` then fails at import. `ChatStore.list_chats` is named that way
@@ -524,15 +523,15 @@ branch, at a time).
   `invalidates` rather than recomputed there), which source is active
   (`Source.is_active`), and what a failed step record looks like (`run._record`, written
   only by `run.action`). Health goes over the wire structured (`Health.as_dict`) for the
-  same reason — the browser was matching on the word "down". Deleting the `analyst
-  source` CLI was the same problem at a larger scale. `drivers.split_mounts` is the newest
-  one: create and edit both have to turn a typed host path into a mount plus a container
-  path, and only one of them getting it right is a key file Cube cannot find. Dashboards
-  add two: `layout.validate` is what both the agent's `set_layout` and the browser's
-  `POST /{id}/layout` go through, and `run.source_mismatch` is the only thing standing
-  between a saved query and a number from the wrong warehouse — two sources can both have
-  `sales.revenue`, nothing downstream would error, and the tile would render a plausible
-  figure about a different database.
+  same reason — the browser was matching on the word "down". Collapsing source management
+  onto the portal alone was the same problem at a larger scale. `drivers.split_mounts` is
+  the newest one: create and edit both have to turn a typed host path into a mount plus a
+  container path, and only one of them getting it right is a key file Cube cannot find.
+  Dashboards add two: `layout.validate` is what both the agent's `set_layout` and the
+  browser's `POST /{id}/layout` go through, and `run.source_mismatch` is the only thing
+  standing between a saved query and a number from the wrong warehouse — two sources can
+  both have `sales.revenue`, nothing downstream would error, and the tile would render a
+  plausible figure about a different database.
 - **A bind mount whose host path does not exist is not an error — docker creates an empty
   directory there.** For a key file that means Cube opens a folder and fails somewhere far
   away. `web.sources._paths` stats the file and 400s while the person is still looking at

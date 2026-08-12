@@ -129,9 +129,9 @@ named `analyst-net` that each source container joins.
 Sources are managed from the portal — **Data** in the rail — and only from there. Each
 source has its own page: a stepper for the five stages with one panel open at a time, the
 container controls behind an overflow menu, a connection test, a **Serving** panel showing
-what Cube compiled from `/v1/meta`, and a danger zone. There is no CLI for any of it: one
-connection form and one validator are easier to keep honest than two, and the model stages
-need the progress stream a terminal cannot show as well.
+what Cube compiled from `/v1/meta`, and a danger zone. One connection form and one
+validator are easier to keep honest than two, and the model stages need the progress
+stream a terminal cannot show as well.
 
 ### Four steps
 
@@ -227,9 +227,9 @@ make api                                                # POST /ask on :8000
 make test lint
 ```
 
-`analyst` is the whole CLI, and it only starts the portal. `catalog`, `ask` and `check` were removed: each resolved
-its target through the single global `CUBE_URL`, which does not survive more than one
-Cube container. The portal selects a source; the CLI never did.
+`analyst` only starts the portal — three flags, and nothing else. Querying goes through the
+portal because the portal is what selects a source: the single global `CUBE_URL` does not
+survive more than one Cube container.
 
 `src/web/` is the frontend source and sits outside the Python package deliberately. Its
 build output does not: `uv_build` ships only `src/analyst_agent`, so Vite writes to

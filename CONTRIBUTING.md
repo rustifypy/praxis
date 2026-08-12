@@ -39,8 +39,8 @@ connection through Cube's `/readyz`. There is no registry file and no credential
 can drift from it.
 
 The portal is the only surface for this — `POST /api/sources` is the sole writer of a new
-row, and `web/sources.py` the sole caller of `run.action`. A parallel CLI existed and was
-removed: the connection form, its validation and the four steps' confirmations were being
+row, and `web/sources.py` the sole caller of `run.action`. Keep it that way: a second
+surface means the connection form, its validation and the four steps' confirmations get
 written twice, which is exactly how two implementations of one rule start disagreeing.
 
 `make up` starts the Cube Store every source shares; source containers restart with
