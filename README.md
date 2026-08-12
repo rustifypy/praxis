@@ -191,56 +191,6 @@ There's no remote and no PR review inside the tool: no pull, no rebase, nothing 
 with. Review happens the way it would for any git branch — `git diff`, `git log`, in your
 own editor, on the same directory the container is reading.
 
-## Layout
-
-```
-src/analyst_agent/
-  config.py            settings
-  cube/schema.py       CubeQuery — the agent's only data-access output format
-  cube/catalog.py      /v1/meta -> members with valid_operators + granularities
-  cube/client.py       httpx client, JWT minting
-  cube/gate.py         the four tiers
-  retrieval.py         model search (lexical; swap for pgvector)
-  grounding.py         one source's rules / skills / certified queries
-  agent/tools.py       search_model, run_query, load_grounding, set_chart,
-                       explain_last_query
-  agent/content.py     text_of / reasoning_of — content is blocks, not a string
-  chat/events.py       the Event schema and emit(); parent_id/depth reserved
-  chat/store.py        SQLite chats + events + results + the checkpointer, one file
-  chat/service.py      stream_turn() — one turn as a stream of events
-  cube/describe.py     deterministic one-line labels for the tool trace
-  cube/shape.py        a result's header: column order, labels, format, alignment
-  cube/visualize.py    the chart a query's shape implies, and the guard on overrides
-  web/server.py        portal routes, SSE, token auth
-  web/static/          committed frontend build (make web-build)
-  agent/model.py       QUERY_MODEL -> chat model (Azure endpoint/deployment wiring)
-  agent/build.py       create_agent wiring, caller identity for the audit log
-  dashboards/store.py  dashboards / tiles / layouts / runs / tile_results, one file
-  dashboards/tiles.py  what a valid tile is; outgrown() re-checks it on every refresh
-  dashboards/run.py    validate (tiers 1-3) and refresh (+ tier 4), the atomic pass
-  dashboards/tools.py  the eight agent tools — refresh is not one of them
-  web/dashboards.py    the dashboards HTTP surface; refresh lives here only
-  sources/drivers.py   connection shape per Cube driver
-  sources/store.py     sources.db — the registry, credentials, steps, cached catalog
-  sources/registry.py  the Source dataclass, its dirs, name and port rules
-  sources/docker.py    docker run/stop/logs per source, all async
-  sources/jobs.py      one job at a time: the lock, the buffer, the watchers
-  sources/health.py    connection test via Cube's /readyz
-  sources/model/vcs.py     git as a subprocess against a source's model directory
-  sources/model/edits.py   the edit gate: append-only cubes, rewritable views
-  sources/model/impact.py  what a branch would break, against the served catalog
-  sources/model/tools.py   the editor agent's six tools
-  web/model_edit.py    branches, files, validate, commit, merge, and the editor chat
-  web/sources.py       the sources HTTP surface and the job stream — the only
-                       way a source is created, edited or run
-  web/stream.py        sse() — one framing for the chat and the job streams
-  db.py                how this process opens SQLite, for both stores
-  api.py  __main__.py  entrypoints
-
-cube/sources/<name>/   one source: its Cube model (a git repo, bind-mounted at
-                       /cube/conf/model) and its grounding
-```
-
 `ungrouped` is absent from `CubeQuery` on purpose. It would return raw
 un-aggregated rows and void the aggregate-only guarantee.
 
