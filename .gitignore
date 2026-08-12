@@ -30,3 +30,4 @@ src/web/node_modules/
 src/web/tsconfig.tsbuildinfo
 
 /cube/
+.cube-probe/

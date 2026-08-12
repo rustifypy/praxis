@@ -43,6 +43,7 @@ export function ServedModel({
   loading,
   onRefresh,
   unavailable,
+  onEdit,
 }: {
   model: Model | null;
   grounding: SourceGrounding | null;
@@ -51,6 +52,9 @@ export function ServedModel({
   /** Why the model side cannot be read at all — a stopped container. Distinct from a
    *  Cube that answered badly, and it must not take grounding down with it. */
   unavailable?: string;
+  /** Open the file that defines this entity. Absent on main, where the model is generated
+   *  and the panel is a reader. */
+  onEdit?: (file: string) => void;
 }) {
   const [filter, setFilter] = useState("");
   const [picked, setPicked] = useState<Picked | null>(null);
@@ -277,7 +281,7 @@ export function ServedModel({
 
         <div className="served-detail">
           {entity ? (
-            <Detail entity={entity} needle={needle} />
+            <Detail entity={entity} needle={needle} onEdit={onEdit} />
           ) : artefact ? (
             <ArtefactDetail artefact={artefact} root={grounding?.root ?? ""} />
           ) : (
@@ -325,7 +329,15 @@ function Row({
   );
 }
 
-function Detail({ entity, needle }: { entity: ServedEntity; needle: string }) {
+function Detail({
+  entity,
+  needle,
+  onEdit,
+}: {
+  entity: ServedEntity;
+  needle: string;
+  onEdit?: (file: string) => void;
+}) {
   const members = needle ? entity.members.filter((m) => matches(m, needle)) : entity.members;
   const hidden = entity.members.length - members.length;
   // Only meaningful once some view reaches this cube: marking every member of a cube no
@@ -340,6 +352,12 @@ function Detail({ entity, needle }: { entity: ServedEntity; needle: string }) {
         </span>
         <h4>{entity.title || entity.name}</h4>
         <code className="served-detail-id">{entity.name}</code>
+        {/* In the header rather than a bar of its own: it acts on the thing named beside it. */}
+        {onEdit && entity.file && (
+          <button className="served-detail-edit" onClick={() => onEdit(entity.file)}>
+            Edit
+          </button>
+        )}
       </header>
 
       <p className="served-rel">

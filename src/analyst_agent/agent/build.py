@@ -8,10 +8,11 @@ from ..cube.catalog import Catalog
 from ..cube.client import CubeClient, mint_token
 from ..dashboards.tools import DashboardContext, build_dashboard_tools
 from ..grounding import for_active_source
+from ..sources.model.tools import EditContext, build_editor_tools
 from .content import text_of
 from .middleware import AuditLog, CompactionNotice
 from .model import build_model
-from .prompts import build_system_prompt
+from .prompts import build_editor_prompt, build_system_prompt
 from .tools import Session, build_tools
 
 
@@ -43,8 +44,8 @@ CATALOGS: dict[str, Catalog] = {}
 
 
 async def load_catalog(client: CubeClient, refresh: bool = False) -> Catalog:
-    """The catalog, cached per Cube. Cube Core does not hot-reload its model, so this changes
-    only when a container restarts — which is what `refresh` is for.
+    """The catalog, cached per Cube. Nothing invalidates it on its own, so it changes only when
+    a caller says so — which is what `refresh` is for.
     """
     key = settings.api_root
     if refresh or key not in CATALOGS:
@@ -77,6 +78,24 @@ def build_agent(
             AuditLog(user=ctx.user_id),
             # run_limit, not thread_limit: a thread is a whole conversation once chats
             # persist, and a thread limit would silently end one mid-chat.
+            ModelCallLimitMiddleware(run_limit=20, exit_behavior="end"),
+            CompactionNotice(model=model.with_config(tags=[COMPACTION_TAG])),
+        ],
+        checkpointer=checkpointer,
+    )
+
+
+def build_editor_agent(ctx: EditContext, source: str, branch: str, checkpointer=None):
+    """The model editor. Its own agent and not a mode of the query one: they share no tools,
+    and the only thing the editor may do to the warehouse is restart the container in front of
+    it."""
+    model = build_model()
+    return create_agent(
+        model=model,
+        tools=build_editor_tools(ctx),
+        system_prompt=build_editor_prompt(source, branch),
+        middleware=[
+            AuditLog(user="local"),
             ModelCallLimitMiddleware(run_limit=20, exit_behavior="end"),
             CompactionNotice(model=model.with_config(tags=[COMPACTION_TAG])),
         ],

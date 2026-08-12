@@ -26,7 +26,7 @@ import { ConfirmName } from "./ConfirmName";
 import { Info } from "./Info";
 import { JobProgress } from "./JobProgress";
 import { Menu } from "./Menu";
-import { ServedModel } from "./ServedModel";
+import { ModelEditor } from "./ModelEditor";
 import { TablePicker } from "./TablePicker";
 
 /**
@@ -89,7 +89,19 @@ export function SourceDetail({
     void api
       .servedModel(source.name)
       .then(setModel)
-      .catch((err) => setModel({ serving: false, error: String(err), entities: [] }))
+      // The request itself failed, so nothing is known about the branch either — the editor
+      // reads its own branch state and is not blocked by this.
+      .catch((err) =>
+        setModel({
+          serving: false,
+          error: String(err),
+          entities: [],
+          branch: "",
+          editable: false,
+          dirty: [],
+          unloaded: [],
+        }),
+      )
       .finally(() => setLoadingModel(false));
   }, [source.name]);
 
@@ -435,30 +447,28 @@ export function SourceDetail({
 
       <section className="detail-panel">
         <div className="panel-head">
-          <h3>Serving</h3>
-          <Info label="About the serving panel">
-            Everything the agent brings to a question. The model half is read live from this
-            source's <code>/v1/meta</code> and parsed by the same code the agent queries
-            through — so it is what a question can actually reach, not what the YAML on disk
-            says; the two differ whenever a build half-failed or a file was edited by hand.
-            Grounding is the markdown this source hands the agent <em>before</em> a question
-            does. It is read from local disk on every turn, so an edit takes effect on the
-            next message, where the model needs the container to restart.
+          <h3>Model</h3>
+          <Info label="About the model panel">
+            Everything the agent brings to a question, and — on a branch — where you change
+            it. The list is read live from this source's <code>/v1/meta</code> and parsed by
+            the same code the agent queries through, so it is what a question can actually
+            reach rather than what the YAML on disk says. In dev mode Cube watches these
+            files, so a save is live at once — which is why what you may save is gated rather
+            than what you may load, and why a file that will not compile is refused before it
+            is written. Grounding is the markdown this source hands the agent <em>before</em> a
+            question does, and it is re-read every turn.
           </Info>
         </div>
-        <ServedModel
+        <ModelEditor
+          name={source.name}
+          running={source.running}
           model={model}
           grounding={grounding}
           loading={loadingModel || loadingGrounding}
-          onRefresh={() => {
+          onReload={() => {
             loadModel();
             loadGrounding();
           }}
-          unavailable={
-            source.running
-              ? undefined
-              : "The container is not running, so Cube cannot say what it would serve."
-          }
         />
       </section>
 

@@ -19,7 +19,7 @@ from ..config import settings
 from ..cube.catalog import Catalog
 from ..cube.client import CubeClient, mint_token
 from ..cube.shape import Column, export_value
-from . import dashboards, sources
+from . import dashboards, model_edit, sources
 from .stream import sse
 
 STATIC = Path(__file__).parent / "static"
@@ -66,6 +66,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="analyst-agent web", lifespan=lifespan)
 app.include_router(sources.router)
 app.include_router(dashboards.router)
+app.include_router(model_edit.router)
 
 
 @app.middleware("http")

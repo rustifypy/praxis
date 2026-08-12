@@ -4,11 +4,18 @@ tools, so only token deltas are interpreted here — and only to split reasoning
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any
 
 from langchain_core.messages import AIMessageChunk
 
-from ..agent.build import COMPACTION_TAG, SecurityContext, build_agent, load_catalog
+from ..agent.build import (
+    COMPACTION_TAG,
+    SecurityContext,
+    build_agent,
+    build_editor_agent,
+    load_catalog,
+)
 from ..agent.content import reasoning_of, text_of
 from ..agent.tools import Session
 from ..config import settings
@@ -16,28 +23,31 @@ from ..cube.client import CubeClient, mint_token
 from ..dashboards.store import DashboardStore
 from ..dashboards.tools import DashboardContext
 from ..grounding import for_active_source
+from ..sources.model import vcs
+from ..sources.model.tools import EditContext
+from ..sources.registry import Source
 from .events import Event
 from .store import ChatStore
 
+Build = Callable[[str], Awaitable[Any]]
+"""Given this turn's id, the agent to run. A callable rather than an agent so that building
+one — which reads a catalog over HTTP — fails into the transcript like any other error."""
 
-async def stream_turn(
+
+async def run_turn(
+    build: Build,
     chat_id: str,
     question: str,
     store: ChatStore,
-    saver,
-    ctx: SecurityContext | None = None,
     cancel: asyncio.Event | None = None,
 ) -> AsyncIterator[Event]:
-    ctx = ctx or SecurityContext(user_id="local")
+    """One agent's stream as events, stored as they arrive. Shared by the query chat and the
+    model editor: what may reach a transcript is subtle, and two copies would drift."""
     turn_id = uuid.uuid4().hex
-
     user_event = Event(type="user", data={"text": question})
     await store.append(chat_id, turn_id, user_event)
     yield user_event
 
-    # Minted per turn. The Cube JWT lives 15 minutes and a chat outlives that easily,
-    # so a client cached for the conversation would start 403ing mid-thought.
-    client = CubeClient(mint_token(ctx.as_claims()))
     buffer = {"thinking": "", "text": ""}
 
     async def flush() -> None:
@@ -51,35 +61,7 @@ async def stream_turn(
                 await store.append(chat_id, turn_id, block)
 
     try:
-        session = Session(
-            catalog=await load_catalog(client),
-            client=client,
-            grounding=await for_active_source(),
-            max_rows=settings.max_rows,
-            # Result sets are kept beside the transcript, under this turn, so the table
-            # and the CSV have something to address after the stream has closed.
-            store=store,
-            chat_id=chat_id,
-            turn_id=turn_id,
-        )
-        # Seeded from the log so `explain_last_query` still answers "show me the SQL for
-        # that" on turn three, and after a restart.
-        session.executed, session.rejected = await store.replay_session(chat_id)
-
-        # The tools that author dashboards. `grounding.source` is the active source's name,
-        # already resolved by `for_active_source` — one lookup, and a new dashboard binds to
-        # the same source the answers in this chat came from.
-        agent = build_agent(
-            session,
-            ctx,
-            checkpointer=saver,
-            dashboards=DashboardContext(
-                store=DashboardStore(),
-                catalog=session.catalog,
-                source_name=session.grounding.source,
-                owner_id=ctx.user_id,
-            ),
-        )
+        agent = await build(turn_id)
         async for mode, payload in agent.astream(
             {"messages": [{"role": "user", "content": question}]},
             config={"configurable": {"thread_id": chat_id}},
@@ -117,7 +99,90 @@ async def stream_turn(
         event = Event(type="error", data={"message": str(exc)})
         await store.append(chat_id, turn_id, event)
         yield event
+
+    yield Event(type="done", data={"turn_id": turn_id})
+
+
+async def stream_turn(
+    chat_id: str,
+    question: str,
+    store: ChatStore,
+    saver,
+    ctx: SecurityContext | None = None,
+    cancel: asyncio.Event | None = None,
+) -> AsyncIterator[Event]:
+    ctx = ctx or SecurityContext(user_id="local")
+    # Minted per turn. The Cube JWT lives 15 minutes and a chat outlives that easily,
+    # so a client cached for the conversation would start 403ing mid-thought.
+    client = CubeClient(mint_token(ctx.as_claims()))
+
+    async def build(turn_id: str):
+        session = Session(
+            catalog=await load_catalog(client),
+            client=client,
+            grounding=await for_active_source(),
+            max_rows=settings.max_rows,
+            # Result sets are kept beside the transcript, under this turn, so the table
+            # and the CSV have something to address after the stream has closed.
+            store=store,
+            chat_id=chat_id,
+            turn_id=turn_id,
+        )
+        # Seeded from the log so `explain_last_query` still answers "show me the SQL for
+        # that" on turn three, and after a restart.
+        session.executed, session.rejected = await store.replay_session(chat_id)
+
+        # The tools that author dashboards. `grounding.source` is the active source's name,
+        # already resolved by `for_active_source` — one lookup, and a new dashboard binds to
+        # the same source the answers in this chat came from.
+        return build_agent(
+            session,
+            ctx,
+            checkpointer=saver,
+            dashboards=DashboardContext(
+                store=DashboardStore(),
+                catalog=session.catalog,
+                source_name=session.grounding.source,
+                owner_id=ctx.user_id,
+            ),
+        )
+
+    try:
+        async for event in run_turn(build, chat_id, question, store, cancel):
+            yield event
     finally:
         await client.aclose()
 
-    yield Event(type="done", data={"turn_id": turn_id})
+
+async def stream_edit_turn(
+    chat_id: str,
+    question: str,
+    source: Source,
+    store: ChatStore,
+    saver,
+    cancel: asyncio.Event | None = None,
+) -> AsyncIterator[Event]:
+    """One turn of a model-editor chat. Its Cube client is pinned to this source's own URL —
+    the query agent's follows CUBE_URL, and the source being edited may not be that one."""
+    client = CubeClient(
+        mint_token(SecurityContext(user_id="local").as_claims()),
+        root=f"{source.url}{settings.cube_base_path}",
+        timeout=10.0,
+    )
+
+    async def build(_turn_id: str):
+        # Read per turn, not stored: the branch is whichever one is checked out, because that
+        # is the one being served, and the page can switch it between turns.
+        branch = await vcs.current(source.model_dir())
+        return build_editor_agent(
+            EditContext(source=source, client=client, dashboards=DashboardStore()),
+            source.name,
+            branch,
+            checkpointer=saver,
+        )
+
+    try:
+        async for event in run_turn(build, chat_id, question, store, cancel):
+            yield event
+    finally:
+        await client.aclose()

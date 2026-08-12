@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 make install                  # uv sync --all-groups
-make test                     # uv run pytest -q — 292 tests, no containers, no model calls
+make test                     # uv run pytest -q — 357 tests, no containers, no model calls
 make lint                     # ruff check + ruff format --check
 make fmt                      # ruff format + ruff check --fix
 make up / make down           # the shared Cube Store (sources are their own containers)
@@ -43,7 +43,7 @@ The launcher cannot be replaced by pointing uvicorn at the app. `web.server.TOKE
 minted at import and nothing else announces it, so `uvicorn analyst_agent.web.server:app`
 serves a portal nobody can authenticate against.
 
-## Four subsystems
+## Five subsystems
 
 **Query time** (`cube/`, `agent/`, `retrieval.py`, `grounding.py`) — the agent answers
 questions about **one** source: `CUBE_URL` picks it, `grounding.for_active_source` is
@@ -106,6 +106,40 @@ it must be triggerable alone, and `cubes` runs it itself when nothing is cached.
 `selection` is why nothing downstream knows selection happened: `build` already tolerates
 a foreign key whose target is absent (it was written that way for keys into another
 schema), and a deselected table is indistinguishable from that.
+
+**Editing & branching** (`sources/model/{edits,impact,vcs,tools}.py`, `web/model_edit.py`,
+`src/web/src/components/{ModelEditor,EditorChat}.tsx`) — a source's model directory is a git
+repo, and the checked-out branch is what the container serves, because the directory is a bind
+mount rather than something copied in. There is no per-branch endpoint the way Cube Cloud has
+one: `git checkout` on the host *is* the deploy, so this subsystem is a gate in front of that
+one mount rather than a sandbox beside it.
+
+| module | role |
+|---|---|
+| `vcs.py` | git as a subprocess against the model directory — branches, diff, merge, and `files_at` for reading main's blobs out of `.git` without checking main out |
+| `edits.py` | tiers 1-2: valid YAML, then append-only cubes vs. freely-rewritable views, diffed against **main**, never against the branch's own previous state |
+| `impact.py` | every dashboard tile and certified query bound to the source, checked against the *served* catalog — not a member-diff of main against the branch, because "is what this tile reads still here" is the question that survives whatever caused the breakage |
+| `tools.py` | the editor agent's six tools — no merge, checkout or branch-create; those restart the container and land work, so they stay buttons on the page |
+| `web/model_edit.py` | the HTTP surface: branches, files, validate (tier 3), commit, merge, and the editor chat |
+
+Two invariants:
+
+1. **The gate runs before the write, because the write is live.** In dev mode Cube watches the
+   mount and reloads in under a second, so `edits.check` is what keeps a file that will not
+   compile off disk in the first place — `write_model_file` and `PUT /files/{path}` both run
+   the identical two-tier check before `write_text`, and neither has another way to refuse.
+2. **Impact is only ever measured against the branch actually checked out.** Two sources can
+   both carry a member of the same name, and a number from the wrong warehouse would look
+   exactly as plausible as a right one. `branch_diff` and `merge` both refuse to compute impact
+   for any branch that is not the one checked out — there is no isolated endpoint to ask a
+   not-checked-out branch's question against.
+
+Main is generated, never edited directly — `_guard`/`_on_a_branch` refuse a write there. A
+branch only ever moves forward from main: no pull, no rebase, no remote at all
+(`GIT_TERMINAL_PROMPT=0`), because there is nothing to sync with. A merge conflict aborts
+immediately rather than leaving markers in the tree, for the same reason a stray
+`grounding/*.yml` is fatal: conflict markers in the live mount are "zero cubes," arrived at
+from a different direction.
 
 **Dashboards** (`dashboards/`, `web/dashboards.py`, `src/web/src/components/{Dashboard,
 DashboardNav,Tile}.tsx`) — the same machinery pointed at a question someone asks
@@ -298,6 +332,10 @@ writes its outcome onto the source's `steps` as it goes. Refreshing the browser
 re-attaches (the buffer replays); restarting the server loses the narration, not the
 result.
 
+`source.model_dir()` is also a git repo once `vcs.ensure` has touched it — see **Editing &
+branching** above for what that buys and what it costs (one container, so one checked-out
+branch, at a time).
+
 ## Things that will cost you an hour
 
 - **`get_stream_writer()` fails two different ways, and a unit test hid the second.** With
@@ -353,8 +391,14 @@ result.
   "Cube-compliant" YAML can hold one; the only free-form slot is `meta:`, which
   `publish.write` regenerates. If grounding ever needs a structured format, that is a
   decision to make grounding *generated* — not a way to keep hand-written files.
-- **Cube Core does not hot-reload model files.** Writing YAML has no effect until that
-  container restarts (~6s). Verified empirically; the docs' hot-reload refers to Cube Cloud.
+- **Cube Core *does* hot-reload model files when `CUBEJS_DEV_MODE=true`** — which is how every
+  source container here runs. A new `views/x.yml` was served in under a second with no restart,
+  and a file with a bad `join_path` took the whole source to a compile error just as fast, then
+  recovered the moment it was deleted. (This bullet previously claimed the opposite. It was
+  wrong.) Two consequences: a save is **live**, so the edit gate refusing bad YAML *before* the
+  write is what keeps a source up, not the restart afterwards; and a restart is still what
+  `publish.install` and a branch checkout use, because a whole model changing at once should be
+  compiled from a known state rather than from whatever the watcher saw mid-write.
 - **Cube qualifies a single-identifier `sql:` but passes an expression through verbatim.**
   `sql: unit_price` becomes `"invoice_line".unit_price`; `sql: quantity * unit_price`
   reaches the database unqualified and dies with `column reference "unit_price" is

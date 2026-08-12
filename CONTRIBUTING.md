@@ -1,5 +1,27 @@
 # Contributing
 
+Thanks for considering it. This project follows the standard GitHub flow: fork, branch,
+PR against `main`. Everyone participating is expected to follow the
+[Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Contribution flow
+
+1. Fork the repo and clone your fork.
+2. Create a branch off `main`: `git checkout -b fix/short-description`.
+3. Make your change. Keep it scoped — a bug fix doesn't need surrounding cleanup, and a
+   PR that mixes an unrelated refactor with the fix is harder to review and harder to
+   revert.
+4. Run the loop below (`make test`, `make lint`) and, for anything container- or
+   model-dependent, verify it against a real source (see below) — the test suite can't.
+5. Open a PR against `main` on this repo. The template asks what changed, how you
+   verified it, and whether docs need updating; fill it in rather than deleting it.
+6. CI runs `make lint` and `make test` on every PR. A maintainer reviews from there.
+
+Small, focused PRs get reviewed faster than large ones. If you're planning something
+bigger than a bug fix, open an issue first so the approach can be discussed before you've
+written the code — especially for anything touching an invariant documented in
+`CLAUDE.md`.
+
 ## Setup
 
 ```bash
@@ -31,7 +53,7 @@ no multi-arch `latest` tag and the default is `arm64v8`.
 ## The loop
 
 ```bash
-make test                 # 165 tests, no containers, no model calls — sub-second
+make test                 # 357 tests, no containers, no model calls — sub-second
 make lint                 # ruff check + format --check
 make fmt                  # fix what is fixable
 ```
@@ -114,6 +136,25 @@ invariants:
 
 New guards on the model's output belong in `MEASURE_RULES` in `decide.py`: a rule id, a
 reason, a predicate. The id shows up in the rejection line, so failures stay countable.
+
+## Changing the model editor
+
+`sources/model/{edits,impact,vcs,tools}.py` and `web/model_edit.py` let a branch of a
+source's model be edited safely, on the same bind mount the container is serving live —
+there's no isolated dev endpoint the way Cube Cloud has one per branch. Two invariants
+hold before you touch it:
+
+1. **The gate runs before the write, not after.** `edits.check` is what keeps a file that
+   won't compile off disk in the first place, because in dev mode a saved file is live in
+   under a second. A new write path that skips it can take a whole source to zero cubes.
+2. **Impact is only meaningful against the checked-out branch.** Two sources can carry a
+   member of the same name; a diff computed against any branch other than the one actually
+   served would report a plausible number about the wrong warehouse. `branch_diff` and
+   `merge` both refuse to compute it otherwise — don't route around that check.
+
+The editor agent's tools (`tools.py`) deliberately exclude merge, checkout and
+branch-create — those restart the container and land work, so they stay buttons on the
+page rather than something an agent can trigger mid-conversation.
 
 ## Pull requests
 

@@ -7,6 +7,7 @@
  */
 
 import { json } from "./api";
+import type { AgentEvent } from "./types";
 
 export type StepName = "connect" | "cubes" | "describe" | "views";
 const STEPS: StepName[] = ["connect", "cubes", "describe", "views"];
@@ -84,6 +85,9 @@ export interface SourceRow {
   invalidates: Record<StepName, StepName[]>;
   /** The one source the agent queries, decided by CUBE_URL. */
   active: boolean;
+  /** The checked-out branch, which is the model this source serves. "" before the model
+   *  directory is a repo. */
+  branch: string;
 }
 
 export interface System {
@@ -165,6 +169,8 @@ interface ServedFolder {
 }
 
 export interface ServedEntity {
+  /** The model file defining it, "" when nothing on this branch does. */
+  file: string;
   name: string;
   is_view: boolean;
   title: string;
@@ -179,6 +185,13 @@ export interface ServedEntity {
 }
 
 export interface ServedModel {
+  /** The checked-out branch, and whether it may be edited — main is generated. */
+  branch: string;
+  editable: boolean;
+  dirty: string[];
+  /** Files defining entities Cube is not serving: written but not validated, which is the
+   *  normal state between a save and a restart rather than a fault. */
+  unloaded: string[];
   /** False when Cube would not answer — often a model that failed to compile rather than
    *  a container that is down. `error` says which. */
   serving: boolean;
@@ -291,6 +304,160 @@ export const runAction = (
 
 export const job = () => json<JobState>("/api/job");
 export const cancelJob = () => post("/api/job/cancel");
+
+// --- branches ------------------------------------------------------------------------
+
+export interface BranchInfo {
+  name: string;
+  current: boolean;
+  /** Files this branch changed against main — what a reviewer is about to read. */
+  changed: number;
+}
+
+export interface Branches {
+  current: string;
+  main: string;
+  /** Paths edited but not committed. A branch cannot be switched while this is non-empty. */
+  dirty: string[];
+  branches: BranchInfo[];
+}
+
+export interface ModelFiles {
+  branch: string;
+  editable: boolean;
+  dirty: string[];
+  files: string[];
+}
+
+export interface BrokenQuery {
+  /** "tile" or "certified". */
+  kind: string;
+  /** The dashboard it sits on, or the grounding file it lives in. */
+  where: string;
+  title: string;
+  members: string[];
+  nearest: Record<string, string[]>;
+}
+
+/** Saved queries against the model being served. Null when it could not be read — and on a
+ *  diff for a branch that is not checked out, where it would describe the wrong model. */
+export interface Impact {
+  checked: number;
+  broken: BrokenQuery[];
+}
+
+/** What Cube makes of the checked-out model. `entities` is what it is serving now. */
+export interface ModelValidation {
+  compiled: boolean;
+  compile_error: string;
+  entities: string[];
+  member_errors: Record<string, string>;
+  impact: Impact | null;
+}
+
+export interface BranchDiff {
+  branch: string;
+  changed: { status: string; path: string }[];
+  patch: string;
+  dirty: string[];
+  impact: Impact | null;
+}
+
+export const branches = (name: string) => json<Branches>(`/api/sources/${name}/branches`);
+
+export const createBranch = (name: string, branch: string) =>
+  post(`/api/sources/${name}/branches`, { name: branch }) as Promise<Branches>;
+
+export const checkoutBranch = (name: string, branch: string) =>
+  post(`/api/sources/${name}/branches/${branch}/checkout`) as Promise<Branches>;
+
+export const deleteBranch = (name: string, branch: string) =>
+  json<Branches>(`/api/sources/${name}/branches/${branch}`, { method: "DELETE" });
+
+export const branchDiff = (name: string, branch: string) =>
+  json<BranchDiff>(`/api/sources/${name}/branches/${branch}/diff`);
+
+/** `force` lands a branch that breaks saved queries — refused otherwise, server-side. */
+export const mergeBranch = (name: string, branch: string, force = false) =>
+  post(`/api/sources/${name}/branches/${branch}/merge${force ? "?force=true" : ""}`) as Promise<
+    ModelValidation & { merged: string; current: string }
+  >;
+
+export const modelFiles = (name: string) => json<ModelFiles>(`/api/sources/${name}/files`);
+
+export const modelFile = (name: string, path: string) =>
+  json<{ path: string; text: string }>(`/api/sources/${name}/files/${path}`);
+
+/** Tiers 1-2 then the write. A rejection arrives as the thrown error's message. */
+export const writeModelFile = (name: string, path: string, text: string) =>
+  json<{ path: string; warnings: string[]; dirty: string[] }>(
+    `/api/sources/${name}/files/${path}`,
+    { method: "PUT", body: JSON.stringify({ text }) },
+  );
+
+export const deleteModelFile = (name: string, path: string) =>
+  json<{ deleted: string; dirty: string[] }>(`/api/sources/${name}/files/${path}`, {
+    method: "DELETE",
+  });
+
+/** Tier 3. Restarts the container, so it is what makes an edit visible as well as checked. */
+export const validateModel = (name: string) =>
+  post(`/api/sources/${name}/validate`) as Promise<ModelValidation>;
+
+export const commitModel = (name: string, message: string) =>
+  post(`/api/sources/${name}/commit`, { message }) as Promise<{
+    branch: string;
+    dirty: string[];
+  }>;
+
+export const discardModel = (name: string) =>
+  post(`/api/sources/${name}/discard`) as Promise<{ dirty: string[] }>;
+
+// --- the editor chat -----------------------------------------------------------------
+
+export interface EditChat {
+  id: string;
+  title: string;
+  branch: string;
+  updated_at: number;
+}
+
+export const editChats = (name: string) => json<EditChat[]>(`/api/sources/${name}/chats`);
+
+export const createEditChat = (name: string) =>
+  post(`/api/sources/${name}/chats`) as Promise<{ id: string; title: string; branch: string }>;
+
+/** Same SSE framing as the query chat — frames split on a blank line, since one read can
+ *  hold a partial frame or several whole ones. */
+export async function* sendEditMessage(
+  name: string,
+  chatId: string,
+  question: string,
+  signal: AbortSignal,
+): AsyncGenerator<AgentEvent> {
+  const response = await fetch(`/api/sources/${name}/chats/${chatId}/messages`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ question }),
+    signal,
+  });
+  if (!response.body) throw new Error("no response body");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let split: number;
+    while ((split = buffer.indexOf("\n\n")) !== -1) {
+      const frame = buffer.slice(0, split);
+      buffer = buffer.slice(split + 2);
+      if (frame.startsWith("data: ")) yield JSON.parse(frame.slice(6)) as AgentEvent;
+    }
+  }
+}
 
 /**
  * Watch the running job.

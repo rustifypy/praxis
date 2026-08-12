@@ -41,6 +41,18 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE INDEX IF NOT EXISTS events_by_chat ON events(chat_id, seq);
 
+-- Which chats edit a model rather than ask questions. A side table and not a `kind` column
+-- on `chats`, because CREATE TABLE IF NOT EXISTS does not diff: adding a table to a live
+-- analyst.db works and adding a column silently does not. `branch` is provenance, like
+-- `chats.cube_url` — the branch acted on is always whichever one is checked out, since that
+-- is the one being served.
+CREATE TABLE IF NOT EXISTS model_chats (
+    chat_id     TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
+    source_name TEXT NOT NULL,
+    branch      TEXT NOT NULL DEFAULT '',
+    created_at  REAL NOT NULL
+);
+
 -- A query's whole result set, which the event log deliberately does not carry: an event
 -- holds the first hundred rows so a replayed transcript renders without a fetch, and
 -- this holds all of them so the table, the CSV and any future drilldown have something
@@ -112,12 +124,45 @@ class ChatStore:
     # Not `list` — a method of that name shadows the builtin for every annotation
     # later in the class body, and `list[dict]` then fails at import time.
     async def list_chats(self, owner_id: str = "local") -> list[Chat]:
+        """The question chats. Model-editor chats are excluded — they belong to a source, and
+        are listed beside the branch they edit rather than in the chat sidebar."""
         async with self._db() as db:
             rows = await db.execute_fetchall(
-                "SELECT * FROM chats WHERE owner_id = ? ORDER BY updated_at DESC",
+                "SELECT chats.* FROM chats LEFT JOIN model_chats ON model_chats.chat_id ="
+                " chats.id WHERE chats.owner_id = ? AND model_chats.chat_id IS NULL"
+                " ORDER BY chats.updated_at DESC",
                 (owner_id,),
             )
         return [Chat(**dict(r)) for r in rows]
+
+    async def create_model_chat(self, source_name: str, branch: str, owner_id: str = "local"):
+        """A chat that edits `source_name`'s model."""
+        chat = await self.create(f"Editing {branch}", owner_id)
+        async with self._db() as db:
+            await db.execute(
+                "INSERT INTO model_chats VALUES (?, ?, ?, ?)",
+                (chat.id, source_name, branch, time.time()),
+            )
+            await db.commit()
+        return chat
+
+    async def model_chats(self, source_name: str) -> list[dict]:
+        async with self._db() as db:
+            rows = await db.execute_fetchall(
+                "SELECT chats.id, chats.title, chats.updated_at, model_chats.branch"
+                " FROM model_chats JOIN chats ON chats.id = model_chats.chat_id"
+                " WHERE model_chats.source_name = ? ORDER BY chats.updated_at DESC",
+                (source_name,),
+            )
+        return [dict(r) for r in rows]
+
+    async def model_chat_source(self, chat_id: str) -> str:
+        """Which source this chat edits, or "" when it is a question chat."""
+        async with self._db() as db:
+            rows = await db.execute_fetchall(
+                "SELECT source_name FROM model_chats WHERE chat_id = ?", (chat_id,)
+            )
+        return rows[0]["source_name"] if rows else ""
 
     async def get(self, chat_id: str) -> Chat | None:
         async with self._db() as db:

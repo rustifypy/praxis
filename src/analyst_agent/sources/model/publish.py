@@ -146,7 +146,8 @@ async def install(
 ) -> Validation:
     """Write the model, restart Cube, and report what Cube makes of it."""
     write(source, files)
-    # Cube Core does not hot-reload model files; only a restart loads what was written.
+    # A restart rather than trusting the file watcher: a whole model is rewritten here, and
+    # `check` must report on that model rather than on a half-seen one.
     if not (await docker.restart(source.service)).ok:
         return Validation(compile_error=f"could not restart {source.service}")
     return await check(source, members=members, every_measure=every_measure, enrichment=enrichment)

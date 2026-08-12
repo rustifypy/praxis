@@ -23,6 +23,22 @@ class Artefact:
     def description(self) -> str:
         return self.meta.get("description", "")
 
+    @property
+    def fenced(self) -> str:
+        """The artefact's fenced code block, or its whole body when it has none."""
+        if "```" not in self.body:
+            return self.body.strip()
+        return self.body.split("```")[1].removeprefix("json").strip()
+
+    @property
+    def query(self) -> dict | None:
+        """A certified query as Cube JSON, or None when it does not parse."""
+        try:
+            parsed = json.loads(self.fenced)
+        except ValueError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
 
 def _load_dir(root: Path | None, name: str) -> list[Artefact]:
     """Every .md in root/name, its frontmatter split off into meta."""
@@ -101,14 +117,10 @@ class Grounding:
             return ""
         blocks = []
         for a in picked:
-            # The certified query is the artefact's fenced JSON block, reformatted.
-            body = a.body
-            if "```" in body:
-                body = body.split("```")[1].removeprefix("json").strip()
-            try:
-                query = json.dumps(json.loads(body), indent=2)
-            except Exception:
-                query = body.strip()
+            # Reformatted when it parses, verbatim when it does not — a query that is not
+            # JSON is still worth showing the agent.
+            parsed = a.query
+            query = json.dumps(parsed, indent=2) if parsed is not None else a.fenced
             blocks.append(
                 f"### {a.name}\nMatches requests like: {a.meta.get('user_request', '-')}\n"
                 f"```json\n{query}\n```"

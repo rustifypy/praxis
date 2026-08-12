@@ -51,6 +51,11 @@ export function ChatHeader({
         <button className="src-chip" aria-expanded={open} onClick={() => setOpen(!open)}>
           <span className={`health-dot ${health?.tone}`} />
           <span className="src-chip-name">{active.name}</span>
+          {/* Only off main. The checked-out branch is the model being queried, and an
+              answer from an unmerged model must not look like an answer from main. */}
+          {active.branch && active.branch !== "main" && (
+            <span className="src-chip-branch">{active.branch}</span>
+          )}
           {/* The size of the model, in the one line there is room for. It is what tells
               you the source is actually built rather than merely connected, without
               opening anything. */}

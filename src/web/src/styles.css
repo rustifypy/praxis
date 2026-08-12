@@ -606,6 +606,16 @@ textarea {
   white-space: nowrap;
 }
 
+/* Rendered only off main, so it reads as a state and not as decoration. */
+.src-chip-branch {
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .src-chip-caret {
   color: var(--faint);
   font-size: 10px;
@@ -862,8 +872,8 @@ textarea {
 
 .copy {
   border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel);
+  border-radius: var(--radius);
+  background: var(--code-bg);
   color: var(--muted);
   font-size: 11.5px;
   padding: 2px 9px;
@@ -3576,4 +3586,320 @@ button.danger.solid {
   margin: 0;
   font-size: 13px;
   line-height: 1.6;
+}
+
+/* --- the model editor -------------------------------------------------------------- */
+/* `.editor*` was free: nothing in the markup or the stylesheet had claimed it. */
+
+.editor-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+/* Inputs do not inherit body line-height and buttons do, so every control sharing this
+   row is sized the same way rather than by padding alone. */
+.editor-bar select,
+.editor-bar button,
+.editor-bar input,
+.editor-actions button {
+  min-height: var(--control);
+  line-height: 1.2;
+}
+
+.editor-name {
+  display: flex;
+  gap: 6px;
+}
+
+.editor-spacer {
+  flex: 1;
+}
+
+.editor-dirty {
+  color: var(--bad);
+  font-size: 12px;
+}
+
+.editor-notice {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.editor-body {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  min-height: 320px;
+}
+
+.editor-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.editor-pane textarea {
+  flex: 1;
+  min-height: 320px;
+  resize: vertical;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: inherit;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
+}
+
+.editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.editor-note {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.editor-note p {
+  margin: 0 0 4px;
+}
+
+.editor-note p:last-child {
+  margin-bottom: 0;
+}
+
+.editor-note.ok {
+  border-color: var(--ok);
+}
+
+.editor-note.bad {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+/* No flex-basis: it lives in a column now, where that would set its height. */
+.editor-diff {
+  margin: 0;
+  padding: 8px;
+  max-height: 300px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  font-size: 12px;
+  white-space: pre;
+}
+
+.editor-hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.editor-broken {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.editor-broken li {
+  margin-bottom: 3px;
+}
+
+/* --- the editor chat ---------------------------------------------------------------- */
+
+.edchat {
+  margin-top: 8px;
+}
+
+.edchat-empty {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.edchat-empty p {
+  margin: 0 0 8px;
+}
+
+.edchat-examples {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.edchat-examples button {
+  min-height: var(--control);
+  line-height: 1.2;
+  font-size: 12px;
+  border-radius: 999px;
+}
+
+/* The log scrolls, not the whole panel — the composer below it must stay put. */
+.edchat-log {
+  max-height: 380px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* What you asked, as a quiet block rather than a bubble: the agent's reply is the content
+   and two competing bubbles made the exchange harder to skim, not easier. */
+.edchat-you {
+  margin: 10px 0 8px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--accent);
+  background: var(--raised);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: 13px;
+}
+
+.edchat-agent {
+  margin-bottom: 12px;
+}
+
+.edchat-tool {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 1px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.edchat-tool.bad {
+  color: var(--bad);
+}
+
+.edchat-tick {
+  width: 10px;
+  color: var(--faint);
+  text-align: center;
+}
+
+.edchat-tool.bad .edchat-tick {
+  color: var(--bad);
+}
+
+.edchat-label {
+  flex: 0 1 auto;
+}
+
+.edchat-note {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.edchat-wait {
+  margin: 0;
+  color: var(--faint);
+  font-size: 13px;
+}
+
+/* This agent replies with the YAML it wrote, so the fenced block is the point. */
+.edchat-md {
+  font-size: 13px;
+}
+
+.edchat-md > :first-child {
+  margin-top: 0;
+}
+
+.edchat-md > :last-child {
+  margin-bottom: 0;
+}
+
+.edchat-md p,
+.edchat-md ul,
+.edchat-md ol {
+  margin: 0 0 8px;
+}
+
+.edchat-md pre {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  /* Its own scroller: a long `sql:` must not make the page scroll sideways. */
+  overflow-x: auto;
+}
+
+.edchat-md code {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.edchat-md pre code {
+  white-space: pre;
+}
+
+.edchat-ask {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.edchat-ask input {
+  flex: 1;
+}
+
+.edchat-ask input,
+.edchat-ask button {
+  min-height: var(--control);
+  line-height: 1.2;
+}
+
+/* In the detail header, not on a bar of its own — it acts on the entity named beside it,
+   and a bar there would be the third row of controls in this panel. */
+/* No `margin-left: auto` — `.served-detail-id` already carries one, so this just sits after
+   it at the right-hand end. */
+.served-detail-edit {
+  min-height: var(--control);
+  line-height: 1.2;
+  font-size: 12px;
+}
+
+/* Shut by default, so the panel ends at the model rather than at a chat box. */
+.editor-assist {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.editor-assist-head {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.editor-assist-head:hover {
+  color: inherit;
+}
+
+/* Already inside .editor-assist's rule, so it does not draw a second divider. */
+.editor-assist .edchat {
+  border-top: 0;
+  padding-top: 4px;
 }

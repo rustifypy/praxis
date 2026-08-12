@@ -8,7 +8,7 @@ from ...config import settings
 from .. import docker, health
 from ..registry import Source, scaffold_source_dirs
 from ..store import STEPS, SourceStore
-from . import build, decide, publish, read, selection
+from . import build, decide, publish, read, selection, vcs
 from .state import dump_enrichment, dump_schema, load_enrichment, load_schema
 from .warehouse import Schema
 
@@ -46,6 +46,7 @@ def _say(report: Report | None, stage: str, payload: dict) -> None:
 async def connect(source: Source, store: SourceStore, report: Report | None = None) -> StepResult:
     """Create the container from this source's row and wait for Cube to say it is up."""
     model_dir = scaffold_source_dirs(source)
+    await vcs.ensure(model_dir)
     _say(report, "connect", {"message": f"starting {source.service}"})
 
     created = await docker.create(
@@ -315,6 +316,12 @@ ACTIONS = ("connect", "read", "cubes", "describe", "views")
 must be triggerable on its own, but it records no step — the four in `store.STEPS` are the ones.
 """
 
+WRITES_MODEL = ("cubes", "describe", "views")
+"""The actions that rewrite the model directory, and so the ones that commit. Each commits pass
+*or* fail: a model Cube rejected is left on disk deliberately, and an uncommitted tree is one
+`git checkout` away from refusing to switch branches.
+"""
+
 
 async def action(
     name: str,
@@ -339,20 +346,38 @@ async def action(
         ):
             raise StepFailed(f"run {STEPS[index - 1]} first")
 
+    model_dir = source.model_dir()
+    if name in WRITES_MODEL:
+        # Before the write, not after. A source built before any of this existed gets its
+        # current model captured as the initial commit, so the rewrite about to happen is
+        # recoverable — the hazard `publish.write` has carried all along.
+        await vcs.ensure(model_dir)
+
     try:
         if name == "connect":
             return await connect(source, store, report)
         if name == "read":
             return StepResult(summary=await read_catalog(source, store, report))
         if name == "cubes":
-            return await cubes(source, store, schema, tables, report)
-        if name == "describe":
-            return await describe(source, store, report)
-        return await views(source, store, report)
+            result = await cubes(source, store, schema, tables, report)
+        elif name == "describe":
+            result = await describe(source, store, report)
+        else:
+            result = await views(source, store, report)
     except StepFailed as exc:
         if name in STEPS:
             await store.save_step(source.name, name, _record({}, failure=str(exc)))
+        if name in WRITES_MODEL:
+            await vcs.commit(model_dir, f"{name} — failed: {exc}"[:200])
         raise
+
+    detail = ", ".join(f"{k}={v}" for k, v in result.summary.items() if not isinstance(v, list))
+    committed = await vcs.commit(model_dir, f"{name} — {detail}"[:200])
+    # A failed commit must not fail a build that worked, but it must not be silent either:
+    # someone who thinks they have history and does not is worse off than before.
+    if not committed.ok:
+        result.notes.append(f"not committed to the model repo: {committed.message}")
+    return result
 
 
 async def generate(

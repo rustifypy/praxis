@@ -24,7 +24,7 @@ from ..sources.drivers import (
     get,
     split_mounts,
 )
-from ..sources.model import selection
+from ..sources.model import edits, selection, vcs
 from ..sources.model.run import ACTIONS, StepFailed
 from ..sources.registry import Source, next_port, scaffold_source_dirs, validate_new
 from ..sources.store import SourceStore, merge_credentials, public
@@ -79,6 +79,16 @@ def runner_of(request: Request) -> jobs.Runner:
     return request.app.state.jobs
 
 
+def invalidate(cache: dict, source: Source) -> None:
+    """Forget what is cached about a source whose model just changed: its health probe, and —
+    when it is the one the agent queries — the catalog behind `search_model`. Neither is watched
+    for changes, so both go stale the moment a model does.
+    """
+    cache.pop(source.name, None)
+    if source.is_active:
+        CATALOGS.pop(settings.api_root, None)
+
+
 # --- reading -----------------------------------------------------------------
 
 
@@ -105,6 +115,10 @@ async def _view(request: Request, source: Source, containers: dict[str, str], st
     body = public(source, steps=steps, running=running, health=probed["health"])
     body["serving"] = probed["serving"]
     body["container_state"] = state or "missing"
+    # The checked-out branch is the model this source serves, so anywhere a query can be
+    # issued has to be able to say which one. Empty until the directory is a repo.
+    model_dir = source.model_dir()
+    body["branch"] = await vcs.current(model_dir) if vcs.is_repo(model_dir) else ""
     return body
 
 
@@ -207,6 +221,20 @@ async def source_catalog(name: str, request: Request) -> dict:
 async def source_model(name: str, request: Request) -> dict:
     """What Cube has compiled, read live from this source's own `/v1/meta`."""
     source = await _find(request, name)
+    # Which file defines each entity, so the panel that lists what Cube serves is also the
+    # panel that edits it. Keyed by name and read from the working tree rather than assumed
+    # from `cubes/<name>.yml`: a hand-edited model may put a cube anywhere.
+    model_dir = source.model_dir()
+    on_disk, _ = edits.read(
+        {str(p.relative_to(model_dir)): p.read_text() for p in sorted(model_dir.rglob("*.yml"))}
+    )
+    branch = await vcs.current(model_dir) if vcs.is_repo(model_dir) else ""
+    state = {
+        "branch": branch,
+        "editable": bool(branch) and branch != vcs.MAIN,
+        "dirty": await vcs.status(model_dir) if branch else [],
+    }
+
     client = CubeClient(
         mint_token(SecurityContext(user_id="local").as_claims()),
         root=f"{source.url}{settings.cube_base_path}",
@@ -215,7 +243,15 @@ async def source_model(name: str, request: Request) -> dict:
     try:
         meta = await client.meta()
     except (CubeError, httpx.RequestError) as exc:
-        return {"serving": False, "error": str(exc)[:400], "entities": []}
+        # A stopped container does not stop the editing. The files are on this machine, and
+        # the branch is still what a restart would load.
+        return {
+            "serving": False,
+            "error": str(exc)[:400],
+            "entities": [],
+            "unloaded": sorted({e.file for e in on_disk.values()}),
+            **state,
+        }
     finally:
         await client.aclose()
 
@@ -241,9 +277,16 @@ async def source_model(name: str, request: Request) -> dict:
     return {
         "serving": True,
         "error": "",
+        **state,
+        # Defined on disk but absent from what Cube serves. With the file watcher on this is
+        # a file that failed to compile; with dev mode off it is simply one not loaded yet.
+        "unloaded": sorted(
+            {e.file for e in on_disk.values() if e.name not in {c.name for c in catalog.entities}}
+        ),
         "entities": [
             {
                 "name": e.name,
+                "file": on_disk[e.name].file if e.name in on_disk else "",
                 "is_view": e.is_view,
                 "title": e.title,
                 "description": e.description,
@@ -499,10 +542,7 @@ async def run_action(name: str, name_of_action: str, body: RunStep, request: Req
             runner.emit("log", message=await docker.logs(source.service, 40))
             raise
         finally:
-            cache.pop(source.name, None)
-            # A rebuilt model must not stay invisible to the agent's cached catalog.
-            if source.is_active:
-                CATALOGS.pop(settings.api_root, None)
+            invalidate(cache, source)
             job.current = ""
         runner.emit(
             "step_end",

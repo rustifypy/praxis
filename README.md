@@ -1,11 +1,21 @@
 # analyst-agent
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
 An analytics agent over a self-hosted Cube Core semantic layer.
 
 The agent never writes SQL. It emits **Cube JSON queries**, which pass a four-tier
 gate before anything touches the warehouse. Cube compiles the query to SQL and
 executes it; the agent only ever speaks HTTP to Cube and holds no database
 credentials.
+
+- **Chat** — ask questions in plain English, get a governed query, a table, a chart, and the trace
+- **Boards** — pin questions asked repeatedly as dashboard tiles that store the query, not the rows
+- **Data** — connect a warehouse, generate its Cube model in four steps, then edit that model on a branch
+
+Everything above is one portal, one process, one machine. See [Contributing](#contributing)
+if you want to help build the parts in [Next](#next).
 
 ## Why JSON queries and not SQL
 
@@ -37,7 +47,8 @@ make web                      # build the frontend, then open the portal
 
 Then: **Data** in the rail → Add source → walk the five stages, and the Serving panel on
 that source's page shows what Cube compiled. Switch to **Chat** and ask questions; the
-header there names the source you are querying and lists everything it exposes.
+header there names the source you are querying and lists everything it exposes. **Boards**
+sits between the two — pin a question you'll ask again and it becomes a tile.
 
 There is no bundled database — bring your own. Adding it in the portal starts its
 Cube container and verifies the connection. A database running on this machine is
@@ -80,6 +91,28 @@ Reasoning summaries need `AZURE_OPENAI_API_VERSION=2025-03-01-preview` or later;
 
 The frontend source is `src/web/` (React + Vite). `npm run dev` there gives hot reload
 against a running `analyst`. `make web-build` is what produces what ships.
+
+## Dashboards
+
+A dashboard is the same machinery pointed at a question someone asks repeatedly. A tile
+stores the **query**, not the rows — so a dashboard costs nothing to keep around and
+nothing goes stale silently.
+
+The agent authors and arranges tiles from chat ("put yesterday's revenue next to this
+board" adds a tile); it never refreshes one. **Refresh is a button on the page**,
+deliberately — an agent that could trigger a refresh would turn "tidy up this dashboard"
+into a dozen warehouse queries nobody asked for. A newly-added tile has no data until
+someone clicks it, and the agent says so rather than implying otherwise.
+
+A refresh is atomic: every tile compiles before any tile executes, so one broken tile
+can't leave the rest half-updated, and the same compile pass runs when a board opens —
+a member a model rebuild dropped shows up as a banner, not a silent gap. A refresh also
+**re-executes rather than rewrites**: a tile asking for "last 30 days" moves with every
+refresh, one asking for `2026-01-01..2026-01-31` never does, and the tile labels which
+kind it is from what Cube actually resolved.
+
+One model call runs per refresh for the whole board — a cross-tile paragraph on what
+changed — never one call per tile.
 
 ## Data sources
 
@@ -133,8 +166,30 @@ waits rather than corrupting the first.
 `CUBE_URL` selects the source the agent queries — the portal marks exactly one **active**
 and every other one *configured, not connected*. Cube's playground is on that same port.
 
-Cube Core does not hot-reload model files — writing YAML into
-`cube/sources/<name>/` takes effect on the next restart of that one container.
+Cube Core runs in dev mode here, and **does** hot-reload model files: a saved YAML change
+is served in under a second, no restart. That is why the edit gate below runs before the
+write and not after — a file that will not compile takes the whole source down the instant
+it lands.
+
+### Editing the model
+
+`cube/sources/<name>/` is a git repo. The checked-out branch is what the container serves —
+there's no separate dev endpoint, `git checkout` on the host *is* the deploy — so editing
+happens on a branch, never on `main`, which the pipeline above generates and nothing else
+writes to.
+
+From a source's page: create a branch, then either edit YAML files directly or open the
+editor chat and describe the change. Both paths run through the same two-tier gate before
+anything reaches disk — cubes are **append-only** (add measures/dimensions/segments, edit
+`description`/`title`/`meta`/`format`, never rename or remove what's there), views are
+freely rewritable. **Validate** restarts the container, asks Cube what compiled, and checks
+every dashboard tile and certified query bound to the source against what's actually being
+served. **Merge** does the same check one more time, then folds the branch into `main` and
+restarts — refused if it would break a saved query, unless you force it.
+
+There's no remote and no PR review inside the tool: no pull, no rebase, nothing to sync
+with. Review happens the way it would for any git branch — `git diff`, `git log`, in your
+own editor, on the same directory the container is reading.
 
 ## Layout
 
@@ -160,20 +215,30 @@ src/analyst_agent/
   web/static/          committed frontend build (make web-build)
   agent/model.py       QUERY_MODEL -> chat model (Azure endpoint/deployment wiring)
   agent/build.py       create_agent wiring, caller identity for the audit log
+  dashboards/store.py  dashboards / tiles / layouts / runs / tile_results, one file
+  dashboards/tiles.py  what a valid tile is; outgrown() re-checks it on every refresh
+  dashboards/run.py    validate (tiers 1-3) and refresh (+ tier 4), the atomic pass
+  dashboards/tools.py  the eight agent tools — refresh is not one of them
+  web/dashboards.py    the dashboards HTTP surface; refresh lives here only
   sources/drivers.py   connection shape per Cube driver
   sources/store.py     sources.db — the registry, credentials, steps, cached catalog
   sources/registry.py  the Source dataclass, its dirs, name and port rules
   sources/docker.py    docker run/stop/logs per source, all async
   sources/jobs.py      one job at a time: the lock, the buffer, the watchers
   sources/health.py    connection test via Cube's /readyz
+  sources/model/vcs.py     git as a subprocess against a source's model directory
+  sources/model/edits.py   the edit gate: append-only cubes, rewritable views
+  sources/model/impact.py  what a branch would break, against the served catalog
+  sources/model/tools.py   the editor agent's six tools
+  web/model_edit.py    branches, files, validate, commit, merge, and the editor chat
   web/sources.py       the sources HTTP surface and the job stream — the only
                        way a source is created, edited or run
   web/stream.py        sse() — one framing for the chat and the job streams
   db.py                how this process opens SQLite, for both stores
   api.py  __main__.py  entrypoints
 
-cube/sources/<name>/   one source: its Cube model, mounted at /cube/conf/model,
-                       and its grounding
+cube/sources/<name>/   one source: its Cube model (a git repo, bind-mounted at
+                       /cube/conf/model) and its grounding
 ```
 
 `ungrouped` is absent from `CubeQuery` on purpose. It would return raw
@@ -238,3 +303,14 @@ build output does not: `uv_build` ships only `src/analyst_agent`, so Vite writes
   query uses `measureFilter`, which pre-aggregations cannot serve.
 - Swap `LexicalRetriever` for pgvector once the model outgrows fuzzy matching.
 - Add the orchestrator and subagents once single-agent accuracy is measured.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup, the test/lint loop, and what to
+verify against a real container before opening a PR — the test suite deliberately skips
+anything that talks to a database or a model. Everyone participating is expected to follow
+the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## License
+
+[MIT](LICENSE)
