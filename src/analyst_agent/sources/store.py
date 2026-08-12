@@ -1,4 +1,5 @@
-"""sources.db — the registry, credentials included."""
+"""sources.db — the registry, credentials included. The schema is in `db.py`, with every
+other table this process creates."""
 
 import json
 import time
@@ -7,24 +8,8 @@ from pathlib import Path
 import aiosqlite
 
 from ..config import settings
-from ..db import connect
+from ..db import SOURCES_SCHEMA, connect
 from .registry import Source
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS sources (
-    name        TEXT PRIMARY KEY,
-    description TEXT NOT NULL DEFAULT '',
-    driver      TEXT NOT NULL,
-    -- One published port per source, and the agent selects one of them by CUBE_URL.
-    port        INTEGER NOT NULL UNIQUE,
-    credentials TEXT NOT NULL DEFAULT '{}',
-    mounts      TEXT NOT NULL DEFAULT '{}',
-    steps       TEXT NOT NULL DEFAULT '{}',
-    state       TEXT NOT NULL DEFAULT '{}',
-    created_at  REAL NOT NULL,
-    updated_at  REAL NOT NULL
-);
-"""
 
 STEPS = ("connect", "cubes", "describe", "views")
 """In order. The UI renders one row per step, and a step may only run once the one
@@ -40,7 +25,7 @@ class SourceStore:
 
     async def init(self) -> None:
         async with self._db() as db:
-            await db.executescript(SCHEMA)
+            await db.executescript(SOURCES_SCHEMA)
             await db.commit()
         # Database passwords in plaintext, so owner-only — the same bar the per-source
         # credential files this replaced were held to.

@@ -13,65 +13,8 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ..agent.tools import QueryRecord
 from ..config import settings
-from ..db import connect
+from ..db import CHAT_SCHEMA, connect
 from .events import Event
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS chats (
-    id         TEXT PRIMARY KEY,
-    title      TEXT NOT NULL,
-    owner_id   TEXT NOT NULL,
-    -- Which Cube this chat ran against. One agent, one Cube today; stored so that
-    -- old chats keep their provenance when the tool learns to span instances.
-    cube_url   TEXT NOT NULL,
-    created_at REAL NOT NULL,
-    updated_at REAL NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS events (
-    id        TEXT PRIMARY KEY,
-    chat_id   TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-    turn_id   TEXT NOT NULL,
-    seq       INTEGER NOT NULL,
-    type      TEXT NOT NULL,
-    data      TEXT NOT NULL,
-    parent_id TEXT,
-    depth     INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE INDEX IF NOT EXISTS events_by_chat ON events(chat_id, seq);
-
--- Which chats edit a model rather than ask questions. A side table and not a `kind` column
--- on `chats`, because CREATE TABLE IF NOT EXISTS does not diff: adding a table to a live
--- analyst.db works and adding a column silently does not. `branch` is provenance, like
--- `chats.cube_url` — the branch acted on is always whichever one is checked out, since that
--- is the one being served.
-CREATE TABLE IF NOT EXISTS model_chats (
-    chat_id     TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
-    source_name TEXT NOT NULL,
-    branch      TEXT NOT NULL DEFAULT '',
-    created_at  REAL NOT NULL
-);
-
--- A query's whole result set, which the event log deliberately does not carry: an event
--- holds the first hundred rows so a replayed transcript renders without a fetch, and
--- this holds all of them so the table, the CSV and any future drilldown have something
--- to address. `columns` is the computed header, not a list of member ids — it is derived
--- from the catalog at query time, and the read endpoint has no catalog to redo that with.
--- `data` rather than `rows`: ROWS is a SQLite keyword, and TEXT-holding-JSON named `data`
--- is what the events table already calls it.
-CREATE TABLE IF NOT EXISTS results (
-    id         TEXT PRIMARY KEY,
-    chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-    turn_id    TEXT NOT NULL,
-    columns    TEXT NOT NULL,
-    data       TEXT NOT NULL,
-    row_count  INTEGER NOT NULL,
-    created_at REAL NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS results_by_chat ON results(chat_id);
-"""
 
 
 @dataclass
@@ -93,7 +36,7 @@ class ChatStore:
 
     async def init(self) -> None:
         async with self._db() as db:
-            await db.executescript(SCHEMA)
+            await db.executescript(CHAT_SCHEMA)
             await db.commit()
 
     async def create(self, title: str = "New chat", owner_id: str = "local") -> Chat:

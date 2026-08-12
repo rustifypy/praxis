@@ -1,5 +1,5 @@
-"""Dashboards, tiles, layouts and refresh history, in `analyst.db`. **These tables will never
-gain a column** — `CREATE TABLE IF NOT EXISTS` does not diff, so adding one fails silently.
+"""Dashboards, tiles, layouts and refresh history, in `analyst.db`. The schema is in `db.py`
+with the rest of that file's tables — see there for why it is not beside this module.
 """
 
 import json
@@ -9,85 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..config import settings
-from ..db import connect
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS dashboards (
-    id          TEXT PRIMARY KEY,
-    title       TEXT NOT NULL,
-    owner_id    TEXT NOT NULL,
-    -- Which source these queries mean something against, compared with the active source
-    -- before any refresh: two warehouses can both have `sales.revenue` and nothing would
-    -- error on the wrong one. No chat_id — a dashboard is editable from any chat.
-    source_name TEXT NOT NULL,
-    created_at  REAL NOT NULL,
-    updated_at  REAL NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS tiles (
-    id           TEXT PRIMARY KEY,
-    dashboard_id TEXT NOT NULL REFERENCES dashboards(id) ON DELETE CASCADE,
-    title        TEXT NOT NULL,
-    -- A copy of the Cube JSON, not a pointer into the event log, so deleting the chat a
-    -- tile was born in cannot take the tile with it.
-    query        TEXT NOT NULL,
-    chart        TEXT NOT NULL,
-    -- Which timeDimension a dashboard-level date control would write into. Unread today;
-    -- without the column that control is unbuildable.
-    time_member  TEXT NOT NULL DEFAULT '',
-    -- Soft, so reverting a layout can bring a deleted tile back.
-    deleted_at   REAL,
-    created_at   REAL NOT NULL,
-    updated_at   REAL NOT NULL
-);
-
--- Versioned apart from tiles: rearranging is the edit undo exists for, and recording it
--- must not duplicate twelve stored queries. A version naming a since-deleted tile is
--- normal and renders as the tiles that survive.
-CREATE TABLE IF NOT EXISTS layouts (
-    dashboard_id TEXT NOT NULL REFERENCES dashboards(id) ON DELETE CASCADE,
-    version      INTEGER NOT NULL,
-    spec         TEXT NOT NULL,
-    note         TEXT NOT NULL DEFAULT '',
-    created_at   REAL NOT NULL,
-    PRIMARY KEY (dashboard_id, version)
-);
-
--- A refresh is an object because it is atomic: it either happened or it did not, and
--- "as of" is one timestamp for the board rather than one per tile.
-CREATE TABLE IF NOT EXISTS runs (
-    id           TEXT PRIMARY KEY,
-    dashboard_id TEXT NOT NULL REFERENCES dashboards(id) ON DELETE CASCADE,
-    status       TEXT NOT NULL,
-    errors       TEXT NOT NULL DEFAULT '[]',
-    insight      TEXT NOT NULL DEFAULT '',
-    started_at   REAL NOT NULL,
-    finished_at  REAL
-);
-
-CREATE TABLE IF NOT EXISTS tile_results (
-    id             TEXT PRIMARY KEY,
-    run_id         TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-    tile_id        TEXT NOT NULL REFERENCES tiles(id) ON DELETE CASCADE,
-    -- Cube returns a grouped time dimension under two keys, so a header recovered from the
-    -- rows invents a duplicate column. Stored, like `results.columns`.
-    columns        TEXT NOT NULL,
-    -- Nullable so pruning drops rows and keeps the history.
-    data           TEXT,
-    row_count      INTEGER NOT NULL,
-    -- What Cube resolved each dateRange to. The only thing that says whether a refresh
-    -- moved a window.
-    resolved_ranges TEXT NOT NULL DEFAULT '{}',
-    duration_ms    INTEGER,
-    insight        TEXT NOT NULL DEFAULT '',
-    created_at     REAL NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS tiles_by_dashboard ON tiles(dashboard_id);
-CREATE INDEX IF NOT EXISTS runs_by_dashboard  ON runs(dashboard_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS results_by_run     ON tile_results(run_id);
-CREATE INDEX IF NOT EXISTS results_by_tile    ON tile_results(tile_id, created_at DESC);
-"""
+from ..db import DASHBOARDS_SCHEMA, connect
 
 ROWS_KEPT = 2
 """Runs deep a tile keeps its rows — what a delta against the previous refresh needs."""
@@ -156,7 +78,7 @@ class DashboardStore:
 
     async def init(self) -> None:
         async with self._db() as db:
-            await db.executescript(SCHEMA)
+            await db.executescript(DASHBOARDS_SCHEMA)
             await db.commit()
 
     # --- dashboards ---------------------------------------------------------------
