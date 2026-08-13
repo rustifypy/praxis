@@ -20,7 +20,7 @@ anything holding state (`layout`, `spec`, `query`, `tiles`)."""
 
 @dataclass
 class DashboardContext:
-    """Separate from the query `Session` so `/ask` can build the query tools without a store."""
+    """Separate from the query `Session`: a different store, and the query tools never read it."""
 
     store: DashboardStore
     catalog: Catalog

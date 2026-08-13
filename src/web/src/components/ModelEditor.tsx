@@ -47,9 +47,9 @@ function Breakage({ impact }: { impact: Impact }) {
  * The model: what this source serves, and — on a branch — how to change it.
  *
  * One panel, and one body with three modes: the model, one file, or the review before a
- * merge. Editing used to stack its own toolbar above the model's, which put three rows of
- * controls over a list that already had its own. Everything that acts on the branch is in
- * the top bar, everything that acts on an entity is in that entity's detail header.
+ * merge. Editing does not get a toolbar of its own — that would stack three rows of controls
+ * over a list that already has its own. Everything that acts on the branch is in the top bar,
+ * everything that acts on an entity is in that entity's detail header.
  *
  * The list is the *compiled* model, because a view's members only exist once Cube has
  * resolved its includes and aliases; the YAML is what you edit to move them.

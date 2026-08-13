@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import { useDismiss } from "../hooks";
 import type { SourceRow } from "../sources";
-import { healthOf, servingSummary } from "../sources";
+import { healthOf, servingNote } from "../sources";
 
 /**
  * Which source this conversation queries, and how to change it.
@@ -59,9 +59,7 @@ export function ChatHeader({
           {/* The size of the model, in the one line there is room for. It is what tells
               you the source is actually built rather than merely connected, without
               opening anything. */}
-          <span className="src-chip-meta">
-            {active.serving ? servingSummary(active.serving) : health?.label}
-          </span>
+          <span className="src-chip-meta">{servingNote(active)}</span>
           <span className="src-chip-caret" aria-hidden>
             ▾
           </span>
@@ -83,9 +81,7 @@ export function ChatHeader({
                 >
                   <span className={`health-dot ${healthOf(source).tone}`} />
                   <span className="src-switch-name">{source.name}</span>
-                  <span className="src-switch-meta">
-                    {source.serving ? servingSummary(source.serving) : healthOf(source).label}
-                  </span>
+                  <span className="src-switch-meta">{servingNote(source)}</span>
                   {source.active ? (
                     <span className="badge accent">active</span>
                   ) : (

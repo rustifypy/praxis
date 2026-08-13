@@ -78,12 +78,14 @@ export function AddSource({
         ? `${name} already exists`
         : "";
 
-  // When editing, an empty required field means "keep it", so nothing is missing.
+  // Which fields are needed is the server's answer (`required_envs`); whether a box is empty
+  // is the only part that has to be local. When editing, an empty field means "keep it".
+  const needed = spec?.required_envs ?? [];
   const missing = editing
     ? []
-    : (spec?.fields ?? [])
-        .filter((f) => f.required && !f.boolean && !(values[f.env] ?? "").trim())
-        .map((f) => f.label);
+    : needed
+        .filter((env) => !(values[env] ?? "").trim())
+        .map((env) => spec?.fields.find((f) => f.env === env)?.label || env);
 
   const hostField = spec?.fields.find((f) => f.env === "CUBEJS_DB_HOST");
   const hostIsLocal =
@@ -177,7 +179,7 @@ export function AddSource({
           ) : (
             <label key={field.env}>
               {field.label}
-              {!field.required && <span className="optional"> optional</span>}
+              {!needed.includes(field.env) && <span className="optional"> optional</span>}
               <input
                 type={field.secret ? "password" : "text"}
                 value={values[field.env] ?? ""}

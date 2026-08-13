@@ -1,8 +1,8 @@
-"""`run.action` — the one dispatcher the CLI and the portal share.
+"""`run.action` — the one dispatcher every caller of a step goes through.
 
-No containers and no model calls: the steps are stubbed. What is under test is the
-behaviour that used to live in each caller and could therefore drift — the order rule,
-and what a failure leaves in the database.
+No containers and no model calls: the steps are stubbed. What is under test is the behaviour
+that belongs here rather than in each caller, and would drift if it were duplicated — the
+order rule, and what a failure leaves in the database.
 """
 
 import pytest
@@ -64,7 +64,7 @@ async def test_read_is_reachable_without_any_step_and_records_none(store, monkey
 
 
 async def test_a_failing_step_is_recorded_before_it_is_re_raised(store, monkeypatch):
-    """The route used to write this itself, so a CLI failure recorded nothing at all."""
+    """Recorded here and not by the route, so a failure outside the portal records it too."""
 
     async def boom(source, st, report=None):
         raise StepFailed("Cube rejected the model")
@@ -93,10 +93,19 @@ async def test_a_failing_read_records_nothing(store, monkeypatch):
     assert await store.steps("shop") == {}
 
 
+async def test_a_stage_with_no_branch_is_refused_rather_than_run_as_views(store, monkeypatch):
+    """`STAGES` is what the membership check accepts, so a name added there with no branch in
+    the dispatch has to be refused rather than fall through to whichever step is last."""
+    monkeypatch.setattr(run, "STAGES", (*run.STAGES, "publish"))
+    await store.save_step("shop", "connect", {"status": "done"})
+    with pytest.raises(StepFailed, match="stage with no branch"):
+        await run.action("publish", SHOP, store)
+
+
 async def test_only_the_model_writing_actions_commit(store, monkeypatch):
-    """Both paths test `WRITES_MODEL`. The success path used to reach `vcs.commit`
-    unconditionally and was correct only because `connect` and `read` returned before it, so
-    moving either return would have committed a catalog read as though it rewrote the model."""
+    """Both the success and the failure path test `WRITES_MODEL` explicitly, rather than relying
+    on where `connect` and `read` leave the dispatch: a commit for a catalog read would put an
+    empty commit in the model repo under a name that claims it rewrote the model."""
     committed: list[str] = []
 
     async def fake_commit(path, message):

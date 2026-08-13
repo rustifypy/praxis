@@ -27,9 +27,6 @@ lint:
 fmt:
 	uv run ruff format . && uv run ruff check --fix .
 
-api:
-	uv run uvicorn analyst_agent.api:app --reload --port 8000
-
 # A real target, not phony: `npm ci` wipes node_modules and reinstalls, which is right
 # when the lockfile moves and wasteful on every serve. Make reruns it only when it does.
 src/web/node_modules: src/web/package-lock.json

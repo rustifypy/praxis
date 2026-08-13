@@ -223,7 +223,6 @@ file written as YAML takes the whole model to zero cubes.
 uv run analyst                                          # the chat portal
 make web                                                # build the frontend, then serve
 make web-build                                          # the frontend artifact alone
-make api                                                # POST /ask on :8000
 make test lint
 ```
 

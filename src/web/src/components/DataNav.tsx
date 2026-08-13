@@ -6,9 +6,9 @@ import { ACTION_LABEL, STAGE_LABEL, healthOf } from "../sources";
 /**
  * The data mode's whole sidebar: sources, and the job running over one of them.
  *
- * These used to sit under the chat list as a link, a row of dots and a pill — three
- * representations of one concept, none of them the primary thing on screen. Here they are
- * the only thing on screen.
+ * Sources are the only thing on screen here, and belong nowhere else: under a chat list they
+ * become a link, a row of dots and a pill — three representations of one concept, none of
+ * them the primary thing on the page.
  */
 export function DataNav({
   sources,

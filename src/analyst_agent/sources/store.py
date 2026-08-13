@@ -33,8 +33,7 @@ class SourceStore:
         async with self._db() as db:
             await db.executescript(SOURCES_SCHEMA)
             await db.commit()
-        # Database passwords in plaintext, so owner-only — the same bar the per-source
-        # credential files this replaced were held to.
+        # Database passwords in plaintext, so owner-only: the file mode is the whole guard.
         self.path.chmod(0o600)
 
     # --- rows ---------------------------------------------------------------
@@ -195,8 +194,8 @@ def invalidated_by(steps: dict, step: str) -> list[str]:
 
 def blocked_by(steps: dict, stage: str) -> str:
     """The step that must succeed before `stage` may run, or "". `run.action` enforces this and
-    the browser explains it, from this one answer — they disagreed about `cubes`, which needs
-    `connect` and not `read` because `cubes` reads the catalog itself when none is cached."""
+    the browser explains it, both from this one answer. `cubes` needs `connect` and not `read`,
+    because `cubes` reads the catalog itself when none is cached."""
     if stage not in STEPS:
         return ""
     index = STEPS.index(stage)

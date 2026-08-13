@@ -36,14 +36,12 @@ const STEP_BLURB: Record<StepName, string> = {
  * What the pipeline looks like to a person: five stages, not four.
  *
  * `read` has no row in `steps` because it caches a catalog rather than producing model
- * files — a backend distinction that has no business leaking into the UI. Hiding it
- * inside "Build cubes" meant the page promised four steps, and expanding the second one
- * offered a button that did something else.
+ * files — a backend distinction that has no business leaking into the UI. Folding it into
+ * "Build cubes" would promise four steps and then offer a button that does a fifth thing.
  *
  * The order, the states and what blocks what all arrive on `SourceRow.stages`, from
- * `store.STAGES`. Only the copy below is the browser's — a label is presentation, a
- * sequence is the workflow, and keeping a second sequence here is what let the sidebar and
- * the page name different next steps.
+ * `store.STAGES`. Only the copy below is the browser's: a label is presentation, a sequence
+ * is the workflow, and two sequences let a sidebar and a page name different next steps.
  */
 export type StageName = StepName | "read";
 
@@ -61,6 +59,17 @@ export interface StageState {
   /** The step that must succeed first, or "" when nothing is holding it up. */
   blocked_by: StepName | "";
 }
+
+/** From `health.serving_state`. The copy for each is below, in SERVING_NOTE — the state is
+ *  the server's answer, the wording is ours. */
+export type ServingState = "stopped" | "unreachable" | "broken" | "empty" | "ok";
+
+const SERVING_NOTE: Record<Exclude<ServingState, "ok">, string> = {
+  stopped: "stopped",
+  unreachable: "not answering",
+  broken: "model not compiling",
+  empty: "no model yet",
+};
 
 interface StepRecord {
   status?: "done" | "error";
@@ -90,11 +99,14 @@ export interface SourceRow {
   /** What Cube is serving right now, read from /v1/meta. This is the truth about the
    *  model; `steps` is only what this portal did, and the two can disagree. */
   serving: { cubes: number; views: string[]; described: number } | null;
+  /** Why `serving` is what it is. A null `serving` has two unrelated causes — the container
+   *  is stopped, and Cube refuses to compile the model — so it cannot be read as either. */
+  serving_state: ServingState;
   /** Per step, the later steps re-running it would discard. Computed server-side so the
    *  confirmation and the deletion come from one rule. */
   invalidates: Record<StepName, StepName[]>;
   /** Where every stage stands and what is holding it up, in order. Server-side, because
-   *  `run.action` enforces the same rule — and the two disagreed about `cubes`. */
+   *  `run.action` enforces the same rule and only one of the two can be authoritative. */
   stages: StageState[];
   /** The first stage not done, or null once all five are. The primary action every screen
    *  offers, so a sidebar and a page cannot name different ones. */
@@ -122,7 +134,6 @@ interface DriverField {
   label: string;
   default: string;
   secret: boolean;
-  required: boolean;
   boolean: boolean;
   /** Non-empty when the value is a path to a file on this machine, and then also where
    *  that file is mounted in the container — which is the key into `SourceRow.mounts`.
@@ -135,6 +146,10 @@ export interface DriverSpec {
   key: string;
   label: string;
   extracts_tables: boolean;
+  /** The envs a person must fill, from `drivers.required_envs` — the same function POST
+   *  /sources rejects on. There is deliberately no per-field `required` flag to derive this
+   *  from a second time. */
+  required_envs: string[];
   fields: DriverField[];
 }
 
@@ -505,8 +520,22 @@ export function watchJob(onEvent: (event: JobEvent) => void): () => void {
   return () => stream.close();
 }
 
+/**
+ * What to say about a source's model, in one phrase — one function for all four screens.
+ *
+ * The interesting cases are the ones with no model, and `serving_state` is the server's
+ * answer to which one it is. Guessing from `serving` being null cannot tell a compile failure
+ * from a stopped container, and calling the first one "no model yet" is wrong rather than
+ * vague for a source with a dozen working cubes.
+ */
+export function servingNote(source: SourceRow): string {
+  return source.serving_state === "ok" && source.serving
+    ? servingSummary(source.serving)
+    : SERVING_NOTE[source.serving_state as Exclude<ServingState, "ok">];
+}
+
 /** "11 cubes, 3 views, all described" — what Cube is actually serving, in one phrase. */
-export function servingSummary(serving: NonNullable<SourceRow["serving"]>): string {
+function servingSummary(serving: NonNullable<SourceRow["serving"]>): string {
   const total = serving.cubes + serving.views.length;
   const parts = [`${serving.cubes} cube${serving.cubes === 1 ? "" : "s"}`];
   if (serving.views.length) {

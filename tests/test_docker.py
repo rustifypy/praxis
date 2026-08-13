@@ -10,7 +10,15 @@ import pathlib
 import yaml
 
 from analyst_agent.sources import docker
-from analyst_agent.sources.drivers import credentials_for, get, missing_fields, split_mounts
+from analyst_agent.sources.drivers import (
+    ConnField,
+    Driver,
+    credentials_for,
+    get,
+    missing_fields,
+    required_envs,
+    split_mounts,
+)
 from analyst_agent.sources.registry import Source
 
 SHOP = Source(
@@ -135,6 +143,27 @@ def test_missing_required_fields_are_named():
     assert "CUBEJS_DB_USER" in missing
     # Optional, so its absence is not an error.
     assert "CUBEJS_DB_SSL" not in missing
+
+
+def test_a_required_boolean_is_still_required():
+    """A boolean is a field like any other: it has to be answered. The form reads
+    `required_envs` rather than deciding for itself, so it cannot exempt a class of field."""
+    spec = Driver(key="x", label="X", fields=(ConnField("FLAG", "Flag", boolean=True),))
+    assert required_envs(spec) == ["FLAG"]
+    assert missing_fields(spec, {}) == ["FLAG"]
+    assert missing_fields(spec, {"FLAG": "false"}) == []
+
+
+def test_a_fixed_field_is_nobody_to_fill_in():
+    """Databricks' accept-policy flag. It is not offered by /drivers either, so the form has
+    nothing to leave blank — but only this list says so."""
+    assert "CUBEJS_DB_DATABRICKS_ACCEPT_POLICY" not in required_envs(get("databricks-jdbc"))
+    assert "CUBEJS_DB_DATABRICKS_URL" in required_envs(get("databricks-jdbc"))
+
+
+def test_missing_fields_is_required_envs_with_the_blanks_kept():
+    spec = get("postgres")
+    assert missing_fields(spec, {}) == required_envs(spec)
 
 
 def test_nothing_is_missing_once_every_required_field_has_a_value():

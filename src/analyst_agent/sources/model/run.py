@@ -352,8 +352,12 @@ async def action(
             result = await cubes(source, store, schema, tables, report)
         elif name == "describe":
             result = await describe(source, store, report)
-        else:
+        elif name == "views":
             result = await views(source, store, report)
+        else:
+            # The membership check above accepts anything in STAGES, so a name added there
+            # without a branch here has to be refused rather than fall through to `views`.
+            raise StepFailed(f"{name!r} is a stage with no branch in `action`")
     except StepFailed as exc:
         if name in STEPS:
             await store.save_step(source.name, name, _record({}, failure=str(exc)))
@@ -361,8 +365,8 @@ async def action(
             await vcs.commit(model_dir, f"{name} — failed: {exc}"[:200])
         raise
 
-    # Both paths test `WRITES_MODEL`, rather than the success path relying on `connect` and
-    # `read` having returned early — moving either return would have committed a catalog read.
+    # Both paths test `WRITES_MODEL` explicitly rather than relying on the dispatch above:
+    # committing after a catalog read would put a commit in the model repo for nothing.
     if name in WRITES_MODEL:
         detail = ", ".join(f"{k}={v}" for k, v in result.summary.items() if not isinstance(v, list))
         committed = await vcs.commit(model_dir, f"{name} — {detail}"[:200])

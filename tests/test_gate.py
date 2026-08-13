@@ -152,8 +152,8 @@ def test_tier1_errors_returned_not_raised():
 
 
 def test_no_limit_does_not_warn(catalog):
-    """The schema used to default `limit`, so this warning reached the agent on
-    every query it ever ran — and the prompt tells it to report warnings."""
+    """A query with no `limit` has nothing to warn about. Defaulting one in the schema would
+    put this warning on every query ever run, and the prompt tells the agent to report them."""
     r = check({"measures": ["orders.count"]}, catalog)
     assert not any("without order" in w for w in r.warnings)
 
