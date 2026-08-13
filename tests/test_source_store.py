@@ -69,7 +69,8 @@ async def test_round_trip_keeps_credentials_and_mounts(store):
 
 
 async def test_the_database_is_owner_only(store):
-    """It holds database passwords in plaintext, as the env files used to."""
+    """It holds database passwords in plaintext, so the file mode is the only thing guarding
+    them."""
     assert store.path.stat().st_mode & 0o777 == 0o600
 
 
@@ -288,10 +289,10 @@ def test_schema_round_trip_keeps_the_derived_types():
 
 
 def test_the_fixture_sets_every_warehouse_field():
-    """What makes the round trip above mean anything. A field the fixture never sets is equal
-    on both sides whatever the loader does with it — which is how the enumerated loader this
-    replaced could drop a new field with every test still passing. No pydantic model needs
-    this: `model_dump` walks `model_fields`, so its symmetry does not depend on a fixture."""
+    """What makes the round trip above mean anything. A field the fixture never sets is equal on
+    both sides whatever the loader does with it, so an enumerating loader could drop a new field
+    with every test still passing. No pydantic model needs this: `model_dump` walks
+    `model_fields`, so its symmetry does not depend on a fixture."""
     instances = {Schema: [SCHEMA], Table: SCHEMA.tables, Column: [], ForeignKey: []}
     for table in SCHEMA.tables:
         instances[Column] += table.columns
@@ -308,10 +309,10 @@ def test_the_fixture_sets_every_warehouse_field():
 
 def test_a_key_the_dataclass_does_not_have_is_refused_rather_than_dropped():
     """`load_schema` builds with `**raw` instead of picking fields, which is what makes a newly
-    added field survive without anyone editing the loader. The cost is the right one: a key
-    that is no longer a field fails here rather than vanishing days later during `views`."""
+    added field survive without anyone editing the loader. The cost is the right one: a key that
+    is not a field fails here rather than vanishing days later during `views`."""
     raw = dump_schema(SCHEMA)
-    raw["tables"][0]["columns"][0]["comment"] = "a field that used to exist"
+    raw["tables"][0]["columns"][0]["comment"] = "not a field"
     with pytest.raises(TypeError, match="comment"):
         load_schema(raw)
 
@@ -337,9 +338,8 @@ async def test_state_survives_sqlite(store):
 
 
 def test_cubes_is_blocked_by_connect_not_by_read():
-    """The browser blocked it on `read` and the server on `connect`, so a source with a
-    connection and no cached catalog got two different answers. `cubes` reads the catalog
-    itself when none is cached, so `connect` is the real prerequisite."""
+    """`cubes` reads the catalog itself when none is cached, so `connect` is the real
+    prerequisite — gating it on `read` would refuse a source that is ready to build."""
     steps = {"connect": {"status": "done"}}
     assert blocked_by(steps, "cubes") == ""
     assert blocked_by({}, "cubes") == "connect"

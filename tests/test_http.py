@@ -1,9 +1,8 @@
 """The HTTP surface: auth, the chat and result routes, sources and dashboards.
 
-Every route here had no test at all — `web/server.py`, `web/dashboards.py` and `api.py` were
-at zero while the pure functions under them were covered exhaustively. What is asserted is
-what only exists at this layer: the token middleware, the status codes, the route shapes, and
-the derived fields the browser is now forbidden from recomputing.
+What is asserted is what only exists at this layer, since the pure functions underneath are
+covered on their own: the token middleware, the status codes, the route shapes, and the
+derived fields the browser is forbidden from recomputing.
 
 No containers and no model calls, per the repo's rule. `app.state` is populated directly
 rather than by running the lifespan, because the real one opens `~/.analyst` — the databases
@@ -221,8 +220,8 @@ async def test_the_sources_list_is_empty_before_anything_is_added(api):
 
 
 async def test_a_stopped_source_says_so_rather_than_reporting_no_model(api):
-    """`serving` is null for a stopped container and for a model Cube will not compile, and the
-    browser used to guess between them. The state is the server's answer now."""
+    """`serving` is null both for a stopped container and for a model Cube will not compile, so
+    the row has to say which — the browser is given the answer rather than guessing."""
     _, _, sources = api.stores
     await sources.add(SHOP)
 

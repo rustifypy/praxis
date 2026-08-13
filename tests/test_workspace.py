@@ -56,8 +56,8 @@ def test_a_model_path_resolves_inside_the_source(rooted):
     ["../../../../etc/passwd.yml", "/etc/passwd.yml", "cubes/../../escape.yml", ".git/config.yml"],
 )
 def test_a_path_leaving_the_model_directory_is_refused(rooted, path):
-    """`..` and an absolute path both resolve out of the tree, so the check is on the result —
-    the string check this replaced let `.git/hooks/x.yml` through."""
+    """`..` and an absolute path both resolve out of the tree, so the check is on the resolved
+    path: a check on the string itself lets `.git/hooks/x.yml` through."""
     target, refused = workspace.resolve(SOURCE, path)
     assert target is None
     assert "model directory" in refused

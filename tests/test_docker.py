@@ -146,8 +146,8 @@ def test_missing_required_fields_are_named():
 
 
 def test_a_required_boolean_is_still_required():
-    """The form used to decide this itself and skipped booleans, which agreed with the server
-    only because no driver has one. It reads `required_envs` now, so the two cannot part."""
+    """A boolean is a field like any other: it has to be answered. The form reads
+    `required_envs` rather than deciding for itself, so it cannot exempt a class of field."""
     spec = Driver(key="x", label="X", fields=(ConnField("FLAG", "Flag", boolean=True),))
     assert required_envs(spec) == ["FLAG"]
     assert missing_fields(spec, {}) == ["FLAG"]

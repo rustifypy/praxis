@@ -56,8 +56,8 @@ SERVED = health.Serving(cubes=13, views=["sales"], described=13)
 
 
 def test_a_stopped_container_and_an_uncompilable_model_are_not_the_same_state():
-    """Both left `serving` null, and the sources list called the second one "no model yet" —
-    a wrong statement about a source with thirteen cubes rather than a vague one."""
+    """Both leave `serving` null, so anything reading only that has to call one of them by the
+    other's name — "no model yet" for a source with thirteen cubes is wrong, not vague."""
     assert health.serving_state(running=False, healthy=False, served=None) == "stopped"
     assert health.serving_state(running=True, healthy=True, served=None) == "broken"
 

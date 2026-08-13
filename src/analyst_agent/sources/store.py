@@ -33,8 +33,7 @@ class SourceStore:
         async with self._db() as db:
             await db.executescript(SOURCES_SCHEMA)
             await db.commit()
-        # Database passwords in plaintext, so owner-only — the same bar the per-source
-        # credential files this replaced were held to.
+        # Database passwords in plaintext, so owner-only: the file mode is the whole guard.
         self.path.chmod(0o600)
 
     # --- rows ---------------------------------------------------------------
