@@ -1,4 +1,5 @@
 import json
+from dataclasses import MISSING, fields
 
 import pytest
 
@@ -11,12 +12,7 @@ from analyst_agent.sources.model.decide import (
     ViewCube,
     ViewDecision,
 )
-from analyst_agent.sources.model.state import (
-    dump_enrichment,
-    dump_schema,
-    load_enrichment,
-    load_schema,
-)
+from analyst_agent.sources.model.state import dump_schema, load_schema
 from analyst_agent.sources.model.warehouse import Column, ForeignKey, Schema, Table
 from analyst_agent.sources.registry import Source
 from analyst_agent.sources.store import (
@@ -229,7 +225,9 @@ SCHEMA = Schema(
     tables=[
         Table(
             name="invoice_line",
-            schema="public",
+            # Not "public": a field left at its default is invisible to a round-trip test,
+            # which `test_the_fixture_sets_every_warehouse_field` below is what enforces.
+            schema="sales",
             columns=[
                 Column(name="invoice_line_id", data_type="integer", distinct=-1.0),
                 Column(name="invoice_id", data_type="integer"),
@@ -289,8 +287,37 @@ def test_schema_round_trip_keeps_the_derived_types():
     assert back.table("invoice").primary_key == ["invoice_id"]
 
 
+def test_the_fixture_sets_every_warehouse_field():
+    """What makes the round trip above mean anything. A field the fixture never sets is equal
+    on both sides whatever the loader does with it — which is how the enumerated loader this
+    replaced could drop a new field with every test still passing. No pydantic model needs
+    this: `model_dump` walks `model_fields`, so its symmetry does not depend on a fixture."""
+    instances = {Schema: [SCHEMA], Table: SCHEMA.tables, Column: [], ForeignKey: []}
+    for table in SCHEMA.tables:
+        instances[Column] += table.columns
+        instances[ForeignKey] += table.foreign_keys
+
+    for cls, seen in instances.items():
+        for f in fields(cls):
+            default = f.default_factory() if f.default_factory is not MISSING else f.default
+            assert any(getattr(i, f.name) != default for i in seen), (
+                f"{cls.__name__}.{f.name} is left at its default everywhere in SCHEMA, so no "
+                "round-trip assertion can see it disappear"
+            )
+
+
+def test_a_key_the_dataclass_does_not_have_is_refused_rather_than_dropped():
+    """`load_schema` builds with `**raw` instead of picking fields, which is what makes a newly
+    added field survive without anyone editing the loader. The cost is the right one: a key
+    that is no longer a field fails here rather than vanishing days later during `views`."""
+    raw = dump_schema(SCHEMA)
+    raw["tables"][0]["columns"][0]["comment"] = "a field that used to exist"
+    with pytest.raises(TypeError, match="comment"):
+        load_schema(raw)
+
+
 def test_enrichment_survives_the_round_trip():
-    back = load_enrichment(json.loads(json.dumps(dump_enrichment(ENRICHMENT))))
+    back = Enrichment.model_validate(json.loads(json.dumps(ENRICHMENT.model_dump())))
     assert back == ENRICHMENT
     assert back.counts == ENRICHMENT.counts
 
@@ -299,11 +326,11 @@ async def test_state_survives_sqlite(store):
     """The whole point: views can read what cubes decided, days later."""
     await store.add(SHOP)
     await store.save_state(
-        "shop", {"schema": dump_schema(SCHEMA), "enrichment": dump_enrichment(ENRICHMENT)}
+        "shop", {"schema": dump_schema(SCHEMA), "enrichment": ENRICHMENT.model_dump()}
     )
     state = await store.state("shop")
     assert load_schema(state["schema"]) == SCHEMA
-    assert load_enrichment(state["enrichment"]) == ENRICHMENT
+    assert Enrichment.model_validate(state["enrichment"]) == ENRICHMENT
 
 
 # --- the stage rail, decided once and shipped -------------------------------

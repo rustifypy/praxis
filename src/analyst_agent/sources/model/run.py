@@ -9,7 +9,7 @@ from .. import docker, health
 from ..registry import Source, scaffold_source_dirs
 from ..store import STAGES, STEPS, SourceStore, blocked_by
 from . import build, decide, publish, read, selection, vcs
-from .state import dump_enrichment, dump_schema, load_enrichment, load_schema
+from .state import dump_schema, load_schema
 from .warehouse import Schema
 
 Report = Callable[[str, dict], None]
@@ -223,7 +223,7 @@ async def describe(source: Source, store: SourceStore, report: Report | None = N
             enrichment=enrichment,
         )
 
-    await store.save_state(source.name, {"enrichment": dump_enrichment(enrichment)})
+    await store.save_state(source.name, {"enrichment": enrichment.model_dump()})
     summary = {
         **enrichment.counts,
         "repaired": len(enrichment.repaired),
@@ -251,7 +251,7 @@ async def views(source: Source, store: SourceStore, report: Report | None = None
     state = await store.state(source.name)
     if "enrichment" not in state:
         raise StepFailed("run the describe step first — views are built from its decisions")
-    enrichment = load_enrichment(state["enrichment"])
+    enrichment = decide.Enrichment.model_validate(state["enrichment"])
 
     _say(report, "views", {"message": "choosing views over the join paths"})
     roots = build.view_roots(schema)
@@ -271,7 +271,7 @@ async def views(source: Source, store: SourceStore, report: Report | None = None
     if not validation.compiled:
         raise StepFailed(f"Cube rejected the views:\n{validation.compile_error}")
 
-    await store.save_state(source.name, {"enrichment": dump_enrichment(enrichment)})
+    await store.save_state(source.name, {"enrichment": enrichment.model_dump()})
     summary = {
         "views": len(enrichment.views),
         "names": [v.name for v in enrichment.views],

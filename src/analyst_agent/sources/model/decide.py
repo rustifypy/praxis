@@ -2,7 +2,7 @@
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import cache
 
 from pydantic import BaseModel, Field
@@ -70,13 +70,16 @@ class Fix(BaseModel):
     give_up: bool = Field(default=False, description="True if this measure cannot be fixed.")
 
 
-@dataclass
-class Enrichment:
-    cubes: dict[str, CubeDecision] = field(default_factory=dict)
-    views: list[ViewDecision] = field(default_factory=list)
-    rejected: list[str] = field(default_factory=list)
-    repaired: list[str] = field(default_factory=list)
-    dropped: list[str] = field(default_factory=list)
+class Enrichment(BaseModel):
+    """Everything steps 3 and 4 decided. A model rather than a dataclass so that storing it
+    is `model_dump()` and reading it back is `model_validate()` — a new field here survives
+    the trip through `sources.db` without anyone enumerating it."""
+
+    cubes: dict[str, CubeDecision] = Field(default_factory=dict)
+    views: list[ViewDecision] = Field(default_factory=list)
+    rejected: list[str] = Field(default_factory=list)
+    repaired: list[str] = Field(default_factory=list)
+    dropped: list[str] = Field(default_factory=list)
 
     @property
     def counts(self) -> dict[str, int]:
