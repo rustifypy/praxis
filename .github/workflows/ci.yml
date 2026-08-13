@@ -29,3 +29,28 @@ jobs:
 
       - name: Test
         run: uv run pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: src/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: src/web
+
+      - name: Type-check and build
+        run: npx tsc -b && npx vite build
+        working-directory: src/web
+
+      # The bundle is committed because `uv_build` only ships `src/analyst_agent`, so a
+      # stale one is what a wheel would serve. Nothing else notices it is stale.
+      - name: The committed bundle is the one this source builds
+        run: git diff --exit-code --stat -- ../analyst_agent/web/static
+        working-directory: src/web
