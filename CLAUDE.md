@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 make install                  # uv sync --all-groups
-make test                     # uv run pytest -q — 357 tests, no containers, no model calls
+make test                     # uv run pytest -q — no containers, no model calls
 make lint                     # ruff check + ruff format --check
 make fmt                      # ruff format + ruff check --fix
 make up / make down           # the shared Cube Store (sources are their own containers)

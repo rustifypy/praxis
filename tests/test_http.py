@@ -1,0 +1,361 @@
+"""The HTTP surface: auth, the chat and result routes, sources and dashboards.
+
+Every route here had no test at all — `web/server.py`, `web/dashboards.py` and `api.py` were
+at zero while the pure functions under them were covered exhaustively. What is asserted is
+what only exists at this layer: the token middleware, the status codes, the route shapes, and
+the derived fields the browser is now forbidden from recomputing.
+
+No containers and no model calls, per the repo's rule. `app.state` is populated directly
+rather than by running the lifespan, because the real one opens `~/.analyst` — the databases
+here are all under tmp_path. `docker.ours` is stubbed: asking this machine what is running
+would make the same test answer differently on a laptop and in CI.
+"""
+
+import httpx
+import pytest
+
+from analyst_agent.config import settings
+from analyst_agent.sources import docker, jobs
+from analyst_agent.sources.registry import Source
+from analyst_agent.web import server
+
+SHOP = Source(
+    name="shop",
+    description="Orders.",
+    driver="postgres",
+    port=4001,
+    credentials={"CUBEJS_DB_NAME": "shop"},
+)
+
+
+@pytest.fixture
+async def api(tmp_path, monkeypatch, cube):
+    """The app with its state wired to tmp databases and a fake Cube."""
+    from analyst_agent.chat.store import ChatStore
+    from analyst_agent.dashboards.store import DashboardStore
+    from analyst_agent.sources.store import SourceStore
+
+    # `dashboards.run.active_source_name` builds its own `SourceStore()`, so pointing the
+    # setting is the only way to keep these routes off the real ~/.analyst/sources.db. Same
+    # pattern as the dashboard-run tests. `cube_url` matches no source, so nothing is active.
+    monkeypatch.setattr(settings, "sources_db", str(tmp_path / "sources.db"))
+    monkeypatch.setattr(settings, "cube_url", "http://localhost:4999")
+
+    chats = ChatStore(tmp_path / "analyst.db")
+    await chats.init()
+    boards = DashboardStore(tmp_path / "analyst.db")
+    await boards.init()
+    sources = SourceStore(tmp_path / "sources.db")
+    await sources.init()
+
+    server.app.state.store = chats
+    server.app.state.dashboards = boards
+    server.app.state.sources = sources
+    server.app.state.jobs = jobs.Runner()
+    server.app.state.health = {}
+    server.app.state.cube = cube
+    server.app.state.cancels = {}
+    server.app.state.saver = None
+
+    # Nothing is running, so every source reads as stopped — deterministic, and the state the
+    # `serving_state` assertions below care about.
+    monkeypatch.setattr(docker, "ours", _no_containers)
+
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        cookies={server.COOKIE: server.TOKEN},
+    ) as client:
+        client.stores = (chats, boards, sources)  # type: ignore[attr-defined]
+        yield client
+
+
+async def _no_containers() -> dict[str, str]:
+    return {}
+
+
+# --- the token middleware ----------------------------------------------------
+
+
+async def test_healthz_needs_no_token():
+    """The one route the middleware lets past, so a launcher can poll for readiness."""
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=server.app), base_url="http://test"
+    ) as bare:
+        assert (await bare.get("/api/healthz")).status_code == 200
+
+
+async def test_every_other_route_is_refused_without_the_token():
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=server.app), base_url="http://test"
+    ) as bare:
+        for path in ("/api/chats", "/api/catalog", "/api/sources", "/api/dashboards", "/"):
+            assert (await bare.get(path)).status_code == 401, path
+
+
+async def test_a_wrong_token_is_refused():
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=server.app), base_url="http://test"
+    ) as bare:
+        assert (await bare.get("/api/chats?token=not-the-token")).status_code == 401
+
+
+async def test_a_token_in_the_query_string_is_moved_into_a_cookie(api):
+    """So a reload and an EventSource carry it implicitly — neither can set a header."""
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=server.app), base_url="http://test"
+    ) as bare:
+        response = await bare.get(f"/api/chats?token={server.TOKEN}")
+    assert response.status_code == 200
+    assert response.cookies[server.COOKIE] == server.TOKEN
+
+
+# --- chats -------------------------------------------------------------------
+
+
+async def test_a_chat_is_created_listed_renamed_and_deleted(api):
+    assert (await api.get("/api/chats")).json() == []
+
+    created = (await api.post("/api/chats", json={"title": "Revenue"})).json()
+    chat_id = created["id"]
+    assert [c["title"] for c in (await api.get("/api/chats")).json()] == ["Revenue"]
+
+    await api.patch(f"/api/chats/{chat_id}", json={"title": "Revenue by month"})
+    assert (await api.get("/api/chats")).json()[0]["title"] == "Revenue by month"
+
+    assert (await api.delete(f"/api/chats/{chat_id}")).status_code == 200
+    assert (await api.get("/api/chats")).json() == []
+
+
+async def test_a_replayed_transcript_is_the_event_log(api):
+    """`events` is the whole contract with the browser, so the route returns it verbatim."""
+    chat = (await api.post("/api/chats", json={})).json()
+    assert (await api.get(f"/api/chats/{chat['id']}/events")).json() == []
+
+
+async def test_stopping_a_chat_with_nothing_in_flight_is_not_an_error(api):
+    chat = (await api.post("/api/chats", json={})).json()
+    assert (await api.post(f"/api/chats/{chat['id']}/stop")).status_code == 200
+
+
+# --- results: the rows the event does not carry ------------------------------
+
+COLUMNS = [
+    {
+        "id": "orders.status",
+        "label": "Status",
+        "kind": "dimension",
+        "type": "string",
+        "format": "",
+        "align": "left",
+    },
+    {
+        "id": "orders.count",
+        "label": "Orders",
+        "kind": "measure",
+        "type": "number",
+        "format": "",
+        "align": "right",
+    },
+]
+ROWS = [{"orders.status": f"s{i}", "orders.count": i} for i in range(5)]
+
+
+async def test_an_unknown_result_is_a_404(api):
+    assert (await api.get("/api/results/nope")).status_code == 404
+    assert (await api.get("/api/results/nope/csv")).status_code == 404
+
+
+async def test_a_result_is_paged_by_offset_and_limit(api):
+    chats, _, _ = api.stores
+    chat = await chats.create("c")
+    result_id = await chats.save_result(chat.id, "turn-1", COLUMNS, ROWS)
+
+    body = (await api.get(f"/api/results/{result_id}?offset=1&limit=2")).json()
+    assert [r["orders.count"] for r in body["rows"]] == [1, 2]
+    # The count is the whole set, not the page — it is what "showing 2 of 5" is built from.
+    assert body["row_count"] == 5
+    assert body["offset"] == 1
+
+
+async def test_the_csv_header_is_the_stored_header_not_the_row_keys(api):
+    """Cube returns a grouped time dimension under two keys, so `rows[0]` would invent a
+    column. The labels are what a person reads in a spreadsheet."""
+    chats, _, _ = api.stores
+    chat = await chats.create("c")
+    result_id = await chats.save_result(chat.id, "turn-1", COLUMNS, ROWS[:2])
+
+    response = await api.get(f"/api/results/{result_id}/csv")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "attachment" in response.headers["content-disposition"]
+    assert response.text.splitlines()[0] == "Status,Orders"
+
+
+async def test_a_dotted_result_id_does_not_swallow_the_csv_route(api):
+    """`/api/results/{id}.csv` would match the paging route with id "abc.csv", which is why
+    the CSV route is a segment. This asserts the shape rather than the bug."""
+    assert (await api.get("/api/results/abc.csv")).status_code == 404
+    routes = {getattr(r, "path", "") for r in server.app.routes}
+    assert "/api/results/{result_id}/csv" in routes
+
+
+# --- the served catalog ------------------------------------------------------
+
+
+async def test_the_catalog_route_reports_what_the_session_serves(api, catalog):
+    body = (await api.get("/api/catalog")).json()
+    names = {e["name"] for e in body["entities"]}
+    assert names == {e.name for e in catalog.entities}
+    assert next(e for e in body["entities"] if e["name"] == "revenue")["view"] is True
+
+
+# --- sources -----------------------------------------------------------------
+
+
+async def test_the_sources_list_is_empty_before_anything_is_added(api):
+    body = (await api.get("/api/sources")).json()
+    assert body["sources"] == []
+    assert body["next_port"] > 0
+
+
+async def test_a_stopped_source_says_so_rather_than_reporting_no_model(api):
+    """`serving` is null for a stopped container and for a model Cube will not compile, and the
+    browser used to guess between them. The state is the server's answer now."""
+    _, _, sources = api.stores
+    await sources.add(SHOP)
+
+    row = (await api.get("/api/sources")).json()["sources"][0]
+    assert row["serving"] is None
+    assert row["serving_state"] == "stopped"
+    assert row["running"] is False
+    assert "CUBEJS_DB_NAME" in row["credential_keys"]
+    assert "shop" not in str(row.get("credentials", ""))
+
+
+async def test_a_source_row_carries_the_stage_rail_and_the_next_stage(api):
+    _, _, sources = api.stores
+    await sources.add(SHOP)
+    await sources.save_step("shop", "connect", {"status": "done"})
+
+    row = (await api.get("/api/sources")).json()["sources"][0]
+    assert [s["name"] for s in row["stages"]] == ["connect", "read", "cubes", "describe", "views"]
+    assert row["next_stage"] == "read"
+    assert next(s for s in row["stages"] if s["name"] == "describe")["blocked_by"] == "cubes"
+
+
+async def test_no_credential_value_ever_leaves_the_process(api):
+    _, _, sources = api.stores
+    await sources.add(
+        Source(
+            name="secretive",
+            description="",
+            driver="postgres",
+            port=4002,
+            credentials={"CUBEJS_DB_PASS": "hunter2"},
+        )
+    )
+    assert "hunter2" not in (await api.get("/api/sources")).text
+
+
+async def test_the_driver_form_ships_what_is_required_and_no_flag_to_re_derive_it(api):
+    """Item three of this branch: the form filtered booleans where the server filters fixed
+    values, so `Save` could enable on a body `POST /sources` would reject."""
+    drivers = {d["key"]: d for d in (await api.get("/api/drivers")).json()["drivers"]}
+    postgres = drivers["postgres"]
+    assert "CUBEJS_DB_NAME" in postgres["required_envs"]
+    assert "CUBEJS_DB_SSL" not in postgres["required_envs"]
+    assert all("required" not in f for f in postgres["fields"]), (
+        "a per-field flag is a second way to answer the same question"
+    )
+    # A fixed field is not offered at all, and is not in the required list either.
+    databricks = drivers["databricks-jdbc"]
+    offered = {f["env"] for f in databricks["fields"]}
+    assert "CUBEJS_DB_DATABRICKS_ACCEPT_POLICY" not in offered | set(databricks["required_envs"])
+
+
+async def test_creating_a_source_without_a_required_field_is_refused_by_name(api):
+    response = await api.post(
+        "/api/sources",
+        json={
+            "name": "half",
+            "description": "",
+            "driver": "postgres",
+            "port": 4099,
+            "values": {"CUBEJS_DB_HOST": "host.docker.internal"},
+        },
+    )
+    assert response.status_code == 400
+    assert "CUBEJS_DB_NAME" in response.text
+
+
+async def test_an_unknown_action_is_a_404_from_the_route(api):
+    """The route checks the stage list itself so the answer is 404 rather than a failed job."""
+    _, _, sources = api.stores
+    await sources.add(SHOP)
+    response = await api.post("/api/sources/shop/actions/enrich", json={})
+    assert response.status_code == 404
+    assert "enrich" in response.text
+
+
+async def test_an_unknown_source_is_a_404(api):
+    assert (await api.get("/api/sources/ghost/catalog")).status_code == 404
+
+
+# --- dashboards --------------------------------------------------------------
+
+
+async def test_a_dashboard_needs_an_active_source(api):
+    """Its tiles would query nothing, and a saved query against the wrong warehouse renders a
+    plausible number. Refused at creation rather than at refresh."""
+    response = await api.post("/api/dashboards", json={"title": "Weekly"})
+    assert response.status_code == 400
+    assert "active" in response.text.lower()
+
+
+async def test_an_unknown_dashboard_reads_as_404_but_refreshes_as_a_failed_run(api):
+    """Not an inconsistency to fix here: `run._open` returns an outcome rather than raising, so
+    that the source check cannot apply to `validate` and not to `refresh`. The button renders
+    the outcome, so a deleted board reports `failed` instead of throwing."""
+    assert (await api.get("/api/dashboards/nope")).status_code == 404
+    response = await api.post("/api/dashboards/nope/refresh")
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    assert "nope" in response.json()["error"]
+
+
+async def test_a_dashboard_binds_to_the_active_source_at_creation(api, monkeypatch):
+    """`source_name` is stamped once, and `run.source_mismatch` is what stops a stored query
+    running against a different warehouse later."""
+    _, _, sources = api.stores
+    await sources.add(SHOP)
+    monkeypatch.setattr(settings, "cube_url", SHOP.url)
+
+    created = (await api.post("/api/dashboards", json={"title": "Weekly"})).json()
+    assert created["source_name"] == "shop"
+
+
+async def test_refreshing_an_empty_board_is_refused_not_ok(api):
+    """`validate` calls an empty board ok and `refresh` calls it refused, deliberately — there
+    is nothing to run. The status is what the button reports."""
+    _, boards, _ = api.stores
+    board = await boards.create("Weekly", "shop")
+    body = (await api.post(f"/api/dashboards/{board.id}/refresh")).json()
+    assert body["ok"] is False
+    assert body["status"] == "refused"
+    assert body["tiles"] == []
+
+
+async def test_a_dashboard_is_listed_renamed_and_deleted(api):
+    _, boards, _ = api.stores
+    board = await boards.create("Weekly", "shop")
+
+    listed = (await api.get("/api/dashboards")).json()
+    assert [b["title"] for b in listed] == ["Weekly"]
+
+    await api.patch(f"/api/dashboards/{board.id}", json={"title": "Monthly"})
+    assert (await api.get(f"/api/dashboards/{board.id}")).json()["title"] == "Monthly"
+
+    assert (await api.delete(f"/api/dashboards/{board.id}")).status_code == 200
+    assert (await api.get("/api/dashboards")).json() == []
