@@ -183,8 +183,8 @@ async def test_check_compiles_and_executes_nothing(catalog, cube):
     assert result.ok
     assert result.sql == "SELECT 1"
     assert result.rows is None
-    assert len(cube.seen) == 1  # compiled once, loaded never
-    assert cube.seen[0]["measures"] == ["orders.count"]
+    assert cube.loaded == []  # compiled, never executed
+    assert cube.compiled[0]["measures"] == ["orders.count"]
 
 
 async def test_check_caps_the_limit_it_sends(catalog, cube):
@@ -195,13 +195,13 @@ async def test_check_caps_the_limit_it_sends(catalog, cube):
         cube,
         max_rows=500,
     )
-    assert cube.seen[0]["limit"] == 500
+    assert cube.compiled[0]["limit"] == 500
 
 
 async def test_a_bad_member_never_reaches_cube(catalog, cube):
     result = await gate.check({"measures": ["orders.nope"]}, catalog, cube, max_rows=500)
     assert not result.ok
-    assert cube.seen == []
+    assert cube.compiled == []
 
 
 async def test_check_reports_cubes_refusal_without_raising(catalog, cube):

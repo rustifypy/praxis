@@ -84,10 +84,13 @@ class FakeCube:
     resolved_ranges: dict[str, list[str]] = field(default_factory=dict)
     refuse: str = ""
     """Non-empty: compile fails the way Cube refusing a member does."""
+    fail_load: str = ""
+    """Non-empty: compile succeeds and execution breaks — the `failed` half of the split."""
     down: str = ""
     """Non-empty: every call raises, the way a stopped container does."""
-    seen: list[dict] = field(default_factory=list)
-    """Every query sent, so a test can assert a tier made no call at all."""
+    compiled: list[dict] = field(default_factory=list)
+    loaded: list[dict] = field(default_factory=list)
+    """Kept apart so "every tile compiled before any executed" is an assertion."""
 
     def _answering(self) -> None:
         if self.down:
@@ -99,14 +102,16 @@ class FakeCube:
 
     async def compile(self, query: CubeQuery) -> CompileResult:
         self._answering()
-        self.seen.append(query.to_payload())
+        self.compiled.append(query.to_payload())
         if self.refuse:
             return CompileResult(ok=False, error=self.refuse)
         return CompileResult(ok=True, sql=self.sql, params=[])
 
     async def load(self, query: CubeQuery) -> LoadResult:
         self._answering()
-        self.seen.append(query.to_payload())
+        self.loaded.append(query.to_payload())
+        if self.fail_load:
+            raise CubeError(self.fail_load, status=400)
         return LoadResult(
             rows=list(self.rows), duration_ms=7, resolved_ranges=dict(self.resolved_ranges)
         )
