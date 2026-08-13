@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from ..config import settings
 from ..sources import docker, model
 from ..sources.drivers import DRIVERS, LOCAL_HOSTS, LOCALHOST_NOTE, required_envs
+from ..sources.registry import NAME_PATTERN
 from .state import store_of
 
 router = APIRouter(prefix="/api")
@@ -41,6 +42,8 @@ async def drivers() -> dict:
     """The connection form, described by the driver specs themselves."""
     return {
         "local_hosts": list(LOCAL_HOSTS),
+        # One rule for a source name, tested on both sides of the wire.
+        "name_pattern": NAME_PATTERN,
         "localhost_note": LOCALHOST_NOTE,
         "drivers": [
             {

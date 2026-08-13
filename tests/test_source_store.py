@@ -205,6 +205,13 @@ def test_validate_name(name, expected):
     assert error is None if expected is None else expected in error
 
 
+def test_a_name_is_ascii_only():
+    """It becomes a container name and a directory name, and `str.isalpha`/`isalnum` accept
+    Greek, accented Latin and Arabic-Indic digits — which the form's own rule rejects."""
+    for name in ("\u03c9mega", "caf\u00e9", "shop\u0663", "\u01c4shop"):
+        assert registry.validate_name(name, taken=[]) is not None, name
+
+
 def test_validate_name_rejects_duplicates():
     assert "already exists" in registry.validate_name("shop", taken=["shop"])
 

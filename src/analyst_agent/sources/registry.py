@@ -1,5 +1,6 @@
 """The vocabulary of a data source, and the rules for naming and porting one."""
 
+import re
 import socket
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -85,14 +86,18 @@ def port_in_use(port: int) -> bool:
         return sock.connect_ex(("127.0.0.1", port)) == 0
 
 
+NAME_PATTERN = r"^[a-z][a-z0-9-]*$"
+"""Shipped to the form by `/api/drivers` so both sides test the same rule. ASCII explicitly:
+`str.isalpha` and `str.isalnum` accept `ωmega` and `café`, and the name becomes a container
+name and a directory name."""
+
+
 def validate_name(name: str, taken: Iterable[str] = ()) -> str | None:
     """Returns an error message, or None when the name is usable."""
     if not name:
         return "a name is required"
-    if not name[0].isalpha() or not all(c.isalnum() or c == "-" for c in name):
+    if not re.match(NAME_PATTERN, name):
         return "use lowercase letters, digits and hyphens, starting with a letter"
-    if name != name.lower():
-        return "use lowercase — the name becomes a container and directory name"
     if name in set(taken):
         return f"source {name!r} already exists"
     return None
