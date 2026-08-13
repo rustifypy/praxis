@@ -64,14 +64,6 @@ STATUS = {"branch": 409, "repo": 400, "path": 400, "missing": 404, "rejected": 4
 """Which status a refusal is. The kinds are the workspace's; the codes are HTTP's."""
 
 
-def _target(source: Source, path: str) -> Path:
-    """A caller's path resolved inside the model directory, or refused."""
-    target, refused = workspace.resolve(source, path)
-    if target is None:
-        raise HTTPException(400, refused)
-    return target
-
-
 async def _on_a_branch(source: Source) -> str:
     """The branch to edit on, or the refusal as a status. One rule, in `workspace`, so the
     routes and the editor's tools cannot come to disagree about what is editable."""
@@ -258,7 +250,9 @@ async def list_files(name: str, request: Request) -> dict:
 @router.get("/sources/{name}/files/{path:path}")
 async def read_file(name: str, path: str, request: Request) -> dict:
     source = await _find(request, name)
-    target = _target(source, path)
+    target, refused = workspace.resolve(source, path)
+    if target is None:
+        raise HTTPException(400, refused)
     if not target.is_file():
         raise HTTPException(404, f"no model file at {path!r}")
     return {"path": path, "text": target.read_text()}
