@@ -19,7 +19,7 @@ from ..config import settings
 from ..cube.catalog import Catalog
 from ..cube.client import CubeClient
 from ..cube.shape import Column, export_value
-from . import dashboards, model_edit, sources
+from . import dashboards, jobs, model_edit, sources, state, system
 from .stream import sse
 
 STATIC = Path(__file__).parent / "static"
@@ -54,7 +54,7 @@ async def lifespan(app: FastAPI):
     await dashboards.init_state(app)
     # Data sources: their own database, their own job runner. Deliberately not under
     # DATA_DIR, so `--data-dir` can scope chat history for testing without hiding them.
-    await sources.init_state(app)
+    await state.init_state(app)
     # One session for the active source, for the life of the process: `CUBE_URL` fixes which
     # source that is at boot, and its catalog cache is what every query turn reads.
     async with checkpointer() as saver, CubeClient.active(claims=identity().as_claims()) as cube:
@@ -67,7 +67,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="analyst-agent web", lifespan=lifespan)
+app.include_router(system.router)
 app.include_router(sources.router)
+app.include_router(jobs.router)
 app.include_router(dashboards.router)
 app.include_router(model_edit.router)
 

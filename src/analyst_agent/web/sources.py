@@ -1,39 +1,25 @@
-"""The sources surface: what exists, what is running, and one job at a time."""
+"""One source: what it is, what it is serving, and editing its connection."""
 
 import asyncio
 import shutil
-import time
 from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..cube.client import CubeError, catalog_of
 from ..grounding import for_source
-from ..sources import docker, health, jobs, model
-from ..sources.drivers import (
-    DRIVERS,
-    LOCAL_HOSTS,
-    LOCALHOST_NOTE,
-    credentials_for,
-    get,
-    required_envs,
-    split_mounts,
-)
+from ..sources import docker, model
+from ..sources.drivers import credentials_for, get, split_mounts
 from ..sources.model import edits, selection, vcs, workspace
-from ..sources.model.run import StepFailed
 from ..sources.registry import Source, next_port, scaffold_source_dirs, validate_new
-from ..sources.store import STAGES, SourceStore, merge_credentials, public
-from .stream import sse
+from ..sources.store import merge_credentials
+from .state import find, runner_of, store_of, view
 
 router = APIRouter(prefix="/api")
 
-HEALTH_TTL_S = 15.0
-"""How long a /readyz result is reused. Each probe is an HTTP call per source, and a
-status dot that lies is worse than one that is a few seconds stale."""
 CONTAINER_ACTIONS = ("start", "stop", "restart")
 
 
@@ -44,7 +30,6 @@ class NewSource(BaseModel):
     port: int = 0
     """0 asks for the next free port."""
     values: dict[str, str] = Field(default_factory=dict)
-    """CUBEJS_DB_* as typed into the form."""
 
 
 class EditSource(BaseModel):
@@ -54,148 +39,12 @@ class EditSource(BaseModel):
     password it would otherwise overwrite with blank."""
 
 
-class RunStep(BaseModel):
+class TableSelection(BaseModel):
+    """Which tables the picker is asking about. Its own model rather than the one the cubes
+    action takes: the shape matches today, the question does not."""
+
     schema_name: str = "public"
     tables: list[str] | None = None
-    """None models every table in the schema."""
-
-
-async def init_state(app) -> None:
-    """Called from the server's lifespan: open the store and the job runner."""
-    store = SourceStore()
-    await store.init()
-    app.state.sources = store
-    app.state.jobs = jobs.Runner()
-    # name -> (monotonic time, probe). See HEALTH_TTL_S.
-    app.state.health = {}
-
-
-def store_of(request: Request) -> SourceStore:
-    return request.app.state.sources
-
-
-def runner_of(request: Request) -> jobs.Runner:
-    return request.app.state.jobs
-
-
-def invalidate(cache: dict, source: Source) -> None:
-    """Forget the health probe for a source whose model just changed — nothing watches a
-    container for changes. The served catalog needs no hook: it is cached on the Cube session
-    for `CATALOG_TTL_S` and ages out on its own."""
-    cache.pop(source.name, None)
-
-
-# --- reading -----------------------------------------------------------------
-
-
-async def _probe(cache: dict, source: Source, running: bool) -> dict:
-    """Cached health and served entities: is it up, and what is it actually serving?"""
-    if not running:
-        return {
-            "health": health.Health(False, "stopped").as_dict(),
-            "serving": None,
-            "serving_state": health.serving_state(False, False, None),
-        }
-    hit = cache.get(source.name)
-    now = time.monotonic()
-    if hit and now - hit[0] < HEALTH_TTL_S:
-        return hit[1]
-
-    result = await health.check(source, timeout=5.0)
-    served = await health.serving(source) if result.ok else None
-    probed = {
-        "health": result.as_dict(),
-        "serving": served and served.__dict__,
-        # Cached with the probe, because it is a fact about this probe rather than about the
-        # row — and the browser must not re-derive it from `serving` being null.
-        "serving_state": health.serving_state(True, result.ok, served),
-    }
-    cache[source.name] = (now, probed)
-    return probed
-
-
-async def _view(
-    request: Request,
-    source: Source,
-    containers: dict[str, str],
-    steps: dict,
-    catalog_read: bool | None = None,
-) -> dict:
-    state = containers.get(source.service, "")
-    running = state == "running"
-    # Looked up unless the caller already has it, never defaulted: the stepper renders the
-    # shipped rail, so a wrong answer here erases a tick rather than being merely imprecise.
-    if catalog_read is None:
-        catalog_read = await store_of(request).catalog_read(source.name)
-    probed = await _probe(request.app.state.health, source, running)
-    body = public(
-        source, steps=steps, running=running, health=probed["health"], catalog_read=catalog_read
-    )
-    body["serving"] = probed["serving"]
-    body["serving_state"] = probed["serving_state"]
-    body["container_state"] = state or "missing"
-    # The checked-out branch is the model this source serves, so anywhere a query can be
-    # issued has to be able to say which one. Empty until the directory is a repo.
-    model_dir = source.model_dir()
-    body["branch"] = await vcs.current(model_dir) if vcs.is_repo(model_dir) else ""
-    return body
-
-
-@router.get("/system")
-async def system(request: Request) -> dict:
-    """Whether this feature can work at all, in one call."""
-    if not docker.installed():
-        return {"ok": False, "reason": "docker is not installed on this machine"}
-    info = await docker.daemon()
-    if not info.ok:
-        return {"ok": False, "reason": "Docker is not running — start Docker Desktop"}
-    # Independent: each is a process spawn plus a daemon round trip, and the panel
-    # refreshes this after every step.
-    containers, cubestore, known = await asyncio.gather(
-        docker.ours(), docker.cubestore_running(), store_of(request).names()
-    )
-    return {
-        "ok": True,
-        "docker": info.out.strip(),
-        "cubestore": cubestore,
-        "orphans": docker.orphans(containers, known),
-        "cube_url": settings.cube_url,
-        "dev_mode": settings.cubejs_dev_mode,
-    }
-
-
-@router.get("/drivers")
-async def drivers() -> dict:
-    """The connection form, described by the driver specs themselves."""
-    return {
-        "local_hosts": list(LOCAL_HOSTS),
-        "localhost_note": LOCALHOST_NOTE,
-        "drivers": [
-            {
-                "key": spec.key,
-                "label": spec.label,
-                "extracts_tables": key in model.read.DIALECTS,
-                # What the form must collect, from the same function `POST /sources` rejects
-                # on. No per-field `required` flag goes with it: two copies of "is this one
-                # needed" is how the form came to enable Save on a body the server would 400.
-                "required_envs": required_envs(spec),
-                "fields": [
-                    {
-                        "env": f.env,
-                        "label": f.prompt,
-                        "default": f.default,
-                        "secret": f.secret,
-                        "boolean": f.boolean,
-                        "mount_to": f.mount_to,
-                        "help": f.comment,
-                    }
-                    for f in spec.fields
-                    if not f.fixed
-                ],
-            }
-            for key, spec in DRIVERS.items()
-        ],
-    }
 
 
 @router.get("/sources")
@@ -208,7 +57,7 @@ async def list_sources(request: Request) -> dict:
     # stopped-but-listening one can burn five seconds before the next even starts.
     views = await asyncio.gather(
         *(
-            _view(request, s, containers, steps.get(s.name, {}), read.get(s.name, False))
+            view(request, s, containers, steps.get(s.name, {}), read.get(s.name, False))
             for s in sources
         )
     )
@@ -219,7 +68,7 @@ async def list_sources(request: Request) -> dict:
 
 @router.get("/sources/{name}/logs")
 async def source_logs(name: str, request: Request, tail: int = 200) -> dict:
-    source = await _find(request, name)
+    source = await find(request, name)
     return {"container": source.service, "logs": await docker.logs(source.service, tail)}
 
 
@@ -227,7 +76,7 @@ async def source_logs(name: str, request: Request, tail: int = 200) -> dict:
 async def source_catalog(name: str, request: Request) -> dict:
     """The cached catalog, for the picker. Never reads the database."""
     store = store_of(request)
-    await _find(request, name)
+    await find(request, name)
     state = await store.state(name)
     catalog = {
         schema: model.state.load_schema(raw) for schema, raw in (state.get("catalog") or {}).items()
@@ -247,7 +96,7 @@ async def source_catalog(name: str, request: Request) -> dict:
 @router.get("/sources/{name}/model")
 async def source_model(name: str, request: Request) -> dict:
     """What Cube has compiled, read live from this source's own `/v1/meta`."""
-    source = await _find(request, name)
+    source = await find(request, name)
     # Which file defines each entity, so the panel that lists what Cube serves is also the
     # panel that edits it. Keyed by name and read from the working tree rather than assumed
     # from `cubes/<name>.yml`: a hand-edited model may put a cube anywhere.
@@ -321,7 +170,7 @@ async def source_model(name: str, request: Request) -> dict:
 @router.get("/sources/{name}/grounding")
 async def source_grounding(name: str, request: Request) -> dict:
     """The markdown this source grounds the agent with, exactly as the agent loads it."""
-    source = await _find(request, name)
+    source = await find(request, name)
     loaded = for_source(source)
     kinds = (
         ("rule", loaded.rules),
@@ -353,14 +202,14 @@ async def source_grounding(name: str, request: Request) -> dict:
 async def check_now(name: str, request: Request) -> dict:
     """Probe now, ignoring `HEALTH_TTL_S`. Nothing else drops that entry without also
     starting or rebuilding something."""
-    source = await _find(request, name)
+    source = await find(request, name)
     request.app.state.health.pop(name, None)
     steps = await store_of(request).steps(name)
-    return await _view(request, source, await docker.ours(), steps)
+    return await view(request, source, await docker.ours(), steps)
 
 
 @router.post("/sources/{name}/closure")
-async def closure(name: str, body: RunStep, request: Request) -> dict:
+async def closure(name: str, body: TableSelection, request: Request) -> dict:
     """What a tick-list actually models, and what it gives up."""
     # Only the requested schema is rebuilt: this fires on every checkbox tick, and
     # `cached_catalog` would reconstruct every Column of every schema each time.
@@ -414,14 +263,14 @@ async def create(body: NewSource, request: Request) -> dict:
     )
     await store.add(source)
     scaffold_source_dirs(source)
-    return await _view(request, source, await docker.ours(), steps={})
+    return await view(request, source, await docker.ours(), steps={})
 
 
 @router.patch("/sources/{name}")
 async def edit(name: str, body: EditSource, request: Request) -> dict:
     """Change the description or the credentials."""
     store = store_of(request)
-    source = await _find(request, name)
+    source = await find(request, name)
     merged = mounts = None
     if body.values:
         values, supplied = _paths(source.spec, body.values)
@@ -432,13 +281,13 @@ async def edit(name: str, body: EditSource, request: Request) -> dict:
     await store.update(name, description=body.description, credentials=merged, mounts=mounts)
     request.app.state.health.pop(name, None)
     updated = await store.get(name)
-    return await _view(request, updated, await docker.ours(), await store.steps(name))
+    return await view(request, updated, await docker.ours(), await store.steps(name))
 
 
 @router.delete("/sources/{name}")
 async def remove(name: str, request: Request, keep_model: bool = False) -> dict:
     """Remove the row, the container, and unless kept the model files."""
-    source = await _find(request, name)
+    source = await find(request, name)
     if source.is_active:
         raise HTTPException(
             409,
@@ -463,101 +312,10 @@ async def control(name: str, action: str, request: Request) -> dict:
         raise HTTPException(
             404, f"no such action {action!r} — one of {', '.join(CONTAINER_ACTIONS)}"
         )
-    source = await _find(request, name)
+    source = await find(request, name)
     result = await getattr(docker, action)(source.service)
     request.app.state.health.pop(name, None)
     if not result.ok:
         raise HTTPException(400, result.message or f"could not {action} {source.service}")
     steps = await store_of(request).steps(name)
-    return await _view(request, source, await docker.ours(), steps)
-
-
-@router.delete("/containers/{container}")
-async def remove_orphan(container: str, request: Request) -> dict:
-    """Delete a `cube-*` container that has no source row."""
-    known = await store_of(request).names()
-    if container not in docker.orphans(await docker.ours(), known):
-        raise HTTPException(400, f"{container} is not an orphaned source container")
-    result = await docker.remove(container)
-    if not result.ok:
-        raise HTTPException(400, result.message)
-    return {"removed": container}
-
-
-# --- the job -----------------------------------------------------------------
-
-
-@router.get("/job")
-async def current_job(request: Request) -> dict:
-    """The running job and its buffered events, so a refresh re-attaches."""
-    job = runner_of(request).job
-    return job.snapshot() if job else {"id": None}
-
-
-@router.post("/job/cancel")
-async def cancel_job(request: Request) -> dict:
-    return {"cancelled": runner_of(request).cancel()}
-
-
-@router.get("/job/stream")
-async def job_stream(request: Request) -> StreamingResponse:
-    """SSE. Native EventSource on the browser side: a job is subscribed to, not posted."""
-    return sse(runner_of(request).watch())
-
-
-@router.post("/sources/{name}/actions/{name_of_action}")
-async def run_action(name: str, name_of_action: str, body: RunStep, request: Request) -> dict:
-    """Start a job that runs one action, and answer as soon as it exists."""
-    if name_of_action not in STAGES:
-        raise HTTPException(404, f"no such action {name_of_action!r} — one of {', '.join(STAGES)}")
-    source = await _find(request, name)
-    runner = runner_of(request)
-    store = store_of(request)
-    # Bound out here so the closure does not hold the finished request — and with it the
-    # whole ASGI scope — alive for the minutes a describe takes.
-    cache = request.app.state.health
-
-    async def work(job: jobs.Job) -> None:
-        job.current = name_of_action
-        runner.emit("step_start", step=name_of_action)
-        try:
-            result = await model.run.action(
-                name_of_action,
-                source,
-                store,
-                schema=body.schema_name,
-                tables=body.tables,
-                report=lambda stage, payload: runner.emit("progress", step=stage, **payload),
-            )
-        except StepFailed as exc:
-            runner.emit("step_end", step=name_of_action, ok=False, error=str(exc))
-            # The container is left as it is — its logs are the diagnosis.
-            runner.emit("log", message=await docker.logs(source.service, 40))
-            raise
-        finally:
-            invalidate(cache, source)
-            job.current = ""
-        runner.emit(
-            "step_end",
-            step=name_of_action,
-            ok=result.ok,
-            summary=result.summary,
-            notes=result.notes,
-            errors=result.errors,
-        )
-
-    try:
-        job = await runner.start(source.name, [name_of_action], work)
-    except jobs.Busy as exc:
-        raise HTTPException(409, f"a job is already running — {exc}") from None
-    return job.snapshot()
-
-
-# --- shared ------------------------------------------------------------------
-
-
-async def _find(request: Request, name: str) -> Source:
-    source = await store_of(request).get(name)
-    if source is None:
-        raise HTTPException(404, f"no source named {name!r}")
-    return source
+    return await view(request, source, await docker.ours(), steps)
