@@ -9,6 +9,9 @@ wheels/
 # Tool caches
 .pytest_cache/
 .ruff_cache/
+# A knowledge graph regenerated from the tree, plus its fingerprint baseline — ~1MB of
+# JSON that is stale the moment anything is committed.
+.understand-anything/
 
 # Virtual environments
 .venv/
@@ -31,3 +34,6 @@ src/web/tsconfig.tsbuildinfo
 
 /cube/
 .cube-probe/
+skills-lock.json
+.claude/
+.agents/
