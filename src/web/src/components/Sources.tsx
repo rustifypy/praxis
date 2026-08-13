@@ -1,6 +1,6 @@
 import * as api from "../sources";
 import type { JobState, SourceRow, System } from "../sources";
-import { STAGE_LABEL, healthOf, servingSummary } from "../sources";
+import { STAGE_LABEL, healthOf, servingNote } from "../sources";
 import { Info } from "./Info";
 import { JobProgress } from "./JobProgress";
 
@@ -100,13 +100,7 @@ export function Sources({
               <span className="src-row-what">
                 {source.driver} · :{source.port}
               </span>
-              <span className="src-row-model">
-                {source.serving
-                  ? servingSummary(source.serving)
-                  : source.running
-                    ? "no model yet"
-                    : health.label}
-              </span>
+              <span className="src-row-model">{servingNote(source)}</span>
               {source.active && <span className="badge accent">active</span>}
               <span className="src-row-next">
                 {upcoming ? `next: ${STAGE_LABEL[upcoming]}` : "complete"}

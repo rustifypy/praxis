@@ -137,10 +137,13 @@ def split_mounts(spec: Driver, values: dict[str, str]) -> tuple[dict[str, str], 
     return kept, mounts
 
 
+def required_envs(spec: Driver) -> list[str]:
+    """The connection fields a person has to fill in. Shipped with the driver so the form and
+    `POST /sources` cannot disagree about what is needed — the form used to skip booleans where
+    this skips fixed values, which agreed only because no driver has a required boolean."""
+    return [f.env for f in spec.fields if f.required and not f.fixed]
+
+
 def missing_fields(spec: Driver, values: dict[str, str]) -> list[str]:
     """Required connection fields with no value. The form offers them; HTTP has to check."""
-    return [
-        f.env
-        for f in spec.fields
-        if f.required and not f.fixed and not values.get(f.env, "").strip()
-    ]
+    return [env for env in required_envs(spec) if not values.get(env, "").strip()]

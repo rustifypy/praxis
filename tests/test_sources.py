@@ -52,6 +52,40 @@ async def test_wait_until_ready_gives_up_after_repeated_down():
     assert not result.ok and attempts == 2
 
 
+SERVED = health.Serving(cubes=13, views=["sales"], described=13)
+
+
+def test_a_stopped_container_and_an_uncompilable_model_are_not_the_same_state():
+    """Both left `serving` null, and the sources list called the second one "no model yet" —
+    a wrong statement about a source with thirteen cubes rather than a vague one."""
+    assert health.serving_state(running=False, healthy=False, served=None) == "stopped"
+    assert health.serving_state(running=True, healthy=True, served=None) == "broken"
+
+
+def test_a_container_that_is_up_but_not_answering_is_its_own_state():
+    assert health.serving_state(running=True, healthy=False, served=None) == "unreachable"
+
+
+def test_cube_answering_with_no_cubes_is_a_source_not_built_yet():
+    """Distinct from `broken`: Cube is fine, there is simply no model in the mount."""
+    empty = health.Serving(cubes=0, views=[], described=0)
+    assert health.serving_state(running=True, healthy=True, served=empty) == "empty"
+    assert health.serving_state(running=True, healthy=True, served=SERVED) == "ok"
+
+
+def test_every_state_is_declared():
+    """SERVING_STATES is what the browser's copy is keyed on, so a new one must be added there
+    rather than falling through to undefined."""
+    states = {
+        health.serving_state(running=r, healthy=h, served=s)
+        for r in (True, False)
+        for h in (True, False)
+        for s in (None, SERVED, health.Serving(cubes=0, views=[], described=0))
+    }
+    assert states <= set(health.SERVING_STATES)
+    assert states == set(health.SERVING_STATES)
+
+
 def test_every_driver_exposes_a_cube_db_type():
     for key in ("postgres", "mysql", "snowflake", "bigquery", "databricks-jdbc"):
         spec = get(key)

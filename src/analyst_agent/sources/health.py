@@ -60,6 +60,24 @@ class Serving:
     described: int
 
 
+SERVING_STATES = ("stopped", "unreachable", "broken", "empty", "ok")
+
+
+def serving_state(running: bool, healthy: bool, served: "Serving | None") -> str:
+    """Why `serving` is what it is. It was `None` for two unrelated reasons — a stopped
+    container and a model Cube refused to compile — and the sources list rendered the second as
+    "no model yet", which is a wrong statement about a source with thirteen cubes rather than a
+    vague one. Structured for the same reason `Health.as_dict` is: so nothing matches on prose.
+    """
+    if not running:
+        return "stopped"
+    if not healthy:
+        return "unreachable"
+    if served is None:
+        return "broken"
+    return "ok" if served.cubes else "empty"
+
+
 async def serving(source: Source, timeout: float = ADMIN_TIMEOUT_S) -> Serving | None:
     """The compiled entities, or None when Cube cannot say. Counted over cubes only — a view's
     members are the same members re-exported, so counting every entity counts the model twice."""

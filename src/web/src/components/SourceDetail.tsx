@@ -15,7 +15,7 @@ import {
   STAGE_LABEL,
   STEP_LABEL,
   healthOf,
-  servingSummary,
+  servingNote,
   summarise,
 } from "../sources";
 import { ConfirmName } from "./ConfirmName";
@@ -208,7 +208,7 @@ export function SourceDetail({
         )}
         <span className="detail-what">
           {source.driver} · :{source.port}
-          {source.serving && ` · ${servingSummary(source.serving)}`}
+          {` · ${servingNote(source)}`}
           {checkedAt > 0 && ` · checked ${ago(checkedAt / 1000)}`}
         </span>
 

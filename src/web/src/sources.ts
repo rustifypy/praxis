@@ -62,6 +62,17 @@ export interface StageState {
   blocked_by: StepName | "";
 }
 
+/** From `health.serving_state`. The copy for each is below, in SERVING_NOTE — the state is
+ *  the server's answer, the wording is ours. */
+export type ServingState = "stopped" | "unreachable" | "broken" | "empty" | "ok";
+
+const SERVING_NOTE: Record<Exclude<ServingState, "ok">, string> = {
+  stopped: "stopped",
+  unreachable: "not answering",
+  broken: "model not compiling",
+  empty: "no model yet",
+};
+
 interface StepRecord {
   status?: "done" | "error";
   finished_at?: number;
@@ -90,6 +101,9 @@ export interface SourceRow {
   /** What Cube is serving right now, read from /v1/meta. This is the truth about the
    *  model; `steps` is only what this portal did, and the two can disagree. */
   serving: { cubes: number; views: string[]; described: number } | null;
+  /** Why `serving` is what it is. Null used to mean both "container stopped" and "Cube
+   *  refused to compile the model", and the list called the second one "no model yet". */
+  serving_state: ServingState;
   /** Per step, the later steps re-running it would discard. Computed server-side so the
    *  confirmation and the deletion come from one rule. */
   invalidates: Record<StepName, StepName[]>;
@@ -122,7 +136,6 @@ interface DriverField {
   label: string;
   default: string;
   secret: boolean;
-  required: boolean;
   boolean: boolean;
   /** Non-empty when the value is a path to a file on this machine, and then also where
    *  that file is mounted in the container — which is the key into `SourceRow.mounts`.
@@ -135,6 +148,10 @@ export interface DriverSpec {
   key: string;
   label: string;
   extracts_tables: boolean;
+  /** The envs a person must fill, from `drivers.required_envs` — the same function POST
+   *  /sources rejects on. There is deliberately no per-field `required` flag to derive this
+   *  from a second time. */
+  required_envs: string[];
   fields: DriverField[];
 }
 
@@ -505,8 +522,22 @@ export function watchJob(onEvent: (event: JobEvent) => void): () => void {
   return () => stream.close();
 }
 
+/**
+ * What to say about a source's model, in one phrase.
+ *
+ * One function for all four screens, because the interesting cases are the ones without a
+ * model and they used to be guessed from `serving` being null: a compile failure rendered as
+ * "no model yet" in the list and as nothing at all on the detail page, for a source with a
+ * dozen working cubes. `serving_state` is the server's answer to why.
+ */
+export function servingNote(source: SourceRow): string {
+  return source.serving_state === "ok" && source.serving
+    ? servingSummary(source.serving)
+    : SERVING_NOTE[source.serving_state as Exclude<ServingState, "ok">];
+}
+
 /** "11 cubes, 3 views, all described" — what Cube is actually serving, in one phrase. */
-export function servingSummary(serving: NonNullable<SourceRow["serving"]>): string {
+function servingSummary(serving: NonNullable<SourceRow["serving"]>): string {
   const total = serving.cubes + serving.views.length;
   const parts = [`${serving.cubes} cube${serving.cubes === 1 ? "" : "s"}`];
   if (serving.views.length) {

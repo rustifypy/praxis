@@ -20,6 +20,7 @@ from ..sources.drivers import (
     LOCALHOST_NOTE,
     credentials_for,
     get,
+    required_envs,
     split_mounts,
 )
 from ..sources.model import edits, selection, vcs, workspace
@@ -90,7 +91,11 @@ def invalidate(cache: dict, source: Source) -> None:
 async def _probe(cache: dict, source: Source, running: bool) -> dict:
     """Cached health and served entities: is it up, and what is it actually serving?"""
     if not running:
-        return {"health": health.Health(False, "stopped").as_dict(), "serving": None}
+        return {
+            "health": health.Health(False, "stopped").as_dict(),
+            "serving": None,
+            "serving_state": health.serving_state(False, False, None),
+        }
     hit = cache.get(source.name)
     now = time.monotonic()
     if hit and now - hit[0] < HEALTH_TTL_S:
@@ -98,7 +103,13 @@ async def _probe(cache: dict, source: Source, running: bool) -> dict:
 
     result = await health.check(source, timeout=5.0)
     served = await health.serving(source) if result.ok else None
-    probed = {"health": result.as_dict(), "serving": served and served.__dict__}
+    probed = {
+        "health": result.as_dict(),
+        "serving": served and served.__dict__,
+        # Cached with the probe, because it is a fact about this probe rather than about the
+        # row — and the browser must not re-derive it from `serving` being null.
+        "serving_state": health.serving_state(True, result.ok, served),
+    }
     cache[source.name] = (now, probed)
     return probed
 
@@ -122,6 +133,7 @@ async def _view(
         source, steps=steps, running=running, health=probed["health"], catalog_read=catalog_read
     )
     body["serving"] = probed["serving"]
+    body["serving_state"] = probed["serving_state"]
     body["container_state"] = state or "missing"
     # The checked-out branch is the model this source serves, so anywhere a query can be
     # issued has to be able to say which one. Empty until the directory is a repo.
@@ -164,13 +176,16 @@ async def drivers() -> dict:
                 "key": spec.key,
                 "label": spec.label,
                 "extracts_tables": key in model.read.DIALECTS,
+                # What the form must collect, from the same function `POST /sources` rejects
+                # on. No per-field `required` flag goes with it: two copies of "is this one
+                # needed" is how the form came to enable Save on a body the server would 400.
+                "required_envs": required_envs(spec),
                 "fields": [
                     {
                         "env": f.env,
                         "label": f.prompt,
                         "default": f.default,
                         "secret": f.secret,
-                        "required": f.required,
                         "boolean": f.boolean,
                         "mount_to": f.mount_to,
                         "help": f.comment,
