@@ -23,9 +23,9 @@ from ..sources.drivers import (
     split_mounts,
 )
 from ..sources.model import edits, selection, vcs, workspace
-from ..sources.model.run import ACTIONS, StepFailed
+from ..sources.model.run import StepFailed
 from ..sources.registry import Source, next_port, scaffold_source_dirs, validate_new
-from ..sources.store import SourceStore, merge_credentials, public
+from ..sources.store import STAGES, SourceStore, merge_credentials, public
 from .stream import sse
 
 router = APIRouter(prefix="/api")
@@ -108,10 +108,15 @@ async def _view(
     source: Source,
     containers: dict[str, str],
     steps: dict,
-    catalog_read: bool = False,
+    catalog_read: bool | None = None,
 ) -> dict:
     state = containers.get(source.service, "")
     running = state == "running"
+    # Looked up unless the caller already has it. It used to default to False, which meant
+    # every response but the list claimed `read` had not run — and now that the stepper
+    # renders the shipped rail rather than deriving one, that default would erase a tick.
+    if catalog_read is None:
+        catalog_read = await store_of(request).catalog_read(source.name)
     probed = await _probe(request.app.state.health, source, running)
     body = public(
         source, steps=steps, running=running, health=probed["health"], catalog_read=catalog_read
@@ -489,8 +494,8 @@ async def job_stream(request: Request) -> StreamingResponse:
 @router.post("/sources/{name}/actions/{name_of_action}")
 async def run_action(name: str, name_of_action: str, body: RunStep, request: Request) -> dict:
     """Start a job that runs one action, and answer as soon as it exists."""
-    if name_of_action not in ACTIONS:
-        raise HTTPException(404, f"no such action {name_of_action!r} — one of {', '.join(ACTIONS)}")
+    if name_of_action not in STAGES:
+        raise HTTPException(404, f"no such action {name_of_action!r} — one of {', '.join(STAGES)}")
     source = await _find(request, name)
     runner = runner_of(request)
     store = store_of(request)

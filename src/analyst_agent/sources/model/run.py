@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from ...config import settings
 from .. import docker, health
 from ..registry import Source, scaffold_source_dirs
-from ..store import STEPS, SourceStore, blocked_by
+from ..store import STAGES, STEPS, SourceStore, blocked_by
 from . import build, decide, publish, read, selection, vcs
 from .state import dump_enrichment, dump_schema, load_enrichment, load_schema
 from .warehouse import Schema
@@ -311,11 +311,6 @@ def _record(
     }
 
 
-ACTIONS = ("connect", "read", "cubes", "describe", "views")
-"""Everything a job can run. `read` is the odd one: it produces the catalog the picker needs, so it
-must be triggerable on its own, but it records no step — the four in `store.STEPS` are the ones.
-"""
-
 WRITES_MODEL = ("cubes", "describe", "views")
 """The actions that rewrite the model directory, and so the ones that commit. Each commits pass
 *or* fail: a model Cube rejected is left on disk deliberately, and an uncommitted tree is one
@@ -333,8 +328,8 @@ async def action(
     report: Report | None = None,
 ) -> StepResult:
     """Run one action by name, recording success or failure on the source."""
-    if name not in ACTIONS:
-        raise StepFailed(f"unknown action {name!r} — one of {', '.join(ACTIONS)}")
+    if name not in STAGES:
+        raise StepFailed(f"unknown action {name!r} — one of {', '.join(STAGES)}")
 
     # A step may only run once the one before it has succeeded. Enforced here rather than in
     # the browser, which is advice — and shipped to it, so the advice cannot say otherwise.

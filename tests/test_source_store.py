@@ -132,6 +132,16 @@ async def test_clearing_after_the_last_step_drops_nothing(store):
     assert await store.clear_steps_after("shop", "views") == []
 
 
+async def test_catalog_read_is_the_cached_catalog_one_source_or_all(store):
+    """`read` records no step, so this is the only evidence it ran — and the per-source and
+    batch answers have to agree, since one feeds the detail page and the other the list."""
+    await store.add(SHOP)
+    assert await store.catalog_read("shop") is False
+    await store.save_state("shop", {"catalog": {"public": {"tables": []}}})
+    assert await store.catalog_read("shop") is True
+    assert await store.all_catalog_read() == {"shop": True}
+
+
 async def test_state_merges_at_the_top_level(store):
     await store.add(SHOP)
     await store.save_state("shop", {"catalog": {"public": ["invoice"]}})

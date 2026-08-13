@@ -38,10 +38,14 @@ const STEP_BLURB: Record<StepName, string> = {
  * `read` has no row in `steps` because it caches a catalog rather than producing model
  * files — a backend distinction that has no business leaking into the UI. Hiding it
  * inside "Build cubes" meant the page promised four steps, and expanding the second one
- * offered a button that did something else. This is `run.generate`'s own order.
+ * offered a button that did something else.
+ *
+ * The order, the states and what blocks what all arrive on `SourceRow.stages`, from
+ * `store.STAGES`. Only the copy below is the browser's — a label is presentation, a
+ * sequence is the workflow, and keeping a second sequence here is what let the sidebar and
+ * the page name different next steps.
  */
 export type StageName = StepName | "read";
-export const STAGES: StageName[] = ["connect", "read", "cubes", "describe", "views"];
 
 export const STAGE_LABEL: Record<StageName, string> = { ...STEP_LABEL, read: "Read tables" };
 
@@ -521,18 +525,6 @@ export function healthOf(source: SourceRow): { tone: "ok" | "warn" | "bad"; labe
     return { tone: "bad", label: source.health.detail || source.health.status };
   }
   return { tone: "ok", label: "connected" };
-}
-
-/** Where a stage stands, as the server decided it. */
-export function stageState(stage: StageName, source: SourceRow): StageState["state"] {
-  return source.stages.find((s) => s.name === stage)?.state ?? "todo";
-}
-
-/** Why a stage cannot run yet, or "" when it can. `run.action` enforces this; the server
- *  ships its answer so this cannot explain a different rule. */
-export function stageBlocker(stage: StageName, source: SourceRow): string {
-  const blocker = source.stages.find((s) => s.name === stage)?.blocked_by;
-  return blocker ? `Run ${STAGE_LABEL[blocker as StageName]} first` : "";
 }
 
 /** A step's summary as one readable line. Lists are joined; counts are labelled. */

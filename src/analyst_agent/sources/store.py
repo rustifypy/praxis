@@ -16,8 +16,10 @@ STEPS = ("connect", "cubes", "describe", "views")
 before it has succeeded."""
 
 STAGES = ("connect", "read", "cubes", "describe", "views")
-"""Every action a person can run, in order. `read` is the odd one — it records no step row,
-so its state is whether a catalog is cached, and nothing gates it."""
+"""Every action a person can run, in order — the one definition of the workflow. `run.action`
+dispatches on it, `stages` renders it, and the browser iterates the shipped rail rather than
+keeping a fourth copy. `read` is the odd one: it records no step row, so its state is whether
+a catalog is cached, and nothing gates it."""
 
 
 class SourceStore:
@@ -72,11 +74,14 @@ class SourceStore:
             rows = await db.execute_fetchall("SELECT name FROM sources ORDER BY created_at")
         return [r["name"] for r in rows]
 
+    async def catalog_read(self, name: str) -> bool:
+        return has_catalog(await self.state(name))
+
     async def all_catalog_read(self) -> dict[str, bool]:
-        """Whether each source has a cached catalog — `read`'s state, which records no step."""
+        """Every source's answer in one read, for the endpoint that renders all of them."""
         async with self._db() as db:
             rows = await db.execute_fetchall("SELECT name, state FROM sources")
-        return {r["name"]: bool(json.loads(r["state"]).get("catalog")) for r in rows}
+        return {r["name"]: has_catalog(json.loads(r["state"])) for r in rows}
 
     async def all_steps(self) -> dict[str, dict]:
         """Every source's step records, in one read."""
@@ -175,6 +180,12 @@ def _source(row: aiosqlite.Row) -> Source:
         mounts=json.loads(row["mounts"]),
         credentials=json.loads(row["credentials"]),
     )
+
+
+def has_catalog(state: dict) -> bool:
+    """`read`'s state. It records no step row, so a cached catalog is the only evidence it ran —
+    asked one source at a time by the detail endpoints and all at once by the list."""
+    return bool(state.get("catalog"))
 
 
 def invalidated_by(steps: dict, step: str) -> list[str]:
