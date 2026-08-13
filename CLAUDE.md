@@ -42,7 +42,7 @@ serves a portal nobody can authenticate against.
 
 ## Five subsystems
 
-**Query time** (`cube/`, `agent/`, `retrieval.py`, `grounding.py`) — the agent answers
+**Query time** (`cube/`, `agent/`, `grounding.py`) — the agent answers
 questions about **one** source: `CUBE_URL` picks it, `grounding.for_active_source` is
 the only place that resolves it, and its grounding is whatever that source carries.
 It never writes SQL. It emits Cube JSON queries that pass a four-tier gate
@@ -433,9 +433,9 @@ branch, at a time).
   `--filter name=^...$` anchored on the service name matches nothing.
 - **Source ports are published on `127.0.0.1` only.** `CUBEJS_DEV_MODE=true` disables JWT
   verification, and a `0.0.0.0` bind would answer the whole network unauthenticated.
-- **A progress sink may return a value.** `run._say` tests `inspect.isawaitable` rather
-  than truthiness: the web's sink returns the `Event` it emitted, and awaiting that killed
-  every job on its first progress call.
+- **A progress sink may return a value.** The web's sink returns the `Event` it emitted, so
+  `run.Report` is `Callable[[str, dict], object]` and `_say` calls it without reading the
+  result. Awaiting that result kills the job on its first progress call.
 - **`body { line-height: 1.6 }` is inherited by buttons but not by inputs**, so identical
   padding gives a 32px button beside a 27px input beside a 27px icon button. Every control
   that shares a row takes `min-height: var(--control)` and `line-height: 1.2`; do not size

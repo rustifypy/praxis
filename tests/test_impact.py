@@ -4,7 +4,7 @@ import pytest
 
 from analyst_agent.dashboards.store import DashboardStore
 from analyst_agent.grounding import Grounding
-from analyst_agent.sources.model import impact
+from analyst_agent.sources.edit import impact
 
 REVENUE = {"measures": ["revenue.net_revenue"], "dimensions": ["revenue.status"]}
 

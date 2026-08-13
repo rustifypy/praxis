@@ -299,7 +299,14 @@ const post = (path: string, body?: unknown) =>
 
 export const system = () => json<System>("/api/system");
 export const drivers = () =>
-  json<{ drivers: DriverSpec[]; local_hosts: string[]; localhost_note: string }>("/api/drivers");
+  json<{
+    drivers: DriverSpec[];
+    local_hosts: string[];
+    localhost_note: string;
+    /** What a source name may be, from `registry.NAME_PATTERN` — the rule `POST /sources`
+     *  rejects on, so the live feedback cannot be more permissive than the server. */
+    name_pattern: string;
+  }>("/api/drivers");
 export const list = () => json<{ sources: SourceRow[]; next_port: number }>("/api/sources");
 export const catalog = (name: string) => json<CatalogInfo>(`/api/sources/${name}/catalog`);
 export const logs = (name: string) =>

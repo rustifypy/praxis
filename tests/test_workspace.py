@@ -7,7 +7,8 @@ refusal to a status code or to prose, and are verified against a live source.
 import pytest
 
 from analyst_agent.sources import registry
-from analyst_agent.sources.model import vcs, workspace
+from analyst_agent.sources.edit import workspace
+from analyst_agent.sources.model import vcs
 from analyst_agent.sources.registry import Source
 
 SOURCE = Source(name="shop", description="", driver="postgres", port=4001)

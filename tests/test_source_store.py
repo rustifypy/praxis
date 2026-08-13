@@ -107,8 +107,10 @@ async def test_saving_a_step_does_not_touch_credentials(store):
 
 
 async def test_unknown_step_is_refused(store):
+    """By the `Step` annotation, not by a membership test in the body. `ValidationError` is a
+    `ValueError`, so what a caller may catch is unchanged."""
     await store.add(SHOP)
-    with pytest.raises(ValueError, match="unknown step"):
+    with pytest.raises(ValueError, match="'connect', 'cubes', 'describe' or 'views'"):
         await store.save_step("shop", "enrich", {})
 
 
@@ -203,6 +205,13 @@ def test_blank_supplied_credential_keeps_the_stored_one():
 def test_validate_name(name, expected):
     error = registry.validate_name(name, taken=["other"])
     assert error is None if expected is None else expected in error
+
+
+def test_a_name_is_ascii_only():
+    """It becomes a container name and a directory name, and `str.isalpha`/`isalnum` accept
+    Greek, accented Latin and Arabic-Indic digits — which the form's own rule rejects."""
+    for name in ("\u03c9mega", "caf\u00e9", "shop\u0663", "\u01c4shop"):
+        assert registry.validate_name(name, taken=[]) is not None, name
 
 
 def test_validate_name_rejects_duplicates():

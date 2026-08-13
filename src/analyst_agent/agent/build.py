@@ -4,7 +4,7 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 
 from ..dashboards.tools import DashboardContext, build_dashboard_tools
-from ..sources.model.tools import EditContext, build_editor_tools
+from ..sources.edit.tools import EditContext, build_editor_tools
 from .middleware import AuditLog, CompactionNotice
 from .model import build_model
 from .prompts import build_editor_prompt, build_system_prompt

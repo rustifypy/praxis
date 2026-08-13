@@ -22,8 +22,8 @@ from ..cube.client import ADMIN_TIMEOUT_S, CubeClient
 from ..dashboards.store import DashboardStore
 from ..dashboards.tools import DashboardContext
 from ..grounding import for_active_source
+from ..sources.edit.tools import EditContext
 from ..sources.model import vcs
-from ..sources.model.tools import EditContext
 from ..sources.registry import Source
 from .events import Event
 from .store import ChatStore

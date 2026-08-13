@@ -4,7 +4,7 @@ from copy import deepcopy
 
 import yaml
 
-from analyst_agent.sources.model import edits
+from analyst_agent.sources.edit import edits
 
 ALBUM = {
     "name": "album",

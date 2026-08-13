@@ -7,6 +7,9 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal, get_args
+
+from pydantic import validate_call
 
 from ..config import settings
 from ..db import DASHBOARDS_SCHEMA, connect
@@ -14,10 +17,13 @@ from ..db import DASHBOARDS_SCHEMA, connect
 ROWS_KEPT = 2
 """Runs deep a tile keeps its rows — what a delta against the previous refresh needs."""
 
-STATUSES = ("validating", "running", "ok", "refused", "failed")
+Status = Literal["validating", "running", "ok", "refused", "failed"]
 """`refused` is tiles that did not compile, and nothing ran; `failed` is tiles that compiled
-and then broke. Separate because only the first is fixable by editing a tile.
+and then broke. Separate because only the first is fixable by editing a tile. Annotating with
+this refuses an unknown one, so neither writer tests the tuple — they had that test twice, ten
+lines apart.
 """
+STATUSES: tuple[Status, ...] = get_args(Status)
 
 
 @dataclass
@@ -296,15 +302,14 @@ class DashboardStore:
             await db.commit()
         return run
 
+    @validate_call
     async def finish_run(
         self,
         run_id: str,
-        status: str,
+        status: Status,
         errors: list[dict] | None = None,
         insight: str = "",
     ) -> None:
-        if status not in STATUSES:
-            raise ValueError(f"unknown run status {status!r} — one of {', '.join(STATUSES)}")
         async with self._db() as db:
             await db.execute(
                 "UPDATE runs SET status = ?, errors = ?, insight = ?, finished_at = ? WHERE id = ?",
@@ -312,9 +317,8 @@ class DashboardStore:
             )
             await db.commit()
 
-    async def set_run_status(self, run_id: str, status: str) -> None:
-        if status not in STATUSES:
-            raise ValueError(f"unknown run status {status!r} — one of {', '.join(STATUSES)}")
+    @validate_call
+    async def set_run_status(self, run_id: str, status: Status) -> None:
         async with self._db() as db:
             await db.execute("UPDATE runs SET status = ? WHERE id = ?", (status, run_id))
             await db.commit()

@@ -274,6 +274,36 @@ async def test_the_driver_form_ships_what_is_required_and_no_flag_to_re_derive_i
     assert "CUBEJS_DB_DATABRICKS_ACCEPT_POLICY" not in offered | set(databricks["required_envs"])
 
 
+async def test_the_form_is_shipped_the_name_rule_it_must_not_contradict(api):
+    """The browser tests it per keystroke and `POST /sources` rejects on it, from one string."""
+    import re
+
+    pattern = (await api.get("/api/drivers")).json()["name_pattern"]
+    assert re.match(pattern, "my-shop") and not re.match(pattern, "\u03c9mega")
+
+
+async def test_a_non_ascii_source_name_is_refused(api):
+    """It would become the container name and the model directory name."""
+    response = await api.post(
+        "/api/sources",
+        json={
+            "name": "\u03c9mega",
+            "description": "",
+            "driver": "postgres",
+            "port": 4098,
+            "values": {
+                "CUBEJS_DB_HOST": "h",
+                "CUBEJS_DB_PORT": "5432",
+                "CUBEJS_DB_NAME": "n",
+                "CUBEJS_DB_USER": "u",
+                "CUBEJS_DB_PASS": "p",
+            },
+        },
+    )
+    assert response.status_code == 400
+    assert "lowercase" in response.text
+
+
 async def test_creating_a_source_without_a_required_field_is_refused_by_name(api):
     response = await api.post(
         "/api/sources",

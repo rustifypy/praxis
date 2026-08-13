@@ -19,6 +19,7 @@ import type { DriverSpec, SourceRow } from "../sources";
 export function AddSource({
   drivers,
   localHosts,
+  namePattern,
   localhostNote,
   nextPort,
   taken,
@@ -29,6 +30,7 @@ export function AddSource({
 }: {
   drivers: DriverSpec[];
   localHosts: string[];
+  namePattern: string;
   localhostNote: string;
   nextPort: number;
   taken: string[];
@@ -72,7 +74,7 @@ export function AddSource({
   // the one that counts — this only saves a round trip on an obvious mistake.
   const nameError = editing
     ? ""
-    : name && !/^[a-z][a-z0-9-]*$/.test(name)
+    : name && namePattern && !new RegExp(namePattern).test(name)
       ? "lowercase letters, digits and hyphens, starting with a letter"
       : taken.includes(name)
         ? `${name} already exists`

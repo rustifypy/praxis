@@ -4,7 +4,7 @@ Swap in pgvector by replacing LexicalRetriever with the same `search(question, l
 
 from rapidfuzz import fuzz
 
-from .cube.catalog import Catalog, Entity
+from ..cube.catalog import Catalog, Entity
 
 
 class LexicalRetriever:

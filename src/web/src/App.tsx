@@ -64,7 +64,11 @@ export default function App() {
   const [sources, setSources] = useState<SourceRow[]>([]);
   const [nextPort, setNextPort] = useState(4001);
   const [drivers, setDrivers] = useState<DriverSpec[]>([]);
-  const [driverMeta, setDriverMeta] = useState({ local_hosts: [] as string[], localhost_note: "" });
+  const [driverMeta, setDriverMeta] = useState({
+    local_hosts: [] as string[],
+    localhost_note: "",
+    name_pattern: "",
+  });
   const [job, setJob] = useState<JobState | null>(null);
   // The connection drawer: "new" to add, a source row to edit its credentials.
   const [drawer, setDrawer] = useState<"new" | SourceRow | null>(null);
@@ -135,7 +139,11 @@ export default function App() {
       try {
         const [meta] = await Promise.all([sourcesApi.drivers(), refreshSources()]);
         setDrivers(meta.drivers);
-        setDriverMeta({ local_hosts: meta.local_hosts, localhost_note: meta.localhost_note });
+        setDriverMeta({
+          local_hosts: meta.local_hosts,
+          localhost_note: meta.localhost_note,
+          name_pattern: meta.name_pattern,
+        });
       } catch {
         /* /api/system reports why; the panel says so itself. */
       }
@@ -311,6 +319,7 @@ export default function App() {
           drivers={drivers}
           localHosts={driverMeta.local_hosts}
           localhostNote={driverMeta.localhost_note}
+          namePattern={driverMeta.name_pattern}
           nextPort={nextPort}
           taken={sources.map((s) => s.name)}
           editing={drawer === "new" ? undefined : drawer}

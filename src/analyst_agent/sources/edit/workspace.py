@@ -14,8 +14,9 @@ to do instead. Neither decision belongs here.
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..model import vcs
 from ..registry import Source
-from . import edits, vcs
+from . import edits
 
 
 @dataclass
