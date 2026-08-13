@@ -1,6 +1,6 @@
 import * as api from "../sources";
 import type { JobState, SourceRow, System } from "../sources";
-import { STEP_LABEL, healthOf, nextStep, servingSummary } from "../sources";
+import { STAGE_LABEL, healthOf, servingSummary } from "../sources";
 import { Info } from "./Info";
 import { JobProgress } from "./JobProgress";
 
@@ -88,7 +88,7 @@ export function Sources({
       <div className="src-list">
         {sources.map((source) => {
           const health = healthOf(source);
-          const upcoming = nextStep(source);
+          const upcoming = source.next_stage;
           return (
             <button
               key={source.name}
@@ -109,7 +109,7 @@ export function Sources({
               </span>
               {source.active && <span className="badge accent">active</span>}
               <span className="src-row-next">
-                {upcoming ? `next: ${STEP_LABEL[upcoming]}` : "complete"}
+                {upcoming ? `next: ${STAGE_LABEL[upcoming]}` : "complete"}
               </span>
               <span className="src-row-go" aria-hidden>
                 →

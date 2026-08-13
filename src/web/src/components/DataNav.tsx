@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 
-import type { JobState, SourceRow, StepName } from "../sources";
-import { STEP_LABEL, healthOf, nextStep } from "../sources";
+import type { JobState, SourceRow } from "../sources";
+import { ACTION_LABEL, STAGE_LABEL, healthOf } from "../sources";
 
 /**
  * The data mode's whole sidebar: sources, and the job running over one of them.
@@ -72,7 +72,7 @@ export function DataNav({
 
         {shown.map((source) => {
           const health = healthOf(source);
-          const upcoming = nextStep(source);
+          const upcoming = source.next_stage;
           return (
             <button
               key={source.name}
@@ -83,7 +83,7 @@ export function DataNav({
               <span className="nav-row-name">{source.name}</span>
               {source.active && <span className="nav-row-tag">active</span>}
               <span className="nav-row-sub">
-                {upcoming ? `next: ${STEP_LABEL[upcoming]}` : "complete"}
+                {upcoming ? `next: ${STAGE_LABEL[upcoming]}` : "complete"}
               </span>
             </button>
           );
@@ -103,7 +103,7 @@ export function DataNav({
           <span className="job-pill-text">
             {running
               ? job.current
-                ? `${STEP_LABEL[job.current as StepName] ?? "Reading"} · ${job.source}`
+                ? `${ACTION_LABEL[job.current] ?? "Reading"} · ${job.source}`
                 : `Working on ${job.source}`
               : job.error
                 ? `${job.source} failed`

@@ -134,16 +134,7 @@ def build_tools(session: Session, preview_rows: int = 30, event_rows: int = MAX_
                     "rows_total": len(rows),
                     "columns": columns,
                     "result_id": result_id,
-                    # Derived, not asked for: the chart is free, instant on a replayed
-                    # transcript, and cannot plot a column nobody fetched. `None` is a
-                    # normal outcome — see visualize.chart_for.
                     "chart": chart,
-                    # Two different limits on purpose: the model pays per token and reads
-                    # `preview_rows`, the browser pays per event row and renders
-                    # `event_rows`. They were one number, which meant making the table
-                    # feel complete would have cost the model 70 rows of context. The
-                    # browser's limit is `visualize.MAX_POINTS`, which is what lets a chart
-                    # be drawn from the event alone rather than fetched.
                     "preview": rows[:event_rows],
                     "duration_ms": result.duration_ms,
                     "warnings": result.warnings,

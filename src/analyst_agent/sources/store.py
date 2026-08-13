@@ -15,6 +15,12 @@ STEPS = ("connect", "cubes", "describe", "views")
 """In order. The UI renders one row per step, and a step may only run once the one
 before it has succeeded."""
 
+STAGES = ("connect", "read", "cubes", "describe", "views")
+"""Every action a person can run, in order — the one definition of the workflow. `run.action`
+dispatches on it, `stages` renders it, and the browser iterates the shipped rail rather than
+keeping a fourth copy. `read` is the odd one: it records no step row, so its state is whether
+a catalog is cached, and nothing gates it."""
+
 
 class SourceStore:
     def __init__(self, path: Path | None = None):
@@ -67,6 +73,15 @@ class SourceStore:
         async with self._db() as db:
             rows = await db.execute_fetchall("SELECT name FROM sources ORDER BY created_at")
         return [r["name"] for r in rows]
+
+    async def catalog_read(self, name: str) -> bool:
+        return has_catalog(await self.state(name))
+
+    async def all_catalog_read(self) -> dict[str, bool]:
+        """Every source's answer in one read, for the endpoint that renders all of them."""
+        async with self._db() as db:
+            rows = await db.execute_fetchall("SELECT name, state FROM sources")
+        return {r["name"]: has_catalog(json.loads(r["state"])) for r in rows}
 
     async def all_steps(self) -> dict[str, dict]:
         """Every source's step records, in one read."""
@@ -167,13 +182,47 @@ def _source(row: aiosqlite.Row) -> Source:
     )
 
 
+def has_catalog(state: dict) -> bool:
+    """`read`'s state. It records no step row, so a cached catalog is the only evidence it ran —
+    asked one source at a time by the detail endpoints and all at once by the list."""
+    return bool(state.get("catalog"))
+
+
 def invalidated_by(steps: dict, step: str) -> list[str]:
     """Which recorded steps re-running `step` would throw away, in order."""
     return [s for s in STEPS[STEPS.index(step) + 1 :] if steps.get(s, {}).get("status")]
 
 
-def public(source: Source, steps: dict, running: bool, health: dict) -> dict:
+def blocked_by(steps: dict, stage: str) -> str:
+    """The step that must succeed before `stage` may run, or "". `run.action` enforces this and
+    the browser explains it, from this one answer — they disagreed about `cubes`, which needs
+    `connect` and not `read` because `cubes` reads the catalog itself when none is cached."""
+    if stage not in STEPS:
+        return ""
+    index = STEPS.index(stage)
+    previous = STEPS[index - 1] if index else ""
+    return previous if previous and steps.get(previous, {}).get("status") != "done" else ""
+
+
+def stages(steps: dict, catalog_read: bool) -> list[dict]:
+    """Where each stage stands and what is holding it up — the whole progress rail, decided
+    once here rather than re-derived per component."""
+    out = []
+    for stage in STAGES:
+        status = steps.get(stage, {}).get("status")
+        if stage == "read":
+            state = "done" if catalog_read else "todo"
+        else:
+            state = status if status in ("done", "error") else "todo"
+        out.append({"name": stage, "state": state, "blocked_by": blocked_by(steps, stage)})
+    return out
+
+
+def public(
+    source: Source, steps: dict, running: bool, health: dict, catalog_read: bool = False
+) -> dict:
     """A source as the browser may see it — every field except the credentials."""
+    rail = stages(steps, catalog_read)
     return {
         "name": source.name,
         "description": source.description,
@@ -195,6 +244,10 @@ def public(source: Source, steps: dict, running: bool, health: dict) -> dict:
         # does not have to parse prose to colour a dot.
         "health": health,
         "invalidates": {step: invalidated_by(steps, step) for step in STEPS},
+        "stages": rail,
+        # The primary action every screen offers. One answer, so a sidebar and a page cannot
+        # name different next steps for the same source.
+        "next_stage": next((s["name"] for s in rail if s["state"] != "done"), None),
         "active": source.is_active,
     }
 

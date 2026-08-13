@@ -10,7 +10,6 @@ import { json } from "./api";
 import type { AgentEvent } from "./types";
 
 export type StepName = "connect" | "cubes" | "describe" | "views";
-const STEPS: StepName[] = ["connect", "cubes", "describe", "views"];
 
 export const STEP_LABEL: Record<StepName, string> = {
   connect: "Connect",
@@ -39,10 +38,14 @@ const STEP_BLURB: Record<StepName, string> = {
  * `read` has no row in `steps` because it caches a catalog rather than producing model
  * files — a backend distinction that has no business leaking into the UI. Hiding it
  * inside "Build cubes" meant the page promised four steps, and expanding the second one
- * offered a button that did something else. This is `run.generate`'s own order.
+ * offered a button that did something else.
+ *
+ * The order, the states and what blocks what all arrive on `SourceRow.stages`, from
+ * `store.STAGES`. Only the copy below is the browser's — a label is presentation, a
+ * sequence is the workflow, and keeping a second sequence here is what let the sidebar and
+ * the page name different next steps.
  */
 export type StageName = StepName | "read";
-export const STAGES: StageName[] = ["connect", "read", "cubes", "describe", "views"];
 
 export const STAGE_LABEL: Record<StageName, string> = { ...STEP_LABEL, read: "Read tables" };
 
@@ -51,6 +54,13 @@ export const STAGE_BLURB: Record<StageName, string> = {
   read: "One throwaway container introspects every schema at once, so choosing tables afterwards is instant and touches no database.",
   cubes: "Pick the tables to model, then emit one cube each with its keys and joins.",
 };
+
+export interface StageState {
+  name: StageName;
+  state: "done" | "error" | "todo";
+  /** The step that must succeed first, or "" when nothing is holding it up. */
+  blocked_by: StepName | "";
+}
 
 interface StepRecord {
   status?: "done" | "error";
@@ -83,6 +93,12 @@ export interface SourceRow {
   /** Per step, the later steps re-running it would discard. Computed server-side so the
    *  confirmation and the deletion come from one rule. */
   invalidates: Record<StepName, StepName[]>;
+  /** Where every stage stands and what is holding it up, in order. Server-side, because
+   *  `run.action` enforces the same rule — and the two disagreed about `cubes`. */
+  stages: StageState[];
+  /** The first stage not done, or null once all five are. The primary action every screen
+   *  offers, so a sidebar and a page cannot name different ones. */
+  next_stage: StageName | null;
   /** The one source the agent queries, decided by CUBE_URL. */
   active: boolean;
   /** The checked-out branch, which is the model this source serves. "" before the model
@@ -197,6 +213,20 @@ export interface ServedModel {
   serving: boolean;
   error: string;
   entities: ServedEntity[];
+  /** Model size, from the server. Over cubes only — a view's members are the cube's members
+   *  re-exported, so counting every entity reports roughly twice the real size. Absent when
+   *  Cube would not answer. */
+  counts?: ModelCounts;
+}
+
+export interface ModelCounts {
+  cubes: number;
+  views: number;
+  members: number;
+  /** Cube members some view re-exports. Views omit surrogate keys on purpose, so this is
+   *  never the whole membership of a healthy model. */
+  exposed: number;
+  described: number;
 }
 
 /** One markdown file under `cube/sources/<name>/grounding/`, as the agent loads it. */
@@ -495,39 +525,6 @@ export function healthOf(source: SourceRow): { tone: "ok" | "warn" | "bad"; labe
     return { tone: "bad", label: source.health.detail || source.health.status };
   }
   return { tone: "ok", label: "connected" };
-}
-
-/** The step that may run next, or null once every one has succeeded. */
-export function nextStep(source: SourceRow): StepName | null {
-  return STEPS.find((step) => source.steps[step]?.status !== "done") ?? null;
-}
-
-/** Where a stage stands. `read` has no step record, so its state is whether a catalog
- *  was cached; every other stage reads the row `run.action` wrote. */
-export function stageState(
-  stage: StageName,
-  source: SourceRow,
-  catalogRead: boolean,
-): "done" | "error" | "todo" {
-  if (stage === "read") return catalogRead ? "done" : "todo";
-  const status = source.steps[stage]?.status;
-  return status === "done" ? "done" : status === "error" ? "error" : "todo";
-}
-
-/** The first stage not yet done, or null once all five are. Drives the primary action. */
-export function nextStage(source: SourceRow, catalogRead: boolean): StageName | null {
-  return STAGES.find((stage) => stageState(stage, source, catalogRead) !== "done") ?? null;
-}
-
-/** Why a stage cannot run yet, or "" when it can. The server enforces the same rule in
- *  `run.action`; this only explains it before the round trip. */
-export function stageBlocker(stage: StageName, source: SourceRow, catalogRead: boolean): string {
-  const index = STAGES.indexOf(stage);
-  if (index <= 0) return "";
-  const previous = STAGES[index - 1];
-  return stageState(previous, source, catalogRead) === "done"
-    ? ""
-    : `Run ${STAGE_LABEL[previous]} first`;
 }
 
 /** A step's summary as one readable line. Lists are joined; counts are labelled. */

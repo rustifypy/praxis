@@ -22,10 +22,10 @@ from ..sources.drivers import (
     get,
     split_mounts,
 )
-from ..sources.model import edits, selection, vcs
-from ..sources.model.run import ACTIONS, StepFailed
+from ..sources.model import edits, selection, vcs, workspace
+from ..sources.model.run import StepFailed
 from ..sources.registry import Source, next_port, scaffold_source_dirs, validate_new
-from ..sources.store import SourceStore, merge_credentials, public
+from ..sources.store import STAGES, SourceStore, merge_credentials, public
 from .stream import sse
 
 router = APIRouter(prefix="/api")
@@ -103,11 +103,24 @@ async def _probe(cache: dict, source: Source, running: bool) -> dict:
     return probed
 
 
-async def _view(request: Request, source: Source, containers: dict[str, str], steps: dict) -> dict:
+async def _view(
+    request: Request,
+    source: Source,
+    containers: dict[str, str],
+    steps: dict,
+    catalog_read: bool | None = None,
+) -> dict:
     state = containers.get(source.service, "")
     running = state == "running"
+    # Looked up unless the caller already has it. It used to default to False, which meant
+    # every response but the list claimed `read` had not run — and now that the stepper
+    # renders the shipped rail rather than deriving one, that default would erase a tick.
+    if catalog_read is None:
+        catalog_read = await store_of(request).catalog_read(source.name)
     probed = await _probe(request.app.state.health, source, running)
-    body = public(source, steps=steps, running=running, health=probed["health"])
+    body = public(
+        source, steps=steps, running=running, health=probed["health"], catalog_read=catalog_read
+    )
     body["serving"] = probed["serving"]
     body["container_state"] = state or "missing"
     # The checked-out branch is the model this source serves, so anywhere a query can be
@@ -174,11 +187,16 @@ async def drivers() -> dict:
 @router.get("/sources")
 async def list_sources(request: Request) -> dict:
     store = store_of(request)
-    sources, steps, containers = await asyncio.gather(store.all(), store.all_steps(), docker.ours())
+    sources, steps, containers, read = await asyncio.gather(
+        store.all(), store.all_steps(), docker.ours(), store.all_catalog_read()
+    )
     # Concurrently: a cold cache costs each source a /readyz and a /v1/meta, and a
     # stopped-but-listening one can burn five seconds before the next even starts.
     views = await asyncio.gather(
-        *(_view(request, s, containers, steps.get(s.name, {})) for s in sources)
+        *(
+            _view(request, s, containers, steps.get(s.name, {}), read.get(s.name, False))
+            for s in sources
+        )
     )
     # A blocking connect_ex per candidate port, off the event loop.
     port = await asyncio.to_thread(next_port, [s.port for s in sources])
@@ -220,9 +238,7 @@ async def source_model(name: str, request: Request) -> dict:
     # panel that edits it. Keyed by name and read from the working tree rather than assumed
     # from `cubes/<name>.yml`: a hand-edited model may put a cube anywhere.
     model_dir = source.model_dir()
-    on_disk, _ = edits.read(
-        {str(p.relative_to(model_dir)): p.read_text() for p in sorted(model_dir.rglob("*.yml"))}
-    )
+    on_disk, _ = edits.read(workspace.files(source))
     branch = await vcs.current(model_dir) if vcs.is_repo(model_dir) else ""
     state = {
         "branch": branch,
@@ -243,20 +259,13 @@ async def source_model(name: str, request: Request) -> dict:
             **state,
         }
 
-    # Which views re-export each cube member, from `aliasMember`. A cube member absent
-    # from this map is reachable only by querying its cube directly — the case the gate
-    # can warn about but not prevent — so the panel marks it rather than leaving the
-    # distinction between a view and a cube to a type string.
-    exposure: dict[str, list[str]] = {}
-    for view in catalog.views:
-        for member in view.members:
-            if member.alias_member:
-                exposure.setdefault(member.alias_member, []).append(view.name)
-
     return {
         "serving": True,
         "error": "",
         **state,
+        # Shipped rather than recomputed in the browser: "over cubes only, because a view's
+        # members are the cube's re-exported" is a fact about the model, not about the panel.
+        "counts": asdict(catalog.counts()),
         # Defined on disk but absent from what Cube serves. With the file watcher on this is
         # a file that failed to compile; with dev mode off it is simply one not loaded yet.
         "unloaded": sorted(
@@ -271,17 +280,8 @@ async def source_model(name: str, request: Request) -> dict:
                 "description": e.description,
                 "ai_context": e.ai_context,
                 "folders": [asdict(f) for f in e.folders],
-                # For a view, the cubes it projects over; for a cube, the views exposing
-                # any of its members. Two directions of one relationship, named for what
-                # each side is asking.
-                "draws_from": sorted(
-                    {m.alias_member.rpartition(".")[0] for m in e.members if m.alias_member}
-                )
-                if e.is_view
-                else [],
-                "exposed_by": []
-                if e.is_view
-                else sorted({v for m in e.members for v in exposure.get(m.id, [])}),
+                "draws_from": catalog.draws_from(e),
+                "exposed_by": catalog.exposed_by(e),
                 "members": [
                     {
                         "id": m.id,
@@ -294,7 +294,7 @@ async def source_model(name: str, request: Request) -> dict:
                         "granularities": m.granularities,
                         "operators": m.valid_operators,
                         "alias": m.alias_member,
-                        "exposed_by": [] if e.is_view else exposure.get(m.id, []),
+                        "exposed_by": [] if e.is_view else catalog.exposure.get(m.id, []),
                     }
                     for m in e.members
                 ],
@@ -494,8 +494,8 @@ async def job_stream(request: Request) -> StreamingResponse:
 @router.post("/sources/{name}/actions/{name_of_action}")
 async def run_action(name: str, name_of_action: str, body: RunStep, request: Request) -> dict:
     """Start a job that runs one action, and answer as soon as it exists."""
-    if name_of_action not in ACTIONS:
-        raise HTTPException(404, f"no such action {name_of_action!r} — one of {', '.join(ACTIONS)}")
+    if name_of_action not in STAGES:
+        raise HTTPException(404, f"no such action {name_of_action!r} — one of {', '.join(STAGES)}")
     source = await _find(request, name)
     runner = runner_of(request)
     store = store_of(request)

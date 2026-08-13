@@ -1,8 +1,18 @@
-"""What one step leaves behind for the next, as JSON."""
+"""What one step leaves behind for the next, as JSON.
+
+These two are each other's inverse, and they are written so that staying inverses is not a
+thing anyone has to maintain: `asdict` emits every field a dataclass has, and `cls(**raw)`
+accepts exactly the fields it has. Add `Column.comment` and it round-trips; the enumerated
+loader this replaces would have dropped it silently on the next resume, days later, with a
+passing test — a field with a default compares equal on both sides of a fixture that never
+sets it. A key that is no longer a field raises `TypeError` here rather than vanishing.
+
+`Enrichment` needs no pair: it is a pydantic model, so `model_dump()` and `model_validate()`
+already are one.
+"""
 
 from dataclasses import asdict
 
-from .decide import CubeDecision, Enrichment, ViewDecision
 from .warehouse import Column, ForeignKey, Schema, Table
 
 
@@ -14,49 +24,12 @@ def load_schema(raw: dict) -> Schema:
     return Schema(
         tables=[
             Table(
-                name=t["name"],
-                schema=t.get("schema", "public"),
-                columns=[
-                    Column(
-                        name=c["name"],
-                        data_type=c.get("data_type", ""),
-                        distinct=c.get("distinct"),
-                        null_fraction=c.get("null_fraction"),
-                    )
-                    for c in t.get("columns") or []
-                ],
-                primary_key=list(t.get("primary_key") or []),
-                foreign_keys=[
-                    ForeignKey(
-                        columns=list(fk.get("columns") or []),
-                        ref_table=fk["ref_table"],
-                        ref_columns=list(fk.get("ref_columns") or []),
-                    )
-                    for fk in t.get("foreign_keys") or []
-                ],
+                **{
+                    **table,
+                    "columns": [Column(**c) for c in table["columns"]],
+                    "foreign_keys": [ForeignKey(**fk) for fk in table["foreign_keys"]],
+                }
             )
-            for t in raw.get("tables") or []
+            for table in raw["tables"]
         ]
-    )
-
-
-def dump_enrichment(enrichment: Enrichment) -> dict:
-    return {
-        "cubes": {name: d.model_dump() for name, d in enrichment.cubes.items()},
-        "views": [v.model_dump() for v in enrichment.views],
-        "rejected": list(enrichment.rejected),
-        "repaired": list(enrichment.repaired),
-        "dropped": list(enrichment.dropped),
-    }
-
-
-def load_enrichment(raw: dict) -> Enrichment:
-    return Enrichment(
-        cubes={
-            name: CubeDecision.model_validate(d) for name, d in (raw.get("cubes") or {}).items()
-        },
-        views=[ViewDecision.model_validate(v) for v in raw.get("views") or []],
-        rejected=list(raw.get("rejected") or []),
-        repaired=list(raw.get("repaired") or []),
-        dropped=list(raw.get("dropped") or []),
     )

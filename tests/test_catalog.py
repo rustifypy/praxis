@@ -55,3 +55,54 @@ def test_nearest_matches_across_an_underscore(catalog):
 def test_nearest_is_empty_when_nothing_is_close(catalog):
     """Three misleading suggestions are worse than saying there is no near match."""
     assert catalog.nearest("orders.zzqqxx") == []
+
+
+# --- the projection graph and model size ------------------------------------
+
+
+def test_a_view_reports_the_cubes_it_projects_over(catalog):
+    """`aliasMember` is the only thing in /v1/meta that says what a view is made of —
+    without it a view and a cube differ by a type string."""
+    revenue = next(e for e in catalog.entities if e.name == "revenue")
+    assert catalog.draws_from(revenue) == ["orders"]
+    assert catalog.exposed_by(revenue) == []
+
+
+def test_a_cube_reports_the_views_exposing_it(catalog):
+    orders = next(e for e in catalog.entities if e.name == "orders")
+    assert catalog.exposed_by(orders) == ["revenue"]
+    assert catalog.draws_from(orders) == []
+
+
+def test_a_cube_no_view_reaches_is_exposed_by_nothing(catalog):
+    """The actionable case: a cube reachable only by querying it directly."""
+    customers = next(e for e in catalog.entities if e.name == "customers")
+    assert catalog.exposed_by(customers) == []
+
+
+def test_model_size_counts_cubes_only(catalog):
+    """A view's members are the cube's members re-exported, so counting every entity
+    reports the model as roughly twice its size."""
+    counts = catalog.counts()
+    assert (counts.cubes, counts.views) == (2, 1)
+    # orders has 5, customers 2. The view's 4 are the same members again.
+    assert counts.members == 7
+    assert counts.members < sum(len(e.members) for e in catalog.entities)
+
+
+def test_exposed_counts_members_some_view_re_exports(catalog):
+    """Surrogate keys are left out of views on purpose, so this is never the whole
+    membership of a healthy model."""
+    counts = catalog.counts()
+    assert counts.exposed == 4
+    assert counts.exposed < counts.members
+
+
+def test_counts_survive_a_model_with_no_views():
+    from analyst_agent.cube.catalog import Catalog
+
+    bare = Catalog.from_meta(
+        {"cubes": [{"name": "orders", "type": "cube", "measures": [{"name": "orders.count"}]}]}
+    )
+    counts = bare.counts()
+    assert (counts.cubes, counts.views, counts.members, counts.exposed) == (1, 0, 1, 0)

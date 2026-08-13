@@ -7,9 +7,9 @@ from dataclasses import dataclass, field
 from ...config import settings
 from .. import docker, health
 from ..registry import Source, scaffold_source_dirs
-from ..store import STEPS, SourceStore
+from ..store import STAGES, STEPS, SourceStore, blocked_by
 from . import build, decide, publish, read, selection, vcs
-from .state import dump_enrichment, dump_schema, load_enrichment, load_schema
+from .state import dump_schema, load_schema
 from .warehouse import Schema
 
 Report = Callable[[str, dict], None]
@@ -223,7 +223,7 @@ async def describe(source: Source, store: SourceStore, report: Report | None = N
             enrichment=enrichment,
         )
 
-    await store.save_state(source.name, {"enrichment": dump_enrichment(enrichment)})
+    await store.save_state(source.name, {"enrichment": enrichment.model_dump()})
     summary = {
         **enrichment.counts,
         "repaired": len(enrichment.repaired),
@@ -251,7 +251,7 @@ async def views(source: Source, store: SourceStore, report: Report | None = None
     state = await store.state(source.name)
     if "enrichment" not in state:
         raise StepFailed("run the describe step first — views are built from its decisions")
-    enrichment = load_enrichment(state["enrichment"])
+    enrichment = decide.Enrichment.model_validate(state["enrichment"])
 
     _say(report, "views", {"message": "choosing views over the join paths"})
     roots = build.view_roots(schema)
@@ -271,7 +271,7 @@ async def views(source: Source, store: SourceStore, report: Report | None = None
     if not validation.compiled:
         raise StepFailed(f"Cube rejected the views:\n{validation.compile_error}")
 
-    await store.save_state(source.name, {"enrichment": dump_enrichment(enrichment)})
+    await store.save_state(source.name, {"enrichment": enrichment.model_dump()})
     summary = {
         "views": len(enrichment.views),
         "names": [v.name for v in enrichment.views],
@@ -311,11 +311,6 @@ def _record(
     }
 
 
-ACTIONS = ("connect", "read", "cubes", "describe", "views")
-"""Everything a job can run. `read` is the odd one: it produces the catalog the picker needs, so it
-must be triggerable on its own, but it records no step — the four in `store.STEPS` are the ones.
-"""
-
 WRITES_MODEL = ("cubes", "describe", "views")
 """The actions that rewrite the model directory, and so the ones that commit. Each commits pass
 *or* fail: a model Cube rejected is left on disk deliberately, and an uncommitted tree is one
@@ -333,18 +328,13 @@ async def action(
     report: Report | None = None,
 ) -> StepResult:
     """Run one action by name, recording success or failure on the source."""
-    if name not in ACTIONS:
-        raise StepFailed(f"unknown action {name!r} — one of {', '.join(ACTIONS)}")
+    if name not in STAGES:
+        raise StepFailed(f"unknown action {name!r} — one of {', '.join(STAGES)}")
 
-    # A step may only run once the one before it has succeeded. Enforced here rather
-    # than in the browser, which is advice, not a guarantee.
-    if name in STEPS:
-        index = STEPS.index(name)
-        if (
-            index
-            and (await store.steps(source.name)).get(STEPS[index - 1], {}).get("status") != "done"
-        ):
-            raise StepFailed(f"run {STEPS[index - 1]} first")
+    # A step may only run once the one before it has succeeded. Enforced here rather than in
+    # the browser, which is advice — and shipped to it, so the advice cannot say otherwise.
+    if blocker := blocked_by(await store.steps(source.name), name):
+        raise StepFailed(f"run {blocker} first")
 
     model_dir = source.model_dir()
     if name in WRITES_MODEL:
@@ -355,10 +345,10 @@ async def action(
 
     try:
         if name == "connect":
-            return await connect(source, store, report)
-        if name == "read":
-            return StepResult(summary=await read_catalog(source, store, report))
-        if name == "cubes":
+            result = await connect(source, store, report)
+        elif name == "read":
+            result = StepResult(summary=await read_catalog(source, store, report))
+        elif name == "cubes":
             result = await cubes(source, store, schema, tables, report)
         elif name == "describe":
             result = await describe(source, store, report)
@@ -371,12 +361,15 @@ async def action(
             await vcs.commit(model_dir, f"{name} — failed: {exc}"[:200])
         raise
 
-    detail = ", ".join(f"{k}={v}" for k, v in result.summary.items() if not isinstance(v, list))
-    committed = await vcs.commit(model_dir, f"{name} — {detail}"[:200])
-    # A failed commit must not fail a build that worked, but it must not be silent either:
-    # someone who thinks they have history and does not is worse off than before.
-    if not committed.ok:
-        result.notes.append(f"not committed to the model repo: {committed.message}")
+    # Both paths test `WRITES_MODEL`, rather than the success path relying on `connect` and
+    # `read` having returned early — moving either return would have committed a catalog read.
+    if name in WRITES_MODEL:
+        detail = ", ".join(f"{k}={v}" for k, v in result.summary.items() if not isinstance(v, list))
+        committed = await vcs.commit(model_dir, f"{name} — {detail}"[:200])
+        # A failed commit must not fail a build that worked, but it must not be silent either:
+        # someone who thinks they have history and does not is worse off than before.
+        if not committed.ok:
+            result.notes.append(f"not committed to the model repo: {committed.message}")
     return result
 
 

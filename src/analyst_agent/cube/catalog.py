@@ -98,11 +98,56 @@ class Entity:
         return head + " " + " ".join(m.search_text for m in self.members)
 
 
+@dataclass
+class Counts:
+    """How big a model is. Over cubes only — a view's members are the cube's members
+    re-exported, so counting every entity reports a model as roughly twice its size."""
+
+    cubes: int
+    views: int
+    members: int
+    exposed: int
+    """Cube members some view re-exports. Surrogate keys are omitted from views on purpose,
+    so this is never the whole membership of a healthy model."""
+    described: int
+
+
 class Catalog:
     def __init__(self, entities: list[Entity]):
         self.entities = entities
         self.members: dict[str, MemberDoc] = {m.id: m for e in entities for m in e.members}
         self.views = [e for e in entities if e.is_view]
+        self.cubes = [e for e in entities if not e.is_view]
+        # Which views re-export each cube member, from `aliasMember` — the only thing in
+        # `/v1/meta` that says what a view is made of.
+        self.exposure: dict[str, list[str]] = {}
+        for view in self.views:
+            for member in view.members:
+                if member.alias_member:
+                    self.exposure.setdefault(member.alias_member, []).append(view.name)
+
+    def draws_from(self, entity: Entity) -> list[str]:
+        """The cubes a view projects over, or nothing for a cube."""
+        if not entity.is_view:
+            return []
+        return sorted({m.alias_member.rpartition(".")[0] for m in entity.members if m.alias_member})
+
+    def exposed_by(self, entity: Entity) -> list[str]:
+        """The views exposing any of a cube's members — the other direction of `draws_from`,
+        named for what each side is asking."""
+        if entity.is_view:
+            return []
+        return sorted({v for m in entity.members for v in self.exposure.get(m.id, [])})
+
+    def counts(self) -> Counts:
+        members = [m for e in self.cubes for m in e.members]
+        return Counts(
+            cubes=len(self.cubes),
+            views=len(self.views),
+            members=len(members),
+            exposed=sum(1 for m in members if self.exposure.get(m.id)),
+            described=sum(1 for m in members if m.description),
+        )
 
     @classmethod
     def from_meta(cls, meta: dict) -> "Catalog":

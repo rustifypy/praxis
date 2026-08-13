@@ -11,15 +11,11 @@ import type {
   StageName,
 } from "../sources";
 import {
-  STAGES,
   STAGE_BLURB,
   STAGE_LABEL,
   STEP_LABEL,
   healthOf,
-  nextStage,
   servingSummary,
-  stageBlocker,
-  stageState,
   summarise,
 } from "../sources";
 import { ConfirmName } from "./ConfirmName";
@@ -75,7 +71,7 @@ export function SourceDetail({
 
   const health = healthOf(source);
   const catalogRead = Boolean(catalog?.read);
-  const upcoming = nextStage(source, catalogRead);
+  const upcoming = source.next_stage;
 
   const loadCatalog = useCallback(() => {
     void api
@@ -143,8 +139,8 @@ export function SourceDetail({
   // reopen the panel each time — including right after someone closed it.
   useEffect(() => {
     if (!job?.done || !job.error) return;
-    const failed = STAGES.find((s) => s !== "read" && source.steps[s]?.status === "error");
-    if (failed) setStage(failed);
+    const failed = source.stages.find((s) => s.state === "error");
+    if (failed) setStage(failed.name);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.id, job?.done, job?.error]);
 
@@ -183,7 +179,10 @@ export function SourceDetail({
     void guard(() => api.runAction(source.name, name), "stage");
 
   const selected = stage;
-  const blocker = selected ? stageBlocker(selected, source, catalogRead) : "";
+  // The server's rail, not a second reading of `steps` — `run.action` enforces the same
+  // ordering rule and ships its answer, so this cannot explain a different one.
+  const current = source.stages.find((s) => s.name === selected);
+  const blocker = current?.blocked_by ? `Run ${STAGE_LABEL[current.blocked_by]} first` : "";
   const record = selected && selected !== "read" ? source.steps[selected] : undefined;
   // Server-computed: the same rule that performs the deletion, so a warning cannot
   // promise something different from what happens.
@@ -217,7 +216,7 @@ export function SourceDetail({
           {upcoming ? (
             <button
               className="primary"
-              disabled={busy || Boolean(stageBlocker(upcoming, source, catalogRead))}
+              disabled={busy || Boolean(source.stages.find((s) => s.name === upcoming)?.blocked_by)}
               onClick={() => {
                 setStage(upcoming);
                 // Cubes is the one stage a button cannot start: a person picks the tables
@@ -333,8 +332,7 @@ export function SourceDetail({
         </div>
 
         <ol className="stepper">
-          {STAGES.map((name, index) => {
-            const state = stageState(name, source, catalogRead);
+          {source.stages.map(({ name, state }, index) => {
             return (
               <li key={name} className={`step ${state} ${selected === name ? "on" : ""}`}>
                 <button
@@ -412,7 +410,7 @@ export function SourceDetail({
                 title={blocker || undefined}
                 onClick={() => runStage(selected)}
               >
-                {stageState(selected, source, catalogRead) === "done"
+                {current?.state === "done"
                   ? `Run ${STAGE_LABEL[selected]} again`
                   : STAGE_LABEL[selected]}
               </button>
