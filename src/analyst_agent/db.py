@@ -7,10 +7,9 @@ alone; a schema split across the two modules reads as two databases and is one. 
 consequence worth knowing before adding versioning: `PRAGMA user_version` is a single integer
 per file, so a migration chain belongs to `analyst.db`, never to a store within it.
 
-**These tables will never gain a column** — `CREATE TABLE IF NOT EXISTS` does not diff, so
-adding a table to a live database works and adding a column silently does not, and there is no
-migration mechanism. Every column nothing reads yet is here because the feature needing it
-would otherwise require deleting the database.
+`CREATE TABLE IF NOT EXISTS` does not diff, so the schema below is only ever the shape of a
+**fresh** file. Changing an existing one is what `MIGRATIONS` is for: a column added here and
+nowhere else reaches a new database and silently misses every database already on disk.
 """
 
 from contextlib import asynccontextmanager
@@ -30,6 +29,13 @@ CREATE TABLE IF NOT EXISTS chats (
     -- Which Cube this chat ran against. One agent, one Cube today; stored so that
     -- old chats keep their provenance when the tool learns to span instances.
     cube_url   TEXT NOT NULL,
+    -- Empty for a question chat; a source name for one that edits that source's model.
+    -- The two agents share this table and this transcript format, and differ only here.
+    source_name TEXT NOT NULL DEFAULT '',
+    -- Which branch the editing chat was opened on. Provenance like `cube_url`, not a
+    -- binding: one container means one checkout, so the editor acts on whatever is
+    -- checked out now.
+    branch     TEXT NOT NULL DEFAULT '',
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
@@ -47,17 +53,7 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE INDEX IF NOT EXISTS events_by_chat ON events(chat_id, seq);
 
--- Which chats edit a model rather than ask questions. A side table and not a `kind` column
--- on `chats`, because CREATE TABLE IF NOT EXISTS does not diff: adding a table to a live
--- analyst.db works and adding a column silently does not. `branch` is provenance, like
--- `chats.cube_url` — the branch acted on is always whichever one is checked out, since that
--- is the one being served.
-CREATE TABLE IF NOT EXISTS model_chats (
-    chat_id     TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
-    source_name TEXT NOT NULL,
-    branch      TEXT NOT NULL DEFAULT '',
-    created_at  REAL NOT NULL
-);
+CREATE INDEX IF NOT EXISTS chats_by_source ON chats(source_name, updated_at DESC);
 
 -- A query's whole result set, which the event log deliberately does not carry: an event
 -- holds the first hundred rows so a replayed transcript renders without a fetch, and
@@ -190,3 +186,63 @@ async def connect(path: Path):
         db.row_factory = aiosqlite.Row
         await db.execute("PRAGMA foreign_keys = ON")
         yield db
+
+
+# --- migrations ----------------------------------------------------------------------
+
+MIGRATIONS = (
+    # 1: model_chats becomes two columns on chats. The side table existed only because there
+    # was no way to add a column to a database already on disk; there is one now. Created
+    # first so this also runs on a database old enough never to have had the table.
+    """
+    CREATE TABLE IF NOT EXISTS model_chats (
+        chat_id     TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
+        source_name TEXT NOT NULL,
+        branch      TEXT NOT NULL DEFAULT '',
+        created_at  REAL NOT NULL
+    );
+    ALTER TABLE chats ADD COLUMN source_name TEXT NOT NULL DEFAULT '';
+    ALTER TABLE chats ADD COLUMN branch TEXT NOT NULL DEFAULT '';
+    UPDATE chats SET
+        source_name = (SELECT source_name FROM model_chats WHERE chat_id = chats.id),
+        branch      = (SELECT branch      FROM model_chats WHERE chat_id = chats.id)
+    WHERE id IN (SELECT chat_id FROM model_chats);
+    DROP TABLE model_chats;
+    CREATE INDEX IF NOT EXISTS chats_by_source ON chats(source_name, updated_at DESC);
+    """,
+)
+"""Applied in order to a database already on disk; a script's index plus one is the
+`user_version` it produces. A shipped migration is never edited — a database that has run it
+will not run it again, so a correction is the next entry rather than a change to this one."""
+
+LATEST = len(MIGRATIONS)
+
+
+async def migrate(db: aiosqlite.Connection) -> int:
+    """Bring one file up to `LATEST`, and answer the version it is now.
+
+    Runs *before* the `CREATE TABLE IF NOT EXISTS` scripts, not after: migration 1 adds a column
+    the schema above already declares, so on a fresh file the ALTER would collide with the table
+    it was meant to change. A file with no tables at all is fresh by definition — it is stamped
+    and skipped, and the schema then creates it at the current shape.
+
+    Each script is run with its own version bump in one transaction, so a migration that fails
+    part-way leaves the file at the version it already had rather than half-changed.
+
+    `user_version` belongs to the file, not to a store within it — which is why this takes a
+    connection rather than a path. `analyst.db` is opened by two stores and either may be first.
+    """
+    version = (await (await db.execute("PRAGMA user_version")).fetchone())[0]
+    if version >= LATEST:
+        return version
+    empty = not await (
+        await db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        )
+    ).fetchone()
+    if empty:
+        await db.executescript(f"PRAGMA user_version = {LATEST};")
+        return LATEST
+    for n, script in enumerate(MIGRATIONS[version:], start=version + 1):
+        await db.executescript(f"BEGIN;\n{script}\nPRAGMA user_version = {n};\nCOMMIT;")
+    return LATEST

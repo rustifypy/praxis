@@ -184,12 +184,13 @@ renderer cannot draw makes the tile misrepresent itself. **Renderer branch first
 second.** (`tools.add_tile`'s docstring still advertises the wider list to the model; the
 validator refuses it, so the failure is a rejection rather than a wrong picture.)
 
-`store.py` will **never gain a column** — `CREATE TABLE IF NOT EXISTS` does not diff, so
-adding a table to a live `analyst.db` works and adding a column silently does not. Every
-column nothing reads yet (`tiles.time_member`, `tiles.deleted_at`, `tile_results.insight`)
-is there because the feature needing it would otherwise require deleting the database.
-Retention is the mirror image: a DELETE rather than a column, so the depth stays
-changeable — it is the *index* that could not be added later.
+A column here reaches a database already on disk only through `db.MIGRATIONS` — the schema
+in `db.py` is the shape of a *fresh* file, and `CREATE TABLE IF NOT EXISTS` does not diff.
+The columns nothing reads yet (`tiles.time_member`, `tiles.deleted_at`,
+`tile_results.insight`) predate the chain: they were added speculatively because at the time
+the alternative was deleting the database. That is no longer the reason to add one.
+Retention stays a DELETE rather than a column, on its own merits — the depth stays
+changeable that way.
 
 Not built, each gated so nothing can author one prematurely: the three missing chart types
 above; **dragging tiles** (`POST /{id}/layout` exists and validates, no UI calls it, so
@@ -474,9 +475,16 @@ branch, at a time).
   swallowed by `/api/results/{result_id}` as `result_id="abc.csv"`. The CSV route is
   `/api/results/{id}/csv` — the same lesson as `/sources/{name}/{action}`, one layer down.
 - **`ROWS` is a SQLite keyword**, so the `results` table stores its rows in a column named
-  `data` — which is also what `events` calls its JSON blob. Adding a *table* to `SCHEMA`
-  works on an existing `analyst.db`; adding a *column* silently does not, because
-  `CREATE TABLE IF NOT EXISTS` does not diff and there is no migration mechanism.
+  `data` — which is also what `events` calls its JSON blob.
+- **Editing a schema constant changes new databases only.** `CREATE TABLE IF NOT EXISTS` does
+  not diff, so a new *table* appears on an existing `analyst.db` and a new *column* silently
+  does not. A column needs an entry in `db.MIGRATIONS` as well, and `migrate` runs *before*
+  the schema scripts — after them, migration 1's `ALTER TABLE` would hit a fresh file's
+  already-correct table. A file with no tables is stamped at `LATEST` and skips the chain.
+  Each script runs with its own `PRAGMA user_version` bump inside one transaction, so a
+  failure leaves the version it started at rather than a half-applied schema recorded as done.
+  Two consequences: a shipped migration is never edited (a correction is the next entry), and
+  every INSERT names its columns, because a migration is now a thing that can shift them.
 - **New CSS goes on new class names — check `styles.css` first.** `.dot` is the rail's brand
   dot; reusing a taken name for the sources panel inherits `display: flex` and a monospace
   font, and every card lays out sideways. The trap is that a name may be claimed by markup
