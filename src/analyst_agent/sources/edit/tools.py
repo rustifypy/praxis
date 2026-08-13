@@ -9,8 +9,9 @@ from ...chat.events import Event, emit
 from ...cube.client import CubeClient, CubeError
 from ...dashboards.store import DashboardStore
 from ...grounding import for_source
+from ..model import publish, vcs
 from ..registry import Source
-from . import impact, publish, vcs, workspace
+from . import impact, workspace
 
 EVENT_KEYS = frozenset({"tool", "label", "ok", "note", "errors"})
 """Every key an editor tool's event may carry — asserted by a test. Absent on purpose: the

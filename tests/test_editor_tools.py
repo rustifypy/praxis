@@ -6,7 +6,8 @@ import yaml
 from analyst_agent.chat.store import ChatStore
 from analyst_agent.dashboards.store import DashboardStore
 from analyst_agent.sources import registry
-from analyst_agent.sources.model import tools, vcs
+from analyst_agent.sources.edit import tools
+from analyst_agent.sources.model import vcs
 from analyst_agent.sources.registry import Source
 
 SOURCE = Source(name="shop", description="", driver="postgres", port=4001)

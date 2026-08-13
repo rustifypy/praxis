@@ -13,7 +13,8 @@ from ..cube.client import CubeError, catalog_of
 from ..grounding import for_source
 from ..sources import docker, model
 from ..sources.drivers import credentials_for, get, split_mounts
-from ..sources.model import edits, selection, vcs, workspace
+from ..sources.edit import edits, workspace
+from ..sources.model import selection, vcs
 from ..sources.registry import Source, next_port, scaffold_source_dirs, validate_new
 from ..sources.store import merge_credentials
 from .state import find, runner_of, store_of, view

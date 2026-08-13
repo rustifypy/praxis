@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 
 import yaml
 
-from .decide import IDENTIFIER, SQL_WORDS
+from ..model.decide import IDENTIFIER, SQL_WORDS
 
 TOP_LEVEL = ("cubes", "views", "view_groups")
 """What Cube accepts at the top of a model file. Anything else fails compilation for the

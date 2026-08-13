@@ -1,21 +1,8 @@
-"""Model generation: read the database, build cubes, ask the model, let Cube judge."""
+"""Model generation: read the database, build cubes, ask the model, let Cube judge.
 
-from . import build, decide, publish, read, run, selection, state, warehouse
-from .publish import Validation
-from .run import StepFailed, StepResult, action, generate
+Changing a model afterwards is `..edit`, which depends on this. Nothing here depends on it.
+"""
 
-__all__ = [
-    "StepFailed",
-    "StepResult",
-    "Validation",
-    "action",
-    "build",
-    "decide",
-    "generate",
-    "publish",
-    "read",
-    "run",
-    "selection",
-    "state",
-    "warehouse",
-]
+# The submodules callers reach as `model.read`, `model.run` and so on. Everything else is
+# imported from its own module by name.
+from . import decide, read, run, state, warehouse  # noqa: F401

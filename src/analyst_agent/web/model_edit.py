@@ -18,7 +18,8 @@ from ..chat.service import stream_edit_turn
 from ..cube.client import CubeError, catalog_of
 from ..grounding import for_source
 from ..sources import docker
-from ..sources.model import impact, publish, vcs, workspace
+from ..sources.edit import impact, workspace
+from ..sources.model import publish, vcs
 from ..sources.registry import Source
 from .state import find, invalidate, runner_of
 from .stream import sse
