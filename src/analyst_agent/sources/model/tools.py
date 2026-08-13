@@ -10,7 +10,7 @@ from ...cube.client import CubeClient, CubeError
 from ...dashboards.store import DashboardStore
 from ...grounding import for_source
 from ..registry import Source
-from . import edits, impact, publish, vcs
+from . import impact, publish, vcs, workspace
 
 EVENT_KEYS = frozenset({"tool", "label", "ok", "note", "errors"})
 """Every key an editor tool's event may carry — asserted by a test. Absent on purpose: the
@@ -46,19 +46,16 @@ def _end(tool_name: str, ok: bool, note: str = "", errors: list[str] | None = No
 def build_editor_tools(ctx: EditContext) -> list:
     from langchain.tools import tool
 
-    async def _guard() -> str:
-        """Why this turn must not write, or "". Main is generated, so it is never editable."""
-        branch = await vcs.current(ctx.repo)
-        if branch == vcs.MAIN:
+    def _refused(tool_name: str, outcome: workspace.Outcome) -> str:
+        """A refusal as something the model can act on. `kind` is what the routes turn into a
+        status code; here it only decides whether to name the next step."""
+        _end(tool_name, False, errors=outcome.errors)
+        if outcome.kind == "branch":
             return (
-                f"This source is on {vcs.MAIN!r}, which the pipeline generates. Tell the user to "
-                "create a branch on the source page before you edit anything."
+                f"{outcome.reason}. Tell the user to create a branch on the source page before "
+                "you edit anything."
             )
-        return ""
-
-    def _files() -> dict[str, str]:
-        root = ctx.repo
-        return {str(p.relative_to(root)): p.read_text() for p in sorted(root.rglob("*.yml"))}
+        return outcome.reason
 
     @tool
     async def list_model_files() -> str:
@@ -66,7 +63,7 @@ def build_editor_tools(ctx: EditContext) -> list:
         other tool takes a path, and paths are not guessable."""
         _start("list_model_files", "Listing the model files")
         branch = await vcs.current(ctx.repo)
-        names = sorted(_files())
+        names = sorted(workspace.files(ctx.source))
         _end("list_model_files", True, note=f"{len(names)} files on {branch}")
         dirty = await vcs.status(ctx.repo)
         return f"branch: {branch}\nuncommitted: {', '.join(dirty) or 'nothing'}\n" + "\n".join(
@@ -77,8 +74,8 @@ def build_editor_tools(ctx: EditContext) -> list:
     async def read_model_file(path: str) -> str:
         """Read one model file, e.g. `cubes/invoice_line.yml` or `views/sales.yml`."""
         _start("read_model_file", f"Reading {path}")
-        target = ctx.repo / path
-        if not target.is_file() or target.suffix != ".yml":
+        target, _ = workspace.resolve(ctx.source, path)
+        if target is None or not target.is_file():
             _end("read_model_file", False)
             return f"No model file at {path!r}. Call list_model_files."
         _end("read_model_file", True, note=path)
@@ -94,49 +91,26 @@ def build_editor_tools(ctx: EditContext) -> list:
         are yours to rewrite. A rejection comes back with the reason; fix it and call again.
         """
         _start("write_model_file", f"Writing {path}")
-        if blocked := await _guard():
-            _end("write_model_file", False)
-            return blocked
-        if not path.endswith(".yml") or path.startswith("/") or ".." in path:
-            _end("write_model_file", False)
-            return "A model file is a relative *.yml path inside the model directory."
+        outcome = await workspace.write(ctx.source, path, text)
+        if not outcome.ok:
+            return _refused("write_model_file", outcome)
 
-        result = edits.check(
-            await vcs.files_at(ctx.repo, vcs.MAIN, suffix=".yml"), {**_files(), path: text}
-        )
-        if not result.ok:
-            _end("write_model_file", False, errors=result.errors)
-            return result.as_message()
-
-        target = ctx.repo / path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text)
-        _end("write_model_file", True, note=path, errors=result.warnings)
+        _end("write_model_file", True, note=outcome.path, errors=outcome.warnings)
+        warnings = "\n".join(f"- {w}" for w in outcome.warnings)
         return (
-            f"Wrote {path}. **This is live** — the container watches these files in dev mode, so "
-            "the source is already answering with it.\n" + result.as_message()
+            f"Wrote {outcome.path}. **This is live** — the container watches these files in dev "
+            "mode, so the source is already answering with it.\n" + warnings
         ).strip()
 
     @tool
     async def delete_model_file(path: str) -> str:
         """Delete one model file. Refused when it would remove a cube or any of its members."""
         _start("delete_model_file", f"Deleting {path}")
-        if blocked := await _guard():
-            _end("delete_model_file", False)
-            return blocked
-        target = ctx.repo / path
-        if not target.is_file():
-            _end("delete_model_file", False)
-            return f"No model file at {path!r}."
-
-        remaining = {p: body for p, body in _files().items() if p != path}
-        result = edits.check(await vcs.files_at(ctx.repo, vcs.MAIN, suffix=".yml"), remaining)
-        if not result.ok:
-            _end("delete_model_file", False, errors=result.errors)
-            return result.as_message()
-        target.unlink()
-        _end("delete_model_file", True, note=path)
-        return f"Deleted {path}."
+        outcome = await workspace.delete(ctx.source, path)
+        if not outcome.ok:
+            return _refused("delete_model_file", outcome)
+        _end("delete_model_file", True, note=outcome.path)
+        return f"Deleted {outcome.path}."
 
     @tool
     async def validate_model() -> str:
@@ -183,9 +157,8 @@ def build_editor_tools(ctx: EditContext) -> list:
     async def commit_changes(message: str) -> str:
         """Commit the edits so far, with a one-line message saying what changed and why."""
         _start("commit_changes", message[:60])
-        if blocked := await _guard():
-            _end("commit_changes", False)
-            return blocked
+        if refusal := await workspace.editable(ctx.source):
+            return _refused("commit_changes", refusal)
         result = await vcs.commit(ctx.repo, message)
         if not result.ok:
             _end("commit_changes", False, errors=[result.message])

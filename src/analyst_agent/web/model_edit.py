@@ -18,7 +18,7 @@ from ..chat.service import stream_edit_turn
 from ..cube.client import CubeError, catalog_of
 from ..grounding import for_source
 from ..sources import docker
-from ..sources.model import edits, impact, publish, vcs
+from ..sources.model import impact, publish, vcs, workspace
 from ..sources.registry import Source
 from .sources import _find, invalidate, runner_of
 from .stream import sse
@@ -60,32 +60,24 @@ async def _repo(source: Source) -> Path:
     return path
 
 
-def model_files(source: Source) -> dict[str, str]:
-    """Every `*.yml` in the working tree, relative path -> text. `.git` holds none."""
-    root = source.model_dir()
-    return {str(p.relative_to(root)): p.read_text() for p in sorted(root.rglob("*.yml"))}
+STATUS = {"branch": 409, "repo": 400, "path": 400, "missing": 404, "rejected": 400}
+"""Which status a refusal is. The kinds are the workspace's; the codes are HTTP's."""
 
 
 def _target(source: Source, path: str) -> Path:
     """A caller's path resolved inside the model directory, or refused."""
-    root = source.model_dir().resolve()
-    # `..` and an absolute path both resolve out of the tree, so the check is on the result.
-    target = (root / path).resolve()
-    if not target.is_relative_to(root) or ".git" in target.parts:
-        raise HTTPException(400, "a model file lives inside the source's model directory")
-    if target.suffix != ".yml":
-        raise HTTPException(400, "a model file is a *.yml — Cube ignores the rest of the mount")
+    target, refused = workspace.resolve(source, path)
+    if target is None:
+        raise HTTPException(400, refused)
     return target
 
 
-async def _on_a_branch(path: Path) -> str:
-    branch = await vcs.current(path)
-    if branch == vcs.MAIN:
-        raise HTTPException(
-            409,
-            f"{vcs.MAIN!r} is what the pipeline generates — create a branch before editing",
-        )
-    return branch
+async def _on_a_branch(source: Source) -> str:
+    """The branch to edit on, or the refusal as a status. One rule, in `workspace`, so the
+    routes and the editor's tools cannot come to disagree about what is editable."""
+    if refusal := await workspace.editable(source):
+        raise HTTPException(STATUS[refusal.kind], refusal.reason)
+    return await vcs.current(source.model_dir())
 
 
 def _dirty(dirty: list[str]) -> None:
@@ -259,7 +251,7 @@ async def list_files(name: str, request: Request) -> dict:
         "branch": branch,
         "editable": branch != vcs.MAIN,
         "dirty": await vcs.status(path),
-        "files": sorted(model_files(source)),
+        "files": sorted(workspace.files(source)),
     }
 
 
@@ -276,40 +268,23 @@ async def read_file(name: str, path: str, request: Request) -> dict:
 async def write_file(name: str, path: str, body: FileBody, request: Request) -> dict:
     """Tiers 1-2, then the write. What the gate refuses never reaches disk."""
     source = await _find(request, name)
-    repo = await _repo(source)
-    await _on_a_branch(repo)
-    target = _target(source, path)
-
-    relative = str(target.relative_to(source.model_dir().resolve()))
-    result = edits.check(
-        await vcs.files_at(repo, vcs.MAIN, suffix=".yml"),
-        {**model_files(source), relative: body.text},
-    )
-    if not result.ok:
-        raise HTTPException(400, result.as_message())
-
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(body.text)
-    return {"path": relative, "warnings": result.warnings, "dirty": await vcs.status(repo)}
+    outcome = await workspace.write(source, path, body.text)
+    if not outcome.ok:
+        raise HTTPException(STATUS[outcome.kind], outcome.reason)
+    return {
+        "path": outcome.path,
+        "warnings": outcome.warnings,
+        "dirty": await vcs.status(source.model_dir()),
+    }
 
 
 @router.delete("/sources/{name}/files/{path:path}")
 async def delete_file(name: str, path: str, request: Request) -> dict:
     source = await _find(request, name)
-    repo = await _repo(source)
-    await _on_a_branch(repo)
-    target = _target(source, path)
-    if not target.is_file():
-        raise HTTPException(404, f"no model file at {path!r}")
-
-    relative = str(target.relative_to(source.model_dir().resolve()))
-    remaining = {p: text for p, text in model_files(source).items() if p != relative}
-    result = edits.check(await vcs.files_at(repo, vcs.MAIN, suffix=".yml"), remaining)
-    if not result.ok:
-        raise HTTPException(400, result.as_message())
-
-    target.unlink()
-    return {"deleted": relative, "dirty": await vcs.status(repo)}
+    outcome = await workspace.delete(source, path)
+    if not outcome.ok:
+        raise HTTPException(STATUS[outcome.kind], outcome.reason)
+    return {"deleted": outcome.path, "dirty": await vcs.status(source.model_dir())}
 
 
 # --- the working tree ----------------------------------------------------------
@@ -332,7 +307,7 @@ async def validate(name: str, request: Request) -> dict:
 async def commit(name: str, body: CommitBody, request: Request) -> dict:
     source = await _find(request, name)
     repo = await _repo(source)
-    branch = await _on_a_branch(repo)
+    branch = await _on_a_branch(source)
     result = await vcs.commit(repo, body.message or f"edit {branch}")
     if not result.ok:
         raise HTTPException(400, result.message)
@@ -352,7 +327,7 @@ async def list_edit_chats(name: str, request: Request) -> list[dict]:
 async def create_edit_chat(name: str, request: Request) -> dict:
     """A chat bound to this source. Editing needs a branch, so refuse on main."""
     source = await _find(request, name)
-    branch = await _on_a_branch(await _repo(source))
+    branch = await _on_a_branch(source)
     chat = await request.app.state.store.create_model_chat(name, branch)
     return {"id": chat.id, "title": chat.title, "branch": branch}
 
@@ -389,7 +364,7 @@ async def discard(name: str, request: Request) -> dict:
     source = await _find(request, name)
     _idle(request)
     repo = await _repo(source)
-    await _on_a_branch(repo)
+    await _on_a_branch(source)
     result = await vcs.discard(repo)
     if not result.ok:
         raise HTTPException(400, result.message)

@@ -22,7 +22,7 @@ from ..sources.drivers import (
     get,
     split_mounts,
 )
-from ..sources.model import edits, selection, vcs
+from ..sources.model import edits, selection, vcs, workspace
 from ..sources.model.run import ACTIONS, StepFailed
 from ..sources.registry import Source, next_port, scaffold_source_dirs, validate_new
 from ..sources.store import SourceStore, merge_credentials, public
@@ -220,9 +220,7 @@ async def source_model(name: str, request: Request) -> dict:
     # panel that edits it. Keyed by name and read from the working tree rather than assumed
     # from `cubes/<name>.yml`: a hand-edited model may put a cube anywhere.
     model_dir = source.model_dir()
-    on_disk, _ = edits.read(
-        {str(p.relative_to(model_dir)): p.read_text() for p in sorted(model_dir.rglob("*.yml"))}
-    )
+    on_disk, _ = edits.read(workspace.files(source))
     branch = await vcs.current(model_dir) if vcs.is_repo(model_dir) else ""
     state = {
         "branch": branch,
