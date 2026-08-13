@@ -110,7 +110,7 @@ def build_tools(session: Session, preview_rows: int = 30, event_rows: int = MAX_
         rows = result.rows or []
         columns = [asdict(c) for c in columns_of(query, session.catalog)]
         picked = chart_for(query, session.catalog, rows)
-        chart = asdict(picked) if picked else None
+        chart = picked.model_dump() if picked else None
         # The handle the browser fetches the whole result by. The event carries only a
         # head of the rows — enough to render a table the moment a transcript replays,
         # without putting a 5000-row payload through the event log on every reload.
@@ -207,7 +207,7 @@ def build_tools(session: Session, preview_rows: int = 30, event_rows: int = MAX_
         emit(
             Event(
                 type="tool_end",
-                data={"tool": "set_chart", "ok": True, "chart": asdict(checked)},
+                data={"tool": "set_chart", "ok": True, "chart": checked.model_dump()},
             )
         )
         return f"The result is now drawn as a {checked.type} chart."

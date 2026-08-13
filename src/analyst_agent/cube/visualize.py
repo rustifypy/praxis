@@ -2,7 +2,9 @@
 common answer**; one measure per line or bar, since mixed magnitudes flatten the smaller.
 """
 
-from dataclasses import dataclass, field
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from .catalog import Catalog
 from .shape import Column, columns_of
@@ -23,14 +25,19 @@ a chart would plot the first hundred of four hundred months as if it were the se
 """
 
 
-@dataclass
-class ChartSpec:
+class ChartSpec(BaseModel):
     """What to draw. Column ids only — the renderer already has the header for labels and
-    number formats, and duplicating them here is how the two would come to disagree."""
+    number formats, and duplicating them here is how the two would come to disagree.
 
-    type: str
-    """line | bar | kpi"""
-    y: list[str] = field(default_factory=list)
+    A model rather than a dataclass because `set_chart` is handed one by the agent: a bare
+    string for `y` used to be iterated character by character, and a misspelled key was
+    accepted in silence.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["line", "bar", "kpi"]
+    y: list[str]
     x: str = ""
     series: str = ""
     """Column whose values split `y` into one line each. Empty for a single series."""
@@ -82,15 +89,20 @@ def chart_for(query: dict, catalog: Catalog, rows: list[dict]) -> ChartSpec | No
 def validate_spec(spec: dict, columns: list[Column]) -> tuple[ChartSpec | None, list[str]]:
     """Check an agent-authored spec against the columns the result actually has. A rejection is
     text the agent can act on, never an exception.
+
+    `ChartSpec` owns the shape — the types, the closed set of chart types, `y` being a non-empty
+    list, and refusing a key it does not have. What is left here is the half a model cannot
+    check: whether these column ids exist in *this* result, and what kind each one is.
     """
+    try:
+        parsed = ChartSpec.model_validate(spec)
+    except ValidationError as exc:
+        return None, [_rejection(e) for e in exc.errors()]
+
     by_id = {c.id: c for c in columns}
-    kind = str(spec.get("type", ""))
+    kind, y, x, series = parsed.type, parsed.y, parsed.x, parsed.series
     errors: list[str] = []
 
-    if kind not in ("line", "bar", "kpi"):
-        errors.append(f"type must be line, bar or kpi — got {kind!r}")
-
-    y = [str(m) for m in spec.get("y") or []]
     if not y:
         errors.append("y must name at least one measure column")
     for member_id in y:
@@ -100,7 +112,6 @@ def validate_spec(spec: dict, columns: list[Column]) -> tuple[ChartSpec | None, 
         elif column.kind != "measure":
             errors.append(f"y column {member_id!r} is a {column.kind}, not a measure")
 
-    x = str(spec.get("x", ""))
     if kind == "kpi":
         if x:
             errors.append("kpi takes no x column")
@@ -111,7 +122,6 @@ def validate_spec(spec: dict, columns: list[Column]) -> tuple[ChartSpec | None, 
     elif by_id[x].kind == "measure":
         errors.append(f"x column {x!r} is a measure — use a dimension or a time grain")
 
-    series = str(spec.get("series", ""))
     if series:
         if kind != "line":
             errors.append("series is only meaningful on a line chart")
@@ -122,4 +132,11 @@ def validate_spec(spec: dict, columns: list[Column]) -> tuple[ChartSpec | None, 
 
     if errors:
         return None, errors
-    return ChartSpec(type=kind, x=x, y=y, series=series), []
+    return parsed, []
+
+
+def _rejection(error: dict) -> str:
+    """One pydantic error as a line the agent can act on. The field path matters more than the
+    wording: `y` being a bare string has to read as a type problem, not as a bad column name."""
+    where = ".".join(str(part) for part in error["loc"]) or "chart"
+    return f"{where}: {error['msg'][0].lower()}{error['msg'][1:]}"

@@ -183,7 +183,44 @@ def test_an_unknown_chart_type_is_rejected(catalog):
     query = {"measures": ["orders.count"]}
     spec, errors = validate_spec({"type": "sankey", "y": ["orders.count"]}, columns(query, catalog))
     assert spec is None
-    assert "line, bar or kpi" in errors[0]
+    assert "'line', 'bar' or 'kpi'" in errors[0]
+
+
+def test_y_as_a_bare_string_is_a_type_error_not_twelve_bad_columns(catalog):
+    """Iterating the string gave one "column 'o' is not in this result" per character, so the
+    agent read a shape mistake as twelve naming mistakes."""
+    query = {"measures": ["orders.count"], "dimensions": ["orders.status"]}
+    spec, errors = validate_spec(
+        {"type": "bar", "x": "orders.status", "y": "orders.count"}, columns(query, catalog)
+    )
+    assert spec is None
+    assert errors == ["y: input should be a valid list"]
+
+
+def test_a_key_the_spec_does_not_have_is_rejected(catalog):
+    """The agent gets told the key is wrong instead of a chart it did not ask for."""
+    query = {"measures": ["orders.count"], "dimensions": ["orders.status"]}
+    spec, errors = validate_spec(
+        {"type": "bar", "x": "orders.status", "y": ["orders.count"], "colour": "red"},
+        columns(query, catalog),
+    )
+    assert spec is None
+    assert errors == ["colour: extra inputs are not permitted"]
+
+
+def test_a_spec_serialises_the_way_the_event_carries_it(catalog):
+    """`run_query` and `set_chart` both put this on the wire, and it is the only place the
+    browser reads a chart from — a spec that cannot be dumped is a transcript with no chart."""
+    query = {"measures": ["orders.count"], "dimensions": ["orders.status"]}
+    spec, _ = validate_spec(
+        {"type": "bar", "x": "orders.status", "y": ["orders.count"]}, columns(query, catalog)
+    )
+    assert spec.model_dump() == {
+        "type": "bar",
+        "y": ["orders.count"],
+        "x": "orders.status",
+        "series": "",
+    }
 
 
 def test_a_kpi_takes_no_axis(catalog):
