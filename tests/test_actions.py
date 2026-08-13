@@ -93,6 +93,15 @@ async def test_a_failing_read_records_nothing(store, monkeypatch):
     assert await store.steps("shop") == {}
 
 
+async def test_a_stage_with_no_branch_is_refused_rather_than_run_as_views(store, monkeypatch):
+    """`STAGES` is what the membership check accepts, and the dispatch used to end in a bare
+    `else`, so adding a sixth name there would have run `views` under its name."""
+    monkeypatch.setattr(run, "STAGES", (*run.STAGES, "publish"))
+    await store.save_step("shop", "connect", {"status": "done"})
+    with pytest.raises(StepFailed, match="stage with no branch"):
+        await run.action("publish", SHOP, store)
+
+
 async def test_only_the_model_writing_actions_commit(store, monkeypatch):
     """Both paths test `WRITES_MODEL`. The success path used to reach `vcs.commit`
     unconditionally and was correct only because `connect` and `read` returned before it, so

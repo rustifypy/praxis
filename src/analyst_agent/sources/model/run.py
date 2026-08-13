@@ -352,8 +352,12 @@ async def action(
             result = await cubes(source, store, schema, tables, report)
         elif name == "describe":
             result = await describe(source, store, report)
-        else:
+        elif name == "views":
             result = await views(source, store, report)
+        else:
+            # A sixth name in STAGES used to land here and silently run `views`, because the
+            # membership check above had already accepted it.
+            raise StepFailed(f"{name!r} is a stage with no branch in `action`")
     except StepFailed as exc:
         if name in STEPS:
             await store.save_step(source.name, name, _record({}, failure=str(exc)))
