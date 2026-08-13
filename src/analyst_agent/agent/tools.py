@@ -46,9 +46,7 @@ class Session:
     store: "ChatStore | None" = None
     chat_id: str = ""
     turn_id: str = ""
-    """Where a result set is kept, and under which chat and turn. Absent on the `/ask` path,
-    which has no chat to hang one on — nothing is persisted and no `result_id` is emitted.
-    """
+    """Where a result set is kept, and under which chat and turn."""
 
 
 def build_tools(session: Session, preview_rows: int = 30, event_rows: int = MAX_POINTS) -> list:

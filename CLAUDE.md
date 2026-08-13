@@ -11,7 +11,6 @@ make lint                     # ruff check + ruff format --check
 make fmt                      # ruff format + ruff check --fix
 make up / make down           # the shared Cube Store (sources are their own containers)
 make logs SOURCE=<name>       # follow one source's container
-make api                      # uvicorn on :8000
 
 uv run pytest tests/test_gate.py::test_valid_query_passes    # a single test
 uv run pytest tests/test_model_generation.py -q              # one file
@@ -30,7 +29,7 @@ starts the portal and nothing else. **The portal is the only surface**: add capa
 connection form and the four steps' confirmations get written twice, and anything resolving
 its target through `settings.api_root` — the single global `CUBE_URL` — cannot survive more
 than one Cube container without a `--source` flag and a `SourceStore` lookup a launcher has
-no reason to hold.
+no reason to hold. Anything headless belongs behind the portal's token guard, not beside it.
 
 `typer` and `rich` are deliberately absent from the dependency list — nothing here needs
 either. That is why the launcher prints with `print(..., flush=True)` rather than
