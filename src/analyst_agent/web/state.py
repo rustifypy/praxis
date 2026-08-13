@@ -29,21 +29,6 @@ async def init_state(app) -> None:
     app.state.health = {}
 
 
-def store_of(request: Request) -> SourceStore:
-    return request.app.state.sources
-
-
-def runner_of(request: Request) -> jobs.Runner:
-    return request.app.state.jobs
-
-
-def invalidate(cache: dict, source: Source) -> None:
-    """Forget the health probe for a source whose model just changed — nothing watches a
-    container for changes. The served catalog needs no hook: it is cached on the Cube session
-    for `CATALOG_TTL_S` and ages out on its own."""
-    cache.pop(source.name, None)
-
-
 # --- reading -----------------------------------------------------------------
 
 
@@ -85,7 +70,7 @@ async def view(
     # Looked up unless the caller already has it, never defaulted: the stepper renders the
     # shipped rail, so a wrong answer here erases a tick rather than being merely imprecise.
     if catalog_read is None:
-        catalog_read = await store_of(request).catalog_read(source.name)
+        catalog_read = await request.app.state.sources.catalog_read(source.name)
     probed = await probe(request.app.state.health, source, running)
     body = public(
         source, steps=steps, running=running, health=probed["health"], catalog_read=catalog_read
@@ -104,7 +89,7 @@ async def view(
 
 
 async def find(request: Request, name: str) -> Source:
-    source = await store_of(request).get(name)
+    source = await request.app.state.sources.get(name)
     if source is None:
         raise HTTPException(404, f"no source named {name!r}")
     return source

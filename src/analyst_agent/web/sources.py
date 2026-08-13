@@ -17,7 +17,7 @@ from ..sources.edit import edits, workspace
 from ..sources.model import selection, vcs
 from ..sources.registry import Source, next_port, scaffold_source_dirs, validate_new
 from ..sources.store import merge_credentials
-from .state import find, runner_of, store_of, view
+from .state import find, view
 
 router = APIRouter(prefix="/api")
 
@@ -50,7 +50,7 @@ class TableSelection(BaseModel):
 
 @router.get("/sources")
 async def list_sources(request: Request) -> dict:
-    store = store_of(request)
+    store = request.app.state.sources
     sources, steps, containers, read = await asyncio.gather(
         store.all(), store.all_steps(), docker.ours(), store.all_catalog_read()
     )
@@ -76,7 +76,7 @@ async def source_logs(name: str, request: Request, tail: int = 200) -> dict:
 @router.get("/sources/{name}/catalog")
 async def source_catalog(name: str, request: Request) -> dict:
     """The cached catalog, for the picker. Never reads the database."""
-    store = store_of(request)
+    store = request.app.state.sources
     await find(request, name)
     state = await store.state(name)
     catalog = {
@@ -205,7 +205,7 @@ async def check_now(name: str, request: Request) -> dict:
     starting or rebuilding something."""
     source = await find(request, name)
     request.app.state.health.pop(name, None)
-    steps = await store_of(request).steps(name)
+    steps = await request.app.state.sources.steps(name)
     return await view(request, source, await docker.ours(), steps)
 
 
@@ -214,7 +214,7 @@ async def closure(name: str, body: TableSelection, request: Request) -> dict:
     """What a tick-list actually models, and what it gives up."""
     # Only the requested schema is rebuilt: this fires on every checkbox tick, and
     # `cached_catalog` would reconstruct every Column of every schema each time.
-    raw = (await store_of(request).state(name)).get("catalog") or {}
+    raw = (await request.app.state.sources.state(name)).get("catalog") or {}
     if body.schema_name not in raw:
         raise HTTPException(404, f"schema {body.schema_name!r} has not been read")
     schema = model.state.load_schema(raw[body.schema_name])
@@ -243,7 +243,7 @@ def _paths(spec, values: dict[str, str]) -> tuple[dict[str, str], dict[str, str]
 
 @router.post("/sources")
 async def create(body: NewSource, request: Request) -> dict:
-    store = store_of(request)
+    store = request.app.state.sources
     existing = await store.all()
     port = body.port or await asyncio.to_thread(next_port, [s.port for s in existing])
 
@@ -270,7 +270,7 @@ async def create(body: NewSource, request: Request) -> dict:
 @router.patch("/sources/{name}")
 async def edit(name: str, body: EditSource, request: Request) -> dict:
     """Change the description or the credentials."""
-    store = store_of(request)
+    store = request.app.state.sources
     source = await find(request, name)
     merged = mounts = None
     if body.values:
@@ -295,13 +295,13 @@ async def remove(name: str, request: Request, keep_model: bool = False) -> dict:
             f"{name} is the source this portal queries (CUBE_URL={settings.cube_url}) — "
             "point CUBE_URL elsewhere and restart before removing it",
         )
-    if runner_of(request).busy:
+    if request.app.state.jobs.busy:
         raise HTTPException(409, "a job is running — wait for it to finish")
 
     await docker.remove(source.service)
     if not keep_model:
         shutil.rmtree(source.model_dir(), ignore_errors=True)
-    await store_of(request).remove(name)
+    await request.app.state.sources.remove(name)
     request.app.state.health.pop(name, None)
     return {"removed": name}
 
@@ -318,5 +318,5 @@ async def control(name: str, action: str, request: Request) -> dict:
     request.app.state.health.pop(name, None)
     if not result.ok:
         raise HTTPException(400, result.message or f"could not {action} {source.service}")
-    steps = await store_of(request).steps(name)
+    steps = await request.app.state.sources.steps(name)
     return await view(request, source, await docker.ours(), steps)

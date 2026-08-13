@@ -21,7 +21,7 @@ from ..sources import docker
 from ..sources.edit import impact, workspace
 from ..sources.model import publish, vcs
 from ..sources.registry import Source
-from .state import find, invalidate, runner_of
+from .state import find
 from .stream import sse
 
 router = APIRouter(prefix="/api")
@@ -48,7 +48,7 @@ class CommitBody(BaseModel):
 
 def _idle(request: Request) -> None:
     """One job at a time, machine-wide — a checkout restarts the container and so does a step."""
-    if runner_of(request).busy:
+    if request.app.state.jobs.busy:
         raise HTTPException(409, "a job is running — wait for it to finish")
 
 
@@ -82,7 +82,7 @@ async def _restart(request: Request, source: Source) -> None:
     """Load what is now checked out — deterministically, rather than trusting the file watcher
     to have seen a whole branch change."""
     result = await docker.restart(source.service)
-    invalidate(request.app.state.health, source)
+    request.app.state.health.pop(source.name, None)
     if not result.ok:
         raise HTTPException(400, result.message or f"could not restart {source.service}")
 

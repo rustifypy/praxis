@@ -13,7 +13,7 @@ from ..sources import docker, model
 from ..sources import jobs as job_runner
 from ..sources.model.run import StepFailed
 from ..sources.store import STAGES
-from .state import find, invalidate, runner_of, store_of
+from .state import find
 from .stream import sse
 
 router = APIRouter(prefix="/api")
@@ -31,19 +31,19 @@ class RunStep(BaseModel):
 @router.get("/job")
 async def current_job(request: Request) -> dict:
     """The running job and its buffered events, so a refresh re-attaches."""
-    job = runner_of(request).job
+    job = request.app.state.jobs.job
     return job.snapshot() if job else {"id": None}
 
 
 @router.post("/job/cancel")
 async def cancel_job(request: Request) -> dict:
-    return {"cancelled": runner_of(request).cancel()}
+    return {"cancelled": request.app.state.jobs.cancel()}
 
 
 @router.get("/job/stream")
 async def job_stream(request: Request) -> StreamingResponse:
     """SSE. Native EventSource on the browser side: a job is subscribed to, not posted."""
-    return sse(runner_of(request).watch())
+    return sse(request.app.state.jobs.watch())
 
 
 @router.post("/sources/{name}/actions/{name_of_action}")
@@ -52,10 +52,10 @@ async def run_action(name: str, name_of_action: str, body: RunStep, request: Req
     if name_of_action not in STAGES:
         raise HTTPException(404, f"no such action {name_of_action!r} — one of {', '.join(STAGES)}")
     source = await find(request, name)
-    runner = runner_of(request)
-    store = store_of(request)
     # Bound out here so the closure does not hold the finished request — and with it the
     # whole ASGI scope — alive for the minutes a describe takes.
+    runner = request.app.state.jobs
+    store = request.app.state.sources
     cache = request.app.state.health
 
     async def work(job: job_runner.Job) -> None:
@@ -76,7 +76,8 @@ async def run_action(name: str, name_of_action: str, body: RunStep, request: Req
             runner.emit("log", message=await docker.logs(source.service, 40))
             raise
         finally:
-            invalidate(cache, source)
+            # A rebuild changes what the container serves and nothing watches it for that.
+            cache.pop(source.name, None)
             job.current = ""
         runner.emit(
             "step_end",

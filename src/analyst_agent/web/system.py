@@ -9,7 +9,6 @@ from ..config import settings
 from ..sources import docker, model
 from ..sources.drivers import DRIVERS, LOCAL_HOSTS, LOCALHOST_NOTE, required_envs
 from ..sources.registry import NAME_PATTERN
-from .state import store_of
 
 router = APIRouter(prefix="/api")
 
@@ -22,10 +21,9 @@ async def system(request: Request) -> dict:
     info = await docker.daemon()
     if not info.ok:
         return {"ok": False, "reason": "Docker is not running — start Docker Desktop"}
-    # Independent: each is a process spawn plus a daemon round trip, and the panel
-    # refreshes this after every step.
+
     containers, cubestore, known = await asyncio.gather(
-        docker.ours(), docker.cubestore_running(), store_of(request).names()
+        docker.ours(), docker.cubestore_running(), request.app.state.sources.names()
     )
     return {
         "ok": True,
@@ -50,9 +48,6 @@ async def drivers() -> dict:
                 "key": spec.key,
                 "label": spec.label,
                 "extracts_tables": key in model.read.DIALECTS,
-                # What the form must collect, from the same function `POST /sources` rejects
-                # on. No per-field `required` flag goes with it: two copies of "is this one
-                # needed" is how the form came to enable Save on a body the server would 400.
                 "required_envs": required_envs(spec),
                 "fields": [
                     {
@@ -76,7 +71,7 @@ async def drivers() -> dict:
 @router.delete("/containers/{container}")
 async def remove_orphan(container: str, request: Request) -> dict:
     """Delete a `cube-*` container that has no source row."""
-    known = await store_of(request).names()
+    known = await request.app.state.sources.names()
     if container not in docker.orphans(await docker.ours(), known):
         raise HTTPException(400, f"{container} is not an orphaned source container")
     result = await docker.remove(container)
