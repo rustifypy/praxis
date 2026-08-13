@@ -345,10 +345,10 @@ async def action(
 
     try:
         if name == "connect":
-            return await connect(source, store, report)
-        if name == "read":
-            return StepResult(summary=await read_catalog(source, store, report))
-        if name == "cubes":
+            result = await connect(source, store, report)
+        elif name == "read":
+            result = StepResult(summary=await read_catalog(source, store, report))
+        elif name == "cubes":
             result = await cubes(source, store, schema, tables, report)
         elif name == "describe":
             result = await describe(source, store, report)
@@ -361,12 +361,15 @@ async def action(
             await vcs.commit(model_dir, f"{name} — failed: {exc}"[:200])
         raise
 
-    detail = ", ".join(f"{k}={v}" for k, v in result.summary.items() if not isinstance(v, list))
-    committed = await vcs.commit(model_dir, f"{name} — {detail}"[:200])
-    # A failed commit must not fail a build that worked, but it must not be silent either:
-    # someone who thinks they have history and does not is worse off than before.
-    if not committed.ok:
-        result.notes.append(f"not committed to the model repo: {committed.message}")
+    # Both paths test `WRITES_MODEL`, rather than the success path relying on `connect` and
+    # `read` having returned early — moving either return would have committed a catalog read.
+    if name in WRITES_MODEL:
+        detail = ", ".join(f"{k}={v}" for k, v in result.summary.items() if not isinstance(v, list))
+        committed = await vcs.commit(model_dir, f"{name} — {detail}"[:200])
+        # A failed commit must not fail a build that worked, but it must not be silent either:
+        # someone who thinks they have history and does not is worse off than before.
+        if not committed.ok:
+            result.notes.append(f"not committed to the model repo: {committed.message}")
     return result
 
 

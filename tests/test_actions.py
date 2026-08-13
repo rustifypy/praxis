@@ -7,7 +7,7 @@ and what a failure leaves in the database.
 
 import pytest
 
-from analyst_agent.sources.model import run
+from analyst_agent.sources.model import run, vcs
 from analyst_agent.sources.model.run import StepFailed
 from analyst_agent.sources.registry import Source
 from analyst_agent.sources.store import SourceStore
@@ -91,6 +91,50 @@ async def test_a_failing_read_records_nothing(store, monkeypatch):
     with pytest.raises(StepFailed):
         await run.action("read", SHOP, store)
     assert await store.steps("shop") == {}
+
+
+async def test_only_the_model_writing_actions_commit(store, monkeypatch):
+    """Both paths test `WRITES_MODEL`. The success path used to reach `vcs.commit`
+    unconditionally and was correct only because `connect` and `read` returned before it, so
+    moving either return would have committed a catalog read as though it rewrote the model."""
+    committed: list[str] = []
+
+    async def fake_commit(path, message):
+        committed.append(message)
+        return vcs.Result(code=0, out="", err="")
+
+    async def nothing(path):
+        return vcs.Result(code=0, out="", err="")
+
+    async def ok(*args, **kwargs):
+        return run.StepResult(summary={"cubes": 3})
+
+    async def catalog(*args, **kwargs):
+        return {"schemas": []}
+
+    async def boom(*args, **kwargs):
+        raise StepFailed("no schemas")
+
+    # Stubbed rather than mocked-out: `model_dir()` only computes a path, so with these two
+    # replaced nothing in this test touches git or the working directory.
+    monkeypatch.setattr(run.vcs, "commit", fake_commit)
+    monkeypatch.setattr(run.vcs, "ensure", nothing)
+    monkeypatch.setattr(run, "connect", ok)
+    monkeypatch.setattr(run, "read_catalog", catalog)
+    monkeypatch.setattr(run, "cubes", ok)
+
+    await run.action("connect", SHOP, store)
+    await run.action("read", SHOP, store)
+    assert committed == [], "starting a container and caching a catalog write no model files"
+
+    monkeypatch.setattr(run, "read_catalog", boom)
+    with pytest.raises(StepFailed):
+        await run.action("read", SHOP, store)
+    assert committed == [], "and a failed read has nothing to commit either"
+
+    await store.save_step("shop", "connect", {"status": "done"})
+    await run.action("cubes", SHOP, store)
+    assert committed == ["cubes — cubes=3"]
 
 
 async def test_generate_runs_the_actions_in_order(store, monkeypatch):
