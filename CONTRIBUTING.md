@@ -32,7 +32,8 @@ make install              # uv sync --all-groups
 You need Docker and a database of your own — nothing is bundled. Point the tool at it
 from the portal: `make serve`, then **Sources** in the sidebar, **Add source**.
 
-That writes one row to `~/.analyst/sources.db` (credentials included, chmod 600) and an
+That writes one row to the `sources` table in `~/.analyst/analyst.db` (credentials
+included, chmod 600) and an
 empty `cube/sources/<name>/`, then starts the container from that row and verifies the
 connection through Cube's `/readyz`. There is no registry file and no credential file:
 `sources/docker.py` builds a `docker run` from the row, so there is nothing on disk that
@@ -131,7 +132,7 @@ invariants:
    what is wrong. Do not add a YAML checker — it would be a second, weaker opinion about
    what Cube accepts.
 3. **Nothing survives only in memory.** The four steps run minutes or days apart, so each
-   writes what the next needs onto the source in `sources.db`. The views step cannot be
+   writes what the next needs onto the source's row. The views step cannot be
    rebuilt from the YAML on disk — it needs the join graph and the cube decisions.
 
 New guards on the model's output belong in `MEASURE_RULES` in `decide.py`: a rule id, a
@@ -139,7 +140,8 @@ reason, a predicate. The id shows up in the rejection line, so failures stay cou
 
 ## Changing the model editor
 
-`sources/model/{edits,impact,vcs,tools}.py` and `web/model_edit.py` let a branch of a
+`sources/edit/{edits,impact,tools,workspace}.py`, `sources/model/vcs.py` and
+`web/model_edit.py` let a branch of a
 source's model be edited safely, on the same bind mount the container is serving live —
 there's no isolated dev endpoint the way Cube Cloud has one per branch. Two invariants
 hold before you touch it:

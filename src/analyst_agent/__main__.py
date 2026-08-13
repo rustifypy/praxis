@@ -13,8 +13,9 @@ def main() -> None:
     parser.add_argument(
         "--data-dir",
         default="",
-        help="Where chats are stored (default DATA_DIR, ~/.analyst). Point this at a "
-        "scratch directory when testing — never at real history.",
+        help="Where everything is stored — chats, dashboards and sources (default "
+        "DATA_DIR, ~/.analyst). Point this at a scratch directory when testing; it "
+        "scopes the whole install, so a scratch run starts with no sources either.",
     )
     args = parser.parse_args()
 

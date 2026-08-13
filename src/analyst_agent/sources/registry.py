@@ -39,6 +39,9 @@ class Source:
     port: int
     mounts: dict[str, str] = field(default_factory=dict)
     """container path -> host path, for drivers that need a key file."""
+    cube_url: str = ""
+    """Where this source answers. Defaulted from `port` rather than derived on every read:
+    the stored value is what a chat follows, and it must not move when the port column does."""
     credentials: dict[str, str] = field(default_factory=dict)
     """CUBEJS_DB_* -> value. Lives in sources.db and reaches the container as `-e`.
     Never returned by an HTTP endpoint — see `store.public`."""
@@ -52,14 +55,19 @@ class Source:
     def spec(self) -> Driver:
         return get(self.driver)
 
+    def __post_init__(self) -> None:
+        if not self.cube_url:
+            self.cube_url = f"http://localhost:{self.port}"
+
     @property
-    def url(self) -> str:
-        return f"http://localhost:{self.port}"
+    def api_root(self) -> str:
+        """Where a query goes. The source is the only thing that knows."""
+        return f"{self.cube_url.rstrip('/')}{settings.cube_base_path}"
 
     @property
     def is_active(self) -> bool:
         """Whether the agent queries this source. `CUBE_URL` decides, not the registry."""
-        return self.url.rstrip("/") == settings.cube_url.rstrip("/")
+        return self.cube_url.rstrip("/") == settings.cube_url.rstrip("/")
 
     def model_dir(self, root: Path | None = None) -> Path:
         return (root or project_root()) / MODEL_ROOT / self.name

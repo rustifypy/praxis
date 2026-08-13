@@ -1,5 +1,5 @@
-"""sources.db — the registry, credentials included. The schema is in `db.py`, with every
-other table this process creates."""
+"""The source registry, credentials included, in `analyst.db` with everything else. The
+schema is in `db.py`."""
 
 import json
 import time
@@ -10,7 +10,7 @@ import aiosqlite
 from pydantic import validate_call
 
 from ..config import settings
-from ..db import SOURCES_SCHEMA, connect
+from ..db import SCHEMA, connect
 from .registry import Source
 
 Step = Literal["connect", "cubes", "describe", "views"]
@@ -30,14 +30,14 @@ STAGES: tuple[Stage, ...] = get_args(Stage)
 
 class SourceStore:
     def __init__(self, path: Path | None = None):
-        self.path = path or settings.sources_db_path
+        self.path = path or settings.db_path
 
     def _db(self):
         return connect(self.path)
 
     async def init(self) -> None:
         async with self._db() as db:
-            await db.executescript(SOURCES_SCHEMA)
+            await db.executescript(SCHEMA)
             await db.commit()
         # Database passwords in plaintext, so owner-only: the file mode is the whole guard.
         self.path.chmod(0o600)
@@ -48,14 +48,15 @@ class SourceStore:
         now = time.time()
         async with self._db() as db:
             await db.execute(
-                "INSERT INTO sources (name, description, driver, port, credentials, mounts,"
-                " steps, state, created_at, updated_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, '{}', '{}', ?, ?)",
+                "INSERT INTO sources (name, description, driver, port, cube_url, credentials,"
+                " mounts, steps, state, created_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, '{}', '{}', ?, ?)",
                 (
                     source.name,
                     source.description,
                     source.driver,
                     source.port,
+                    source.cube_url,
                     json.dumps(source.credentials),
                     json.dumps(source.mounts),
                     now,
@@ -63,6 +64,11 @@ class SourceStore:
                 ),
             )
             await db.commit()
+
+    async def active(self) -> Source | None:
+        """The source `CUBE_URL` points at. One definition, so grounding, a dashboard refresh
+        and a newly created chat cannot disagree about which source is being queried."""
+        return next((s for s in await self.all() if s.is_active), None)
 
     async def all(self) -> list[Source]:
         async with self._db() as db:
@@ -181,6 +187,7 @@ def _source(row: aiosqlite.Row) -> Source:
         description=row["description"],
         driver=row["driver"],
         port=int(row["port"]),
+        cube_url=row["cube_url"],
         mounts=json.loads(row["mounts"]),
         credentials=json.loads(row["credentials"]),
     )
@@ -232,7 +239,7 @@ def public(
         "description": source.description,
         "driver": source.driver,
         "port": source.port,
-        "url": source.url,
+        "url": source.cube_url,
         "container": source.service,
         # Which connection fields are set, so the edit form can show them filled —
         # names only, never values.

@@ -23,12 +23,12 @@ async def active(tmp_path, monkeypatch):
     """One registered source, and CUBE_URL pointing at it — so `source_mismatch` runs for real
     rather than being patched out. It is the only thing between a saved query and a number from
     the wrong warehouse."""
-    monkeypatch.setattr(settings, "sources_db", str(tmp_path / "sources.db"))
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
     store = SourceStore()
     await store.init()
     source = Source(name="chinook", description="", driver="postgres", port=4001)
     await store.add(source)
-    monkeypatch.setattr(settings, "cube_url", source.url)
+    monkeypatch.setattr(settings, "cube_url", source.cube_url)
     return source
 
 

@@ -17,7 +17,7 @@ SHOP = Source(name="shop", description="", driver="postgres", port=4001, credent
 
 @pytest.fixture
 async def store(tmp_path) -> SourceStore:
-    s = SourceStore(tmp_path / "sources.db")
+    s = SourceStore(tmp_path / "analyst.db")
     await s.init()
     await s.add(SHOP)
     return s

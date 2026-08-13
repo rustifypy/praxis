@@ -32,12 +32,7 @@ class Settings(BaseSettings):
     max_rows: int = 5_000
     query_timeout_s: float = 60.0
 
-    # Chat history and the LangGraph checkpointer share one SQLite file here.
     data_dir: str = "~/.analyst"
-    # Data sources deliberately do NOT live under data_dir: `analyst --data-dir`
-    # points chat history at a scratch file for testing, and it must not take the
-    # sources with it. Override this separately when you want a throwaway registry.
-    sources_db: str = "~/.analyst/sources.db"
 
     web_host: str = "127.0.0.1"
     web_port: int = 8420
@@ -47,13 +42,13 @@ class Settings(BaseSettings):
         return f"{self.cube_url.rstrip('/')}{self.cube_base_path}"
 
     @property
-    def db_path(self) -> Path:
-        """Callers create the parent — a property should not touch the filesystem."""
-        return Path(self.data_dir).expanduser() / "analyst.db"
+    def dir_path(self) -> Path:
+        return Path(self.data_dir).expanduser()
 
     @property
-    def sources_db_path(self) -> Path:
-        return Path(self.sources_db).expanduser()
+    def db_path(self) -> Path:
+        """Callers create the parent — a property should not touch the filesystem."""
+        return self.dir_path / "analyst.db"
 
 
 settings = Settings()

@@ -147,4 +147,4 @@ async def for_active_source() -> Grounding:
     """
     store = SourceStore()
     await store.init()
-    return for_source(next((s for s in await store.all() if s.is_active), None))
+    return for_source(await store.active())

@@ -148,7 +148,7 @@ def test_grounding_lives_inside_the_directory_cube_mounts(tmp_path):
 @pytest.fixture
 def registered(tmp_path, monkeypatch):
     """Two sources in a scratch registry, and `CUBE_URL` pointing at the second."""
-    monkeypatch.setattr(settings, "sources_db", str(tmp_path / "sources.db"))
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
     return tmp_path
 
 

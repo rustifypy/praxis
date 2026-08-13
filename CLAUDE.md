@@ -89,7 +89,7 @@ Three invariants hold throughout: **the LLM returns decisions, never YAML** (pyd
 objects via `with_structured_output`, then checked against a derived menu); **Cube is the
 validator** — a candidate model goes to the real container and Cube says what is wrong,
 so do not write a YAML checker; and **nothing survives only in memory** — the steps run
-minutes or days apart, so each writes what the next needs into `sources.db`.
+minutes or days apart, so each writes what the next needs into the `sources` row.
 
 `publish.install` is the only way a model reaches a container: write → restart → ask.
 
@@ -104,7 +104,8 @@ it must be triggerable alone, and `cubes` runs it itself when nothing is cached.
 a foreign key whose target is absent (it was written that way for keys into another
 schema), and a deselected table is indistinguishable from that.
 
-**Editing & branching** (`sources/model/{edits,impact,vcs,tools}.py`, `web/model_edit.py`,
+**Editing & branching** (`sources/edit/{edits,impact,tools,workspace}.py`,
+`sources/model/vcs.py`, `web/model_edit.py`,
 `src/web/src/components/{ModelEditor,EditorChat}.tsx`) — a source's model directory is a git
 repo, and the checked-out branch is what the container serves, because the directory is a bind
 mount rather than something copied in. There is no per-branch endpoint the way Cube Cloud has
@@ -113,8 +114,9 @@ one mount rather than a sandbox beside it.
 
 | module | role |
 |---|---|
-| `vcs.py` | git as a subprocess against the model directory — branches, diff, merge, and `files_at` for reading main's blobs out of `.git` without checking main out |
+| `model/vcs.py` | git as a subprocess against the model directory — branches, diff, merge, and `files_at` for reading main's blobs out of `.git` without checking main out. Under `model/` and not `edit/` because `publish.install` versions what it writes |
 | `edits.py` | tiers 1-2: valid YAML, then append-only cubes vs. freely-rewritable views, diffed against **main**, never against the branch's own previous state |
+| `workspace.py` | the directory as a working tree: `write` and `delete`, which both the HTTP routes and the editor agent's tools go through — that shared path is what stops the two drifting, and they had drifted |
 | `impact.py` | every dashboard tile and certified query bound to the source, checked against the *served* catalog — not a member-diff of main against the branch, because "is what this tile reads still here" is the question that survives whatever caused the breakage |
 | `tools.py` | the editor agent's six tools — no merge, checkout or branch-create; those restart the container and land work, so they stay buttons on the page |
 | `web/model_edit.py` | the HTTP surface: branches, files, validate (tier 3), commit, merge, and the editor chat |
@@ -184,12 +186,14 @@ renderer cannot draw makes the tile misrepresent itself. **Renderer branch first
 second.** (`tools.add_tile`'s docstring still advertises the wider list to the model; the
 validator refuses it, so the failure is a rejection rather than a wrong picture.)
 
-`store.py` will **never gain a column** — `CREATE TABLE IF NOT EXISTS` does not diff, so
-adding a table to a live `analyst.db` works and adding a column silently does not. Every
+`db.SCHEMA` will **never gain a column** — `CREATE TABLE IF NOT EXISTS` does not diff, so
+adding a table to a live `analyst.db` works and adding a column silently does not. There is
+no migration mechanism and deliberately so: this runs on one machine for one person, and
+recreating the database is a cheaper answer than a chain nobody else will ever run. Every
 column nothing reads yet (`tiles.time_member`, `tiles.deleted_at`, `tile_results.insight`)
-is there because the feature needing it would otherwise require deleting the database.
-Retention is the mirror image: a DELETE rather than a column, so the depth stays
-changeable — it is the *index* that could not be added later.
+is there because the feature needing it would otherwise require exactly that. Retention is
+the mirror image: a DELETE rather than a column, so the depth stays changeable — it is the
+*index* that could not be added later.
 
 Not built, each gated so nothing can author one prematurely: the three missing chart types
 above; **dragging tiles** (`POST /{id}/layout` exists and validates, no UI calls it, so
@@ -203,7 +207,7 @@ Jupyter does. One flat event stream is the contract between agent and browser:
 | module | role |
 |---|---|
 | `chat/events.py` | the `Event` schema and `emit()` — the wire format |
-| `chat/store.py` | SQLite: `chats` + `events` + the LangGraph checkpointer, one file |
+| `chat/store.py` | the `chats` and `events` tables, and the LangGraph checkpointer beside them |
 | `web/stream.py` | `sse()` — the wire framing and the headers, for both streams |
 | `chat/service.py` | `stream_turn()` — one turn as an async iterator of events |
 | `web/server.py` | routes, SSE, token auth, static mount |
@@ -307,19 +311,48 @@ a button that did something else. `store.STAGES` is the one definition of the se
 `store.stages` is the one place that knows `read`'s state comes from the cached catalog
 rather than from `steps`; the browser iterates the rail it ships on `SourceRow.stages`.
 
+## Storage
+
+**One file, one schema.** `db.SCHEMA` is every table this process creates, and
+`~/.analyst/analyst.db` holds all of them: `chats` and `events` (the transcript),
+`results`, `dashboards`/`tiles`/`layouts`/`runs`/`tile_results`, `sources`, and
+LangGraph's `checkpoints`/`writes` — those last two created by `AsyncSqliteSaver` rather
+than here. `db.connect` is how it is opened, so `PRAGMA foreign_keys` cannot drift between
+the three stores that open it.
+
+The schema lives in `db.py` rather than beside each store because **the unit is the file,
+not the store**: `ChatStore`, `DashboardStore` and `SourceStore` all write it and none owns
+it, and a schema split across three modules reads as three databases.
+
+The file is **chmod 600** — `SourceStore.init` sets it, because `sources.credentials` is
+plaintext JSON and the file mode is the whole guard.
+
 ## Sources
 
-One Cube container per data source, and **one row in `sources.db` is the whole source** —
+One Cube container per data source, and **one row in `sources` is the whole source** —
 credentials included. `sources/docker.py` starts each container with `docker run -e` built
 from that row, so there is nothing on disk that can drift from it: no registry file, no
 per-source credential file, no generated compose file, and do not add one.
 `docker-compose.yml` is hand-written and holds only the shared Cube Store, on an explicitly
 named `analyst-net` network that standalone containers join.
 
-`sources.db` lives at `SOURCES_DB` (`~/.analyst/sources.db`), deliberately **not** under
-`DATA_DIR`: pointing `--data-dir` at a scratch file to protect chat history must not hide
-the sources. `CUBE_URL` selects which source the agent queries — exactly one is "active",
-and the registry has no say in it.
+The registry is a table in `analyst.db` like everything else — chats, dashboards, sources
+and the checkpointer in one file under `DATA_DIR`. So `--data-dir` scopes the whole install
+rather than just the history: a scratch directory is a scratch *everything*, sources
+included.
+
+**A source owns its URL.** `sources.cube_url` is written from the port at creation and is
+what every query follows — `Source.api_root` is the only thing that builds a request URL,
+and `health`, `run` and `CubeClient.for_source` all read it rather than deriving one. A
+chat carries `source_name` and no URL of its own for the same reason: two copies would be
+one wrong number away from answering out of the wrong warehouse. `CUBE_URL` still picks
+which source is *active*, and `SourceStore.active()` is the one place that resolves it —
+grounding, a dashboard refresh and a newly created chat all go through it rather than
+each scanning the registry.
+
+**A chat has a `kind`.** `'question'` runs the query agent, `'model'` the editor agent;
+both share this table and the transcript format and differ only there. `list_chats`
+filters on it, so the sidebar shows question chats and the model editor shows its own.
 
 `sources/jobs.py` runs **one job at a time, machine-wide**, guarded by a `flock` — the
 probe container has one name, so a second portal process must wait rather than delete it
@@ -408,8 +441,8 @@ branch, at a time).
   markup and silently swallowed the gate's `[rule-id]` prefixes. Use `rich.markup.escape`.
 - **`cube/sources/` is the only thing written into the working directory.** That
   directory belongs to whoever installed this — it is a dependency, and their `cube/` is
-  theirs to version. Everything else machine-local goes under
-  `~/.analyst`: `sources.db`, the job lock, and `probe-model/` (the catalog probe's
+  theirs to version. Everything else goes under `DATA_DIR`
+  (`~/.analyst`): `analyst.db`, the job lock, and `probe-model/` (the catalog probe's
   throwaway cubes, cleared on every read). Do not put scratch — a probe directory, a model
   backup — into the project. Note the probe directory is **bind-mounted**, which is why it is
   under `~/.analyst` rather than a system tempdir — Docker Desktop's default file sharing
@@ -474,9 +507,12 @@ branch, at a time).
   swallowed by `/api/results/{result_id}` as `result_id="abc.csv"`. The CSV route is
   `/api/results/{id}/csv` — the same lesson as `/sources/{name}/{action}`, one layer down.
 - **`ROWS` is a SQLite keyword**, so the `results` table stores its rows in a column named
-  `data` — which is also what `events` calls its JSON blob. Adding a *table* to `SCHEMA`
-  works on an existing `analyst.db`; adding a *column* silently does not, because
-  `CREATE TABLE IF NOT EXISTS` does not diff and there is no migration mechanism.
+  `data` — which is also what `events` calls its JSON blob.
+- **Editing `db.SCHEMA` changes new databases only.** `CREATE TABLE IF NOT EXISTS` does not
+  diff, so a new *table* appears on an existing `analyst.db` and a new *column* silently does
+  not. There is no migration mechanism; changing a column means recreating the file, which is
+  affordable precisely because this is one local install. Every INSERT still names its
+  columns, so that a schema edit is a loud error rather than values shifted one place left.
 - **New CSS goes on new class names — check `styles.css` first.** `.dot` is the rail's brand
   dot; reusing a taken name for the sources panel inherits `display: flex` and a monospace
   font, and every card lays out sideways. The trap is that a name may be claimed by markup
