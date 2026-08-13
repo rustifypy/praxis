@@ -1,6 +1,11 @@
+from dataclasses import dataclass, field
+
+import httpx
 import pytest
 
 from analyst_agent.cube.catalog import Catalog
+from analyst_agent.cube.client import CompileResult, CubeError, LoadResult
+from analyst_agent.cube.schema import CubeQuery
 
 META = {
     "cubes": [
@@ -66,3 +71,47 @@ META = {
 @pytest.fixture
 def catalog() -> Catalog:
     return Catalog.from_meta(META)
+
+
+@dataclass
+class FakeCube:
+    """The second adapter at the Cube seam — `client.Cube` with no HTTP. Anything taking a
+    session (`gate`, `Session`, `dashboards.run`, `EditContext`) takes one of these in a test."""
+
+    served: Catalog
+    sql: str = "SELECT 1"
+    rows: list[dict] = field(default_factory=list)
+    resolved_ranges: dict[str, list[str]] = field(default_factory=dict)
+    refuse: str = ""
+    """Non-empty: compile fails the way Cube refusing a member does."""
+    down: str = ""
+    """Non-empty: every call raises, the way a stopped container does."""
+    seen: list[dict] = field(default_factory=list)
+    """Every query sent, so a test can assert a tier made no call at all."""
+
+    def _answering(self) -> None:
+        if self.down:
+            raise CubeError(self.down, cause=httpx.ConnectError(self.down))
+
+    async def catalog(self, *, refresh: bool = False) -> Catalog:
+        self._answering()
+        return self.served
+
+    async def compile(self, query: CubeQuery) -> CompileResult:
+        self._answering()
+        self.seen.append(query.to_payload())
+        if self.refuse:
+            return CompileResult(ok=False, error=self.refuse)
+        return CompileResult(ok=True, sql=self.sql, params=[])
+
+    async def load(self, query: CubeQuery) -> LoadResult:
+        self._answering()
+        self.seen.append(query.to_payload())
+        return LoadResult(
+            rows=list(self.rows), duration_ms=7, resolved_ranges=dict(self.resolved_ranges)
+        )
+
+
+@pytest.fixture
+def cube(catalog) -> FakeCube:
+    return FakeCube(served=catalog)
