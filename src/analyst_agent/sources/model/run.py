@@ -12,8 +12,10 @@ from . import build, decide, publish, read, selection, vcs
 from .state import dump_schema, load_schema
 from .warehouse import Schema
 
-Report = Callable[[str, dict], None]
-"""Progress sink, synchronous. `report("describe", {"done": 7, "total": 12, ...})`."""
+Report = Callable[[str, dict], object]
+"""Progress sink, synchronous. `report("describe", {"done": 7, "total": 12, ...})`. The return
+is `object` because the web's sink returns the `Event` it emitted; `_say` discards it, and
+awaiting it would kill the job on its first progress call."""
 
 
 class StepFailed(RuntimeError):
