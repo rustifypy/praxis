@@ -12,7 +12,7 @@ from ..cube.describe import describe_query
 from ..cube.shape import Column, columns_of
 from ..cube.visualize import MAX_POINTS, chart_for, validate_spec
 from ..grounding import Grounding
-from ..retrieval import LexicalRetriever, render
+from .retrieval import LexicalRetriever, render
 
 if TYPE_CHECKING:
     # Only for the annotation: chat.store imports QueryRecord from this module, so a real

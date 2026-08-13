@@ -42,7 +42,7 @@ serves a portal nobody can authenticate against.
 
 ## Five subsystems
 
-**Query time** (`cube/`, `agent/`, `retrieval.py`, `grounding.py`) — the agent answers
+**Query time** (`cube/`, `agent/`, `grounding.py`) — the agent answers
 questions about **one** source: `CUBE_URL` picks it, `grounding.for_active_source` is
 the only place that resolves it, and its grounding is whatever that source carries.
 It never writes SQL. It emits Cube JSON queries that pass a four-tier gate
