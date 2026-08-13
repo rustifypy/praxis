@@ -133,18 +133,13 @@ export function ServedModel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [picked, listed, artefacts]);
 
-  // Counted over cubes only. A view's members are the same members re-exported, so
-  // flattening every entity reported a model roughly twice its real size.
+  // Model size comes from the server: "over cubes only, because a view's members are the
+  // cube's re-exported" is a fact about the model, and it is tested there. Grounding is
+  // counted here because it is a local directory the server does not size.
   const totals = useMemo(() => {
-    const entities = model?.entities ?? [];
-    const cubeMembers = entities.filter((e) => !e.is_view).flatMap((e) => e.members);
     const files = grounding?.artefacts ?? [];
     return {
-      views: entities.filter((e) => e.is_view).length,
-      cubes: entities.filter((e) => !e.is_view).length,
-      members: cubeMembers.length,
-      exposed: cubeMembers.filter((m) => m.exposed_by.length > 0).length,
-      described: cubeMembers.filter((m) => m.description).length,
+      ...(model?.counts ?? { views: 0, cubes: 0, members: 0, exposed: 0, described: 0 }),
       grounded: files.length,
       // The half with a standing cost, which is the only grounding number worth a
       // headline: these are in the system prompt of every turn.

@@ -243,20 +243,13 @@ async def source_model(name: str, request: Request) -> dict:
             **state,
         }
 
-    # Which views re-export each cube member, from `aliasMember`. A cube member absent
-    # from this map is reachable only by querying its cube directly — the case the gate
-    # can warn about but not prevent — so the panel marks it rather than leaving the
-    # distinction between a view and a cube to a type string.
-    exposure: dict[str, list[str]] = {}
-    for view in catalog.views:
-        for member in view.members:
-            if member.alias_member:
-                exposure.setdefault(member.alias_member, []).append(view.name)
-
     return {
         "serving": True,
         "error": "",
         **state,
+        # Shipped rather than recomputed in the browser: "over cubes only, because a view's
+        # members are the cube's re-exported" is a fact about the model, not about the panel.
+        "counts": asdict(catalog.counts()),
         # Defined on disk but absent from what Cube serves. With the file watcher on this is
         # a file that failed to compile; with dev mode off it is simply one not loaded yet.
         "unloaded": sorted(
@@ -271,17 +264,8 @@ async def source_model(name: str, request: Request) -> dict:
                 "description": e.description,
                 "ai_context": e.ai_context,
                 "folders": [asdict(f) for f in e.folders],
-                # For a view, the cubes it projects over; for a cube, the views exposing
-                # any of its members. Two directions of one relationship, named for what
-                # each side is asking.
-                "draws_from": sorted(
-                    {m.alias_member.rpartition(".")[0] for m in e.members if m.alias_member}
-                )
-                if e.is_view
-                else [],
-                "exposed_by": []
-                if e.is_view
-                else sorted({v for m in e.members for v in exposure.get(m.id, [])}),
+                "draws_from": catalog.draws_from(e),
+                "exposed_by": catalog.exposed_by(e),
                 "members": [
                     {
                         "id": m.id,
@@ -294,7 +278,7 @@ async def source_model(name: str, request: Request) -> dict:
                         "granularities": m.granularities,
                         "operators": m.valid_operators,
                         "alias": m.alias_member,
-                        "exposed_by": [] if e.is_view else exposure.get(m.id, []),
+                        "exposed_by": [] if e.is_view else catalog.exposure.get(m.id, []),
                     }
                     for m in e.members
                 ],

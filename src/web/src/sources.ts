@@ -197,6 +197,20 @@ export interface ServedModel {
   serving: boolean;
   error: string;
   entities: ServedEntity[];
+  /** Model size, from the server. Over cubes only — a view's members are the cube's members
+   *  re-exported, so counting every entity reports roughly twice the real size. Absent when
+   *  Cube would not answer. */
+  counts?: ModelCounts;
+}
+
+export interface ModelCounts {
+  cubes: number;
+  views: number;
+  members: number;
+  /** Cube members some view re-exports. Views omit surrogate keys on purpose, so this is
+   *  never the whole membership of a healthy model. */
+  exposed: number;
+  described: number;
 }
 
 /** One markdown file under `cube/sources/<name>/grounding/`, as the agent loads it. */
