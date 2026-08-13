@@ -5,10 +5,7 @@ restart the container and land work, so they stay buttons on the page.
 from dataclasses import dataclass
 from pathlib import Path
 
-import httpx
-
 from ...chat.events import Event, emit
-from ...cube.catalog import Catalog
 from ...cube.client import CubeClient, CubeError
 from ...dashboards.store import DashboardStore
 from ...grounding import for_source
@@ -166,8 +163,8 @@ def build_editor_tools(ctx: EditContext) -> list:
             lines += [f"- {m}: {e}" for m, e in validation.member_errors.items()]
 
         try:
-            catalog = Catalog.from_meta(await ctx.client.meta())
-        except (CubeError, httpx.RequestError) as exc:
+            catalog = await ctx.client.catalog(refresh=True)
+        except CubeError as exc:
             _end("validate_model", True, note="compiled; impact unread")
             return "\n".join([*lines, f"Could not check saved queries: {exc}"])
 

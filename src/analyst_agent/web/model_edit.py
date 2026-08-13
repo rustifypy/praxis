@@ -10,16 +10,12 @@ import asyncio
 from dataclasses import asdict
 from pathlib import Path
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ..agent.build import SecurityContext
 from ..chat.service import stream_edit_turn
-from ..config import settings
-from ..cube.catalog import Catalog
-from ..cube.client import CubeClient, CubeError, mint_token
+from ..cube.client import CubeError, catalog_of
 from ..grounding import for_source
 from ..sources import docker
 from ..sources.model import edits, impact, publish, vcs
@@ -109,17 +105,10 @@ async def _restart(request: Request, source: Source) -> None:
 async def _impact(request: Request, source: Source) -> impact.Impact:
     """What the checked-out model would break. Read from this source's own `/v1/meta`, not the
     agent's cached catalog — that one follows CUBE_URL and this source may not be it."""
-    client = CubeClient(
-        mint_token(SecurityContext(user_id="local").as_claims()),
-        root=f"{source.url}{settings.cube_base_path}",
-        timeout=10.0,
-    )
     try:
-        catalog = Catalog.from_meta(await client.meta())
-    except (CubeError, httpx.RequestError) as exc:
+        catalog = await catalog_of(source)
+    except CubeError as exc:
         raise HTTPException(409, f"cannot read the served model to check impact: {exc}") from None
-    finally:
-        await client.aclose()
     return await impact.check(
         source.name, catalog, request.app.state.dashboards, for_source(source)
     )

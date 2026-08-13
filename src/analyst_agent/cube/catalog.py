@@ -72,6 +72,15 @@ class MemberDoc:
 
 
 @dataclass
+class Folder:
+    """A view's member grouping. Cube calls the list `members` in `/v1/meta` and `includes` in
+    the model YAML, which is why `decide.Folder` is a separate shape."""
+
+    name: str
+    members: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Entity:
     """A cube or a view from /v1/meta."""
 
@@ -81,6 +90,7 @@ class Entity:
     description: str = ""
     ai_context: str = ""
     members: list[MemberDoc] = field(default_factory=list)
+    folders: list[Folder] = field(default_factory=list)
 
     @property
     def search_text(self) -> str:
@@ -104,6 +114,10 @@ class Catalog:
                 title=raw.get("title", ""),
                 description=raw.get("description", ""),
                 ai_context=_ai_context(raw),
+                folders=[
+                    Folder(name=f.get("name", ""), members=list(f.get("members") or []))
+                    for f in raw.get("folders") or []
+                ],
             )
             for kind, key in (
                 ("measure", "measures"),

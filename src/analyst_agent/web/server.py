@@ -12,12 +12,12 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from ..agent.build import SecurityContext, load_catalog
+from ..agent.build import SecurityContext
 from ..chat.service import stream_turn
 from ..chat.store import ChatStore, checkpointer
 from ..config import settings
 from ..cube.catalog import Catalog
-from ..cube.client import CubeClient, mint_token
+from ..cube.client import CubeClient
 from ..cube.shape import Column, export_value
 from . import dashboards, model_edit, sources
 from .stream import sse
@@ -55,9 +55,12 @@ async def lifespan(app: FastAPI):
     # Data sources: their own database, their own job runner. Deliberately not under
     # DATA_DIR, so `--data-dir` can scope chat history for testing without hiding them.
     await sources.init_state(app)
-    async with checkpointer() as saver:
+    # One session for the active source, for the life of the process: `CUBE_URL` fixes which
+    # source that is at boot, and its catalog cache is what every query turn reads.
+    async with checkpointer() as saver, CubeClient.active(claims=identity().as_claims()) as cube:
         app.state.store = store
         app.state.saver = saver
+        app.state.cube = cube
         # One cancel flag per in-flight turn, so the stop button has something to set.
         app.state.cancels = {}
         yield
@@ -143,7 +146,13 @@ async def send(chat_id: str, body: Message, request: Request) -> StreamingRespon
     async def events():
         try:
             async for event in stream_turn(
-                chat_id, body.question, store, request.app.state.saver, identity(), cancel
+                chat_id,
+                body.question,
+                store,
+                request.app.state.saver,
+                request.app.state.cube,
+                identity(),
+                cancel,
             ):
                 yield event
                 # A closed tab should not leave the agent burning model calls.
@@ -198,11 +207,7 @@ async def result_csv(result_id: str, request: Request) -> Response:
 
 @app.get("/api/catalog")
 async def catalog(request: Request, refresh: bool = False) -> dict:
-    client = CubeClient(mint_token(identity().as_claims()))
-    try:
-        cat: Catalog = await load_catalog(client, refresh=refresh)
-    finally:
-        await client.aclose()
+    cat: Catalog = await request.app.state.cube.catalog(refresh=refresh)
     return {
         "cube_url": settings.cube_url,
         "entities": [

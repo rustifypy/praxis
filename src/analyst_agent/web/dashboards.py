@@ -4,13 +4,12 @@ since the refresh is atomic and has no partial state to stream.
 
 from dataclasses import asdict
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from ..agent.build import SecurityContext, load_catalog
+from ..agent.build import SecurityContext
 from ..config import settings
-from ..cube.client import CubeClient, CubeError, mint_token
+from ..cube.client import CubeClient, CubeError
 from ..cube.shape import Column
 from ..dashboards import delta
 from ..dashboards import layout as layouts
@@ -128,7 +127,7 @@ async def read_dashboard(dashboard_id: str, request: Request) -> dict:
     checks = (
         {"available": False, "reason": mismatch, "broken": []}
         if mismatch
-        else await _checks(dashboard_id, store)
+        else await _checks(dashboard_id, store, request.app.state.cube)
     )
 
     return {
@@ -163,20 +162,16 @@ async def read_dashboard(dashboard_id: str, request: Request) -> dict:
     }
 
 
-async def _checks(dashboard_id: str, store: DashboardStore) -> dict:
+async def _checks(dashboard_id: str, store: DashboardStore, cube: CubeClient) -> dict:
     """Compile every tile without executing it, and never fail the page for trying. Turns a
     member dropped by a model rebuild into a banner on arrival."""
-    client = CubeClient(mint_token(OWNER.as_claims()))
     try:
-        catalog = await load_catalog(client)
-        outcome = await runner.validate(dashboard_id, store, catalog, client, settings.max_rows)
-    except (CubeError, httpx.RequestError) as exc:
-        # `httpx.RequestError`, not `OSError`: httpx transport errors do not subclass it, and an
-        # `except OSError` here let a ConnectError through and 500'd the page for a stopped
-        # container. Same pair `sources.py` catches.
+        catalog = await cube.catalog()
+        outcome = await runner.validate(dashboard_id, store, catalog, cube, settings.max_rows)
+    except CubeError as exc:
+        # The session wraps transport failures, so a stopped container arrives here rather than
+        # as a ConnectError — which once escaped an `except OSError` and 500'd the page.
         return {"available": False, "reason": str(exc), "broken": []}
-    finally:
-        await client.aclose()
     return {
         "available": True,
         "reason": "",
@@ -204,16 +199,14 @@ async def delete_dashboard(dashboard_id: str, request: Request) -> dict:
 async def refresh_dashboard(dashboard_id: str, request: Request) -> dict:
     """Execute every tile's stored query. Atomic: all of them compile, or none of them run."""
     store = request.app.state.dashboards
-    client = CubeClient(mint_token(OWNER.as_claims()))
+    cube = request.app.state.cube
     try:
-        catalog = await load_catalog(client)
-        outcome = await runner.refresh(dashboard_id, store, catalog, client, settings.max_rows)
-    except (CubeError, httpx.RequestError) as exc:
+        catalog = await cube.catalog()
+        outcome = await runner.refresh(dashboard_id, store, catalog, cube, settings.max_rows)
+    except CubeError as exc:
         # 502 rather than 500: the container being down is not this server malfunctioning,
         # and the message is what the button shows.
         raise HTTPException(502, f"Cube is not answering: {exc}") from exc
-    finally:
-        await client.aclose()
     return {
         "ok": outcome.ok,
         "status": outcome.status,

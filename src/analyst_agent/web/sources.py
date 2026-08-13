@@ -3,17 +3,15 @@
 import asyncio
 import shutil
 import time
+from dataclasses import asdict
 from pathlib import Path
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from ..agent.build import CATALOGS, SecurityContext
 from ..config import settings
-from ..cube.catalog import Catalog
-from ..cube.client import CubeClient, CubeError, mint_token
+from ..cube.client import CubeError, catalog_of
 from ..grounding import for_source
 from ..sources import docker, health, jobs, model
 from ..sources.drivers import (
@@ -80,13 +78,10 @@ def runner_of(request: Request) -> jobs.Runner:
 
 
 def invalidate(cache: dict, source: Source) -> None:
-    """Forget what is cached about a source whose model just changed: its health probe, and —
-    when it is the one the agent queries — the catalog behind `search_model`. Neither is watched
-    for changes, so both go stale the moment a model does.
-    """
+    """Forget the health probe for a source whose model just changed — nothing watches a
+    container for changes. The served catalog needs no hook: it is cached on the Cube session
+    for `CATALOG_TTL_S` and ages out on its own."""
     cache.pop(source.name, None)
-    if source.is_active:
-        CATALOGS.pop(settings.api_root, None)
 
 
 # --- reading -----------------------------------------------------------------
@@ -235,14 +230,9 @@ async def source_model(name: str, request: Request) -> dict:
         "dirty": await vcs.status(model_dir) if branch else [],
     }
 
-    client = CubeClient(
-        mint_token(SecurityContext(user_id="local").as_claims()),
-        root=f"{source.url}{settings.cube_base_path}",
-        timeout=10.0,
-    )
     try:
-        meta = await client.meta()
-    except (CubeError, httpx.RequestError) as exc:
+        catalog = await catalog_of(source)
+    except CubeError as exc:
         # A stopped container does not stop the editing. The files are on this machine, and
         # the branch is still what a restart would load.
         return {
@@ -252,18 +242,7 @@ async def source_model(name: str, request: Request) -> dict:
             "unloaded": sorted({e.file for e in on_disk.values()}),
             **state,
         }
-    finally:
-        await client.aclose()
 
-    folders = {
-        raw["name"]: [
-            {"name": f.get("name", ""), "members": f.get("members") or []}
-            for f in (raw.get("folders") or [])
-        ]
-        for raw in meta.get("cubes", [])
-    }
-
-    catalog = Catalog.from_meta(meta)
     # Which views re-export each cube member, from `aliasMember`. A cube member absent
     # from this map is reachable only by querying its cube directly — the case the gate
     # can warn about but not prevent — so the panel marks it rather than leaving the
@@ -291,7 +270,7 @@ async def source_model(name: str, request: Request) -> dict:
                 "title": e.title,
                 "description": e.description,
                 "ai_context": e.ai_context,
-                "folders": folders.get(e.name) or [],
+                "folders": [asdict(f) for f in e.folders],
                 # For a view, the cubes it projects over; for a cube, the views exposing
                 # any of its members. Two directions of one relationship, named for what
                 # each side is asking.

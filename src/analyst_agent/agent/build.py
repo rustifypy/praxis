@@ -4,8 +4,7 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 
 from ..config import settings
-from ..cube.catalog import Catalog
-from ..cube.client import CubeClient, mint_token
+from ..cube.client import CubeClient
 from ..dashboards.tools import DashboardContext, build_dashboard_tools
 from ..grounding import for_active_source
 from ..sources.model.tools import EditContext, build_editor_tools
@@ -37,20 +36,6 @@ class Answer:
 # up in the message stream. Tagged here, skipped there — otherwise a compaction would
 # render into the transcript as if it were the agent's answer.
 COMPACTION_TAG = "compaction"
-
-# Keyed by Cube url. Popped after a model rebuild — a rebuilt source is otherwise invisible
-# to the agent until a restart.
-CATALOGS: dict[str, Catalog] = {}
-
-
-async def load_catalog(client: CubeClient, refresh: bool = False) -> Catalog:
-    """The catalog, cached per Cube. Nothing invalidates it on its own, so it changes only when
-    a caller says so — which is what `refresh` is for.
-    """
-    key = settings.api_root
-    if refresh or key not in CATALOGS:
-        CATALOGS[key] = Catalog.from_meta(await client.meta())
-    return CATALOGS[key]
 
 
 def build_agent(
@@ -106,11 +91,10 @@ def build_editor_agent(ctx: EditContext, source: str, branch: str, checkpointer=
 async def ask(question: str, ctx: SecurityContext | None = None) -> Answer:
     """One question, no memory. The /ask endpoint."""
     ctx = ctx or SecurityContext()
-    client = CubeClient(mint_token(ctx.as_claims()))
-    try:
+    async with CubeClient.active(claims=ctx.as_claims()) as cube:
         session = Session(
-            catalog=await load_catalog(client),
-            client=client,
+            catalog=await cube.catalog(),
+            client=cube,
             grounding=await for_active_source(),
             max_rows=settings.max_rows,
         )
@@ -130,5 +114,3 @@ async def ask(question: str, ctx: SecurityContext | None = None) -> Answer:
             ],
             rejected=session.rejected,
         )
-    finally:
-        await client.aclose()

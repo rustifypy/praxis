@@ -14,12 +14,11 @@ from ..agent.build import (
     SecurityContext,
     build_agent,
     build_editor_agent,
-    load_catalog,
 )
 from ..agent.content import reasoning_of, text_of
 from ..agent.tools import Session
 from ..config import settings
-from ..cube.client import CubeClient, mint_token
+from ..cube.client import ADMIN_TIMEOUT_S, CubeClient
 from ..dashboards.store import DashboardStore
 from ..dashboards.tools import DashboardContext
 from ..grounding import for_active_source
@@ -108,18 +107,18 @@ async def stream_turn(
     question: str,
     store: ChatStore,
     saver,
+    cube: CubeClient,
     ctx: SecurityContext | None = None,
     cancel: asyncio.Event | None = None,
 ) -> AsyncIterator[Event]:
+    """`cube` is the app's session for the active source — borrowed, never closed here. It
+    re-mints its own token, so a chat outliving the 15-minute JWT no longer 403s mid-thought."""
     ctx = ctx or SecurityContext(user_id="local")
-    # Minted per turn. The Cube JWT lives 15 minutes and a chat outlives that easily,
-    # so a client cached for the conversation would start 403ing mid-thought.
-    client = CubeClient(mint_token(ctx.as_claims()))
 
     async def build(turn_id: str):
         session = Session(
-            catalog=await load_catalog(client),
-            client=client,
+            catalog=await cube.catalog(),
+            client=cube,
             grounding=await for_active_source(),
             max_rows=settings.max_rows,
             # Result sets are kept beside the transcript, under this turn, so the table
@@ -147,11 +146,8 @@ async def stream_turn(
             ),
         )
 
-    try:
-        async for event in run_turn(build, chat_id, question, store, cancel):
-            yield event
-    finally:
-        await client.aclose()
+    async for event in run_turn(build, chat_id, question, store, cancel):
+        yield event
 
 
 async def stream_edit_turn(
@@ -162,27 +158,21 @@ async def stream_edit_turn(
     saver,
     cancel: asyncio.Event | None = None,
 ) -> AsyncIterator[Event]:
-    """One turn of a model-editor chat. Its Cube client is pinned to this source's own URL —
+    """One turn of a model-editor chat. Its Cube session is pinned to this source's own URL —
     the query agent's follows CUBE_URL, and the source being edited may not be that one."""
-    client = CubeClient(
-        mint_token(SecurityContext(user_id="local").as_claims()),
-        root=f"{source.url}{settings.cube_base_path}",
-        timeout=10.0,
-    )
 
-    async def build(_turn_id: str):
-        # Read per turn, not stored: the branch is whichever one is checked out, because that
-        # is the one being served, and the page can switch it between turns.
-        branch = await vcs.current(source.model_dir())
-        return build_editor_agent(
-            EditContext(source=source, client=client, dashboards=DashboardStore()),
-            source.name,
-            branch,
-            checkpointer=saver,
-        )
+    async with CubeClient.for_source(source, timeout=ADMIN_TIMEOUT_S) as client:
 
-    try:
+        async def build(_turn_id: str):
+            # Read per turn, not stored: the branch is whichever one is checked out, because
+            # that is the one being served, and the page can switch it between turns.
+            branch = await vcs.current(source.model_dir())
+            return build_editor_agent(
+                EditContext(source=source, client=client, dashboards=DashboardStore()),
+                source.name,
+                branch,
+                checkpointer=saver,
+            )
+
         async for event in run_turn(build, chat_id, question, store, cancel):
             yield event
-    finally:
-        await client.aclose()
