@@ -91,9 +91,12 @@ async def test_a_refused_run_keeps_its_reasons(store, board):
 
 
 async def test_an_unknown_run_status_is_refused_rather_than_stored(store, board):
+    """By the `Status` annotation on both writers, which is why neither tests the tuple. A
+    status nothing reads would leave `latest_run("ok")` unable to find the run it just wrote."""
     run = await store.start_run(board.id)
-    with pytest.raises(ValueError, match="unknown run status"):
-        await store.finish_run(run.id, "done")
+    for write in (store.finish_run, store.set_run_status):
+        with pytest.raises(ValueError, match="'validating', 'running', 'ok'"):
+            await write(run.id, "done")
 
 
 async def test_a_dashboard_renders_its_last_successful_run_not_its_last_attempt(store, board):

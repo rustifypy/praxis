@@ -4,22 +4,28 @@ other table this process creates."""
 import json
 import time
 from pathlib import Path
+from typing import Literal, get_args
 
 import aiosqlite
+from pydantic import validate_call
 
 from ..config import settings
 from ..db import SOURCES_SCHEMA, connect
 from .registry import Source
 
-STEPS = ("connect", "cubes", "describe", "views")
+Step = Literal["connect", "cubes", "describe", "views"]
 """In order. The UI renders one row per step, and a step may only run once the one
-before it has succeeded."""
+before it has succeeded. Annotating a parameter with this is what refuses an unknown one —
+`@validate_call` enforces it, so no function needs to test the tuple itself."""
+STEPS: tuple[Step, ...] = get_args(Step)
+"""The same names to iterate, index and join. Derived, so the two cannot drift."""
 
-STAGES = ("connect", "read", "cubes", "describe", "views")
+Stage = Literal["connect", "read", "cubes", "describe", "views"]
 """Every action a person can run, in order — the one definition of the workflow. `run.action`
 dispatches on it, `stages` renders it, and the browser iterates the shipped rail rather than
 keeping a fourth copy. `read` is the odd one: it records no step row, so its state is whether
 a catalog is cached, and nothing gates it."""
+STAGES: tuple[Stage, ...] = get_args(Stage)
 
 
 class SourceStore:
@@ -126,10 +132,9 @@ class SourceStore:
     async def steps(self, name: str) -> dict:
         return await self._blob(name, "steps")
 
-    async def save_step(self, name: str, step: str, payload: dict) -> None:
+    @validate_call
+    async def save_step(self, name: str, step: Step, payload: dict) -> None:
         """Replace one step's record, leaving the other three untouched."""
-        if step not in STEPS:
-            raise ValueError(f"unknown step {step!r} — one of {', '.join(STEPS)}")
         current = await self.steps(name)
         current[step] = payload
         await self._save_blob(name, "steps", current)
