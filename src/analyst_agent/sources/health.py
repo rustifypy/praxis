@@ -27,7 +27,7 @@ class Health:
 async def check(source: Source, timeout: float = 20.0) -> Health:
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.get(f"{source.url}/readyz")
+            r = await client.get(f"{source.cube_url}/readyz")
     except httpx.TimeoutException:
         return Health(False, "timeout", f"no response in {timeout:.0f}s")
     except httpx.ConnectError:

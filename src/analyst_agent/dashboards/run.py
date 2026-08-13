@@ -44,7 +44,7 @@ class RunOutcome:
 
 async def active_source_name() -> str:
     """The name of the source `CUBE_URL` points at, or "" if it points outside the registry."""
-    active = next((s for s in await SourceStore().all() if s.is_active), None)
+    active = await SourceStore().active()
     return active.name if active else ""
 
 

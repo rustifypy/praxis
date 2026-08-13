@@ -101,7 +101,11 @@ async def list_chats(request: Request) -> list[dict]:
 
 @app.post("/api/chats")
 async def create_chat(body: NewChat, request: Request) -> dict:
-    chat = await request.app.state.store.create(body.title, identity().user_id)
+    """A chat belongs to a source, and the active one is the only candidate today."""
+    active = await request.app.state.sources.active()
+    chat = await request.app.state.store.create(
+        body.title, identity().user_id, active.name if active else ""
+    )
     return chat.__dict__
 
 

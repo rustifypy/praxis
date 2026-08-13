@@ -35,16 +35,16 @@ async def api(tmp_path, monkeypatch, cube):
     from analyst_agent.sources.store import SourceStore
 
     # `dashboards.run.active_source_name` builds its own `SourceStore()`, so pointing the
-    # setting is the only way to keep these routes off the real ~/.analyst/sources.db. Same
-    # pattern as the dashboard-run tests. `cube_url` matches no source, so nothing is active.
-    monkeypatch.setattr(settings, "sources_db", str(tmp_path / "sources.db"))
+    # setting is the only way to keep these routes off the real ~/.analyst. Same pattern as
+    # the dashboard-run tests. `cube_url` matches no source, so nothing is active.
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
     monkeypatch.setattr(settings, "cube_url", "http://localhost:4999")
 
     chats = ChatStore(tmp_path / "analyst.db")
     await chats.init()
     boards = DashboardStore(tmp_path / "analyst.db")
     await boards.init()
-    sources = SourceStore(tmp_path / "sources.db")
+    sources = SourceStore(tmp_path / "analyst.db")
     await sources.init()
 
     server.app.state.store = chats
@@ -359,7 +359,7 @@ async def test_a_dashboard_binds_to_the_active_source_at_creation(api, monkeypat
     running against a different warehouse later."""
     _, _, sources = api.stores
     await sources.add(SHOP)
-    monkeypatch.setattr(settings, "cube_url", SHOP.url)
+    monkeypatch.setattr(settings, "cube_url", SHOP.cube_url)
 
     created = (await api.post("/api/dashboards", json={"title": "Weekly"})).json()
     assert created["source_name"] == "shop"

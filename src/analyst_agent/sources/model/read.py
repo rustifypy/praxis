@@ -138,15 +138,7 @@ async def read_catalog(source: Source, timeout: float = BOOT_TIMEOUT_S) -> Catal
         # Cube will not serve /v1/meta at all unless the model has at least one cube.
         probes.append(("probe_noop", "SELECT 1 AS one", ()))
 
-    # A model directory holding those cubes and nothing else, so no unrelated file can
-    # fail to compile and take the whole read down with it.
-    #
-    # Machine-local, next to sources.db and the job lock, rather than in the project:
-    # this is a dependency, and the working directory belongs to whoever installed it —
-    # `cube/` is theirs, and a scratch directory of ours has no business
-    # appearing beside them. Not a system tempdir either: this path is bind-mounted, and
-    # Docker Desktop's file sharing covers `/Users` far more reliably than `/var/folders`.
-    probe_dir = settings.sources_db_path.parent / PROBE_MODEL_DIR
+    probe_dir = settings.dir_path / PROBE_MODEL_DIR
     shutil.rmtree(probe_dir, ignore_errors=True)
     (probe_dir / "cubes").mkdir(parents=True)
     cubes = []

@@ -65,10 +65,8 @@ make web-build          # build the frontend once (needs npm; output is committe
 uv run analyst          # opens a browser, Jupyter-style, with a token in the URL
 ```
 
-Multiple chats, each with its own history, kept in `~/.analyst/analyst.db` along with
-the LangGraph checkpointer that gives a chat its memory. Answers stream, and so does the
-model's reasoning — the panel fills while the agent plans, then collapses when it
-answers.
+Multiple chats, each with its own history. Answers stream, and so does the model's
+reasoning — the panel fills while the agent plans, then collapses when it answers.
 
 Every step shows up as a line you can expand: which members `search_model` found, the
 Cube JSON that went to the gate, the SQL Cube generated, and the rejections in between.
@@ -91,6 +89,22 @@ Reasoning summaries need `AZURE_OPENAI_API_VERSION=2025-03-01-preview` or later;
 
 The frontend source is `src/web/` (React + Vite). `npm run dev` there gives hot reload
 against a running `analyst`. `make web-build` is what produces what ships.
+
+## Storage
+
+One SQLite file, `~/.analyst/analyst.db`, holds all of it: chats and the flat event stream
+that *is* the transcript, full result sets, dashboards and their tiles and refresh history,
+the source registry with its credentials, and the LangGraph checkpointer that gives a chat
+its memory. `--data-dir` moves the lot, so pointing it at a scratch directory gives you a
+scratch *everything* — including an empty source registry.
+
+The file is chmod 600, because the source credentials in it are plaintext.
+
+There is no migration mechanism, deliberately. `CREATE TABLE IF NOT EXISTS` does not diff,
+so adding a table to an existing database works and adding a column silently does not —
+changing a column means deleting the file and starting again. That is an affordable answer
+for one person on one machine and a bad one for anything else; it is the first thing to
+revisit if this ever runs somewhere shared.
 
 ## Dashboards
 
@@ -116,12 +130,14 @@ changed — never one call per tile.
 
 ## Data sources
 
-Each source is one Cube container with its own model directory. **One row in
-`sources.db` is the whole source**, credentials included — there is no registry file, no
+Each source is one Cube container with its own model directory. **One row in the `sources`
+table is the whole source**, credentials included — there is no registry file, no
 credential file, and no generated compose file. `sources/docker.py` builds a `docker run`
 from that row, which is why adding a source is one INSERT and one command, and why nothing
-on disk can fall out of sync with it. The trade is that the credentials are visible to
-`docker inspect`; the database is chmod 600 and the ports are bound to `127.0.0.1`.
+on disk can fall out of sync with it. The row also carries the source's `cube_url`, so
+whatever queries it follows the source rather than deriving an address of its own. The
+trade is that the credentials are visible to `docker inspect`; the database is chmod 600
+and the ports are bound to `127.0.0.1`.
 
 `docker-compose.yml` is hand-written and holds only the shared Cube Store, on a network
 named `analyst-net` that each source container joins.

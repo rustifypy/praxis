@@ -129,7 +129,7 @@ class CubeClient:
         cls, source: "Source", *, claims: dict | None = None, timeout: float | None = None
     ) -> "CubeClient":
         return cls(
-            f"{source.url}{settings.cube_base_path}",
+            source.api_root,
             settings.cube_api_secret,
             claims=claims,
             timeout=timeout,

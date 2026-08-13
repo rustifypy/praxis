@@ -1,43 +1,28 @@
-"""How this process opens SQLite, and every table it creates — in one place, so two stores
-in separate files cannot drift on a pragma one of them relies on.
-
-The schema lives here rather than beside each store because **the unit is the file, not the
-store**. `analyst.db` is written by `ChatStore` and `DashboardStore` both, so neither owns it
-alone; a schema split across the two modules reads as two databases and is one. It also has a
-consequence worth knowing before adding versioning: `PRAGMA user_version` is a single integer
-per file, so a migration chain belongs to `analyst.db`, never to a store within it.
-
-`CREATE TABLE IF NOT EXISTS` does not diff, so the schema below is only ever the shape of a
-**fresh** file. Changing an existing one is what `MIGRATIONS` is for: a column added here and
-nowhere else reaches a new database and silently misses every database already on disk.
-"""
-
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import aiosqlite
 
-# --- analyst.db: the transcript ------------------------------------------------------
-# LangGraph's checkpointer keeps its own tables in this same file, created by
-# `AsyncSqliteSaver` rather than here.
+# One database, one schema. LangGraph's checkpointer keeps its own tables in this same
+# file, created by `AsyncSqliteSaver` rather than here.
 
-CHAT_SCHEMA = """
+SCHEMA = """
+-- --- the transcript ---------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS chats (
-    id         TEXT PRIMARY KEY,
-    title      TEXT NOT NULL,
-    owner_id   TEXT NOT NULL,
-    -- Which Cube this chat ran against. One agent, one Cube today; stored so that
-    -- old chats keep their provenance when the tool learns to span instances.
-    cube_url   TEXT NOT NULL,
-    -- Empty for a question chat; a source name for one that edits that source's model.
-    -- The two agents share this table and this transcript format, and differ only here.
-    source_name TEXT NOT NULL DEFAULT '',
-    -- Which branch the editing chat was opened on. Provenance like `cube_url`, not a
-    -- binding: one container means one checkout, so the editor acts on whatever is
-    -- checked out now.
-    branch     TEXT NOT NULL DEFAULT '',
-    created_at REAL NOT NULL,
-    updated_at REAL NOT NULL
+    id          TEXT PRIMARY KEY,
+    title       TEXT NOT NULL,
+    owner_id    TEXT NOT NULL,
+    -- Which source this chat is about. No cube_url here: the source carries it, so the
+    -- URL a chat queries cannot disagree with the container that answers.
+    source_name TEXT NOT NULL,
+    -- 'question' asks about the data, 'model' edits it. The two agents share this table
+    -- and this transcript format and differ only here.
+    kind        TEXT NOT NULL DEFAULT 'question',
+    -- Model chats only: the branch it was opened on. Provenance, not a binding — one
+    -- container means one checkout, so the editor acts on whatever is checked out now.
+    branch      TEXT NOT NULL DEFAULT '',
+    created_at  REAL NOT NULL,
+    updated_at  REAL NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -73,11 +58,9 @@ CREATE TABLE IF NOT EXISTS results (
 );
 
 CREATE INDEX IF NOT EXISTS results_by_chat ON results(chat_id);
-"""
 
-# --- analyst.db: dashboards ----------------------------------------------------------
+-- --- dashboards -------------------------------------------------------------------
 
-DASHBOARDS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS dashboards (
     id          TEXT PRIMARY KEY,
     title       TEXT NOT NULL,
@@ -153,19 +136,20 @@ CREATE INDEX IF NOT EXISTS tiles_by_dashboard ON tiles(dashboard_id);
 CREATE INDEX IF NOT EXISTS runs_by_dashboard  ON runs(dashboard_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS results_by_run     ON tile_results(run_id);
 CREATE INDEX IF NOT EXISTS results_by_tile    ON tile_results(tile_id, created_at DESC);
-"""
 
-# --- sources.db: the registry --------------------------------------------------------
-# Its own file, and deliberately not under DATA_DIR: pointing `--data-dir` at a scratch
-# file to protect chat history must not also hide the sources.
-
-SOURCES_SCHEMA = """
+-- --- the registry -----------------------------------------------------------------
+-- One row is the whole source, credentials included: `docker run -e` is built from it,
+-- so nothing on disk can drift from it. `--data-dir` scopes this along with the history,
+-- which is the point — a scratch directory is a whole scratch install.
 CREATE TABLE IF NOT EXISTS sources (
     name        TEXT PRIMARY KEY,
     description TEXT NOT NULL DEFAULT '',
     driver      TEXT NOT NULL,
     -- One published port per source, and the agent selects one of them by CUBE_URL.
     port        INTEGER NOT NULL UNIQUE,
+    -- Where this source answers. Written from the port at creation, and the one thing a
+    -- chat or a dashboard follows to reach it — nothing resolves a URL from settings.
+    cube_url    TEXT NOT NULL,
     credentials TEXT NOT NULL DEFAULT '{}',
     mounts      TEXT NOT NULL DEFAULT '{}',
     steps       TEXT NOT NULL DEFAULT '{}',
@@ -186,63 +170,3 @@ async def connect(path: Path):
         db.row_factory = aiosqlite.Row
         await db.execute("PRAGMA foreign_keys = ON")
         yield db
-
-
-# --- migrations ----------------------------------------------------------------------
-
-MIGRATIONS = (
-    # 1: model_chats becomes two columns on chats. The side table existed only because there
-    # was no way to add a column to a database already on disk; there is one now. Created
-    # first so this also runs on a database old enough never to have had the table.
-    """
-    CREATE TABLE IF NOT EXISTS model_chats (
-        chat_id     TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
-        source_name TEXT NOT NULL,
-        branch      TEXT NOT NULL DEFAULT '',
-        created_at  REAL NOT NULL
-    );
-    ALTER TABLE chats ADD COLUMN source_name TEXT NOT NULL DEFAULT '';
-    ALTER TABLE chats ADD COLUMN branch TEXT NOT NULL DEFAULT '';
-    UPDATE chats SET
-        source_name = (SELECT source_name FROM model_chats WHERE chat_id = chats.id),
-        branch      = (SELECT branch      FROM model_chats WHERE chat_id = chats.id)
-    WHERE id IN (SELECT chat_id FROM model_chats);
-    DROP TABLE model_chats;
-    CREATE INDEX IF NOT EXISTS chats_by_source ON chats(source_name, updated_at DESC);
-    """,
-)
-"""Applied in order to a database already on disk; a script's index plus one is the
-`user_version` it produces. A shipped migration is never edited — a database that has run it
-will not run it again, so a correction is the next entry rather than a change to this one."""
-
-LATEST = len(MIGRATIONS)
-
-
-async def migrate(db: aiosqlite.Connection) -> int:
-    """Bring one file up to `LATEST`, and answer the version it is now.
-
-    Runs *before* the `CREATE TABLE IF NOT EXISTS` scripts, not after: migration 1 adds a column
-    the schema above already declares, so on a fresh file the ALTER would collide with the table
-    it was meant to change. A file with no tables at all is fresh by definition — it is stamped
-    and skipped, and the schema then creates it at the current shape.
-
-    Each script is run with its own version bump in one transaction, so a migration that fails
-    part-way leaves the file at the version it already had rather than half-changed.
-
-    `user_version` belongs to the file, not to a store within it — which is why this takes a
-    connection rather than a path. `analyst.db` is opened by two stores and either may be first.
-    """
-    version = (await (await db.execute("PRAGMA user_version")).fetchone())[0]
-    if version >= LATEST:
-        return version
-    empty = not await (
-        await db.execute(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
-        )
-    ).fetchone()
-    if empty:
-        await db.executescript(f"PRAGMA user_version = {LATEST};")
-        return LATEST
-    for n, script in enumerate(MIGRATIONS[version:], start=version + 1):
-        await db.executescript(f"BEGIN;\n{script}\nPRAGMA user_version = {n};\nCOMMIT;")
-    return LATEST

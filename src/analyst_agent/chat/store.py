@@ -13,7 +13,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ..agent.tools import QueryRecord
 from ..config import settings
-from ..db import CHAT_SCHEMA, connect, migrate
+from ..db import SCHEMA, connect
 from .events import Event
 
 
@@ -22,10 +22,9 @@ class Chat:
     id: str
     title: str
     owner_id: str
-    cube_url: str
-    # "" for a question chat. Set means this chat edits that source's model, and `branch`
-    # is the one it was opened on — provenance, not a binding.
     source_name: str
+    kind: str
+    """'question' or 'model' — which agent this chat runs."""
     branch: str
     created_at: float
     updated_at: float
@@ -40,8 +39,7 @@ class ChatStore:
 
     async def init(self) -> None:
         async with self._db() as db:
-            await migrate(db)
-            await db.executescript(CHAT_SCHEMA)
+            await db.executescript(SCHEMA)
             await db.commit()
 
     async def create(
@@ -49,6 +47,7 @@ class ChatStore:
         title: str = "New chat",
         owner_id: str = "local",
         source_name: str = "",
+        kind: str = "question",
         branch: str = "",
     ) -> Chat:
         now = time.time()
@@ -56,24 +55,24 @@ class ChatStore:
             id=uuid.uuid4().hex,
             title=title,
             owner_id=owner_id,
-            cube_url=settings.cube_url,
             source_name=source_name,
+            kind=kind,
             branch=branch,
             created_at=now,
             updated_at=now,
         )
         async with self._db() as db:
-            # Named, not positional: a column added by a migration would otherwise shift
+            # Named, not positional: a column added to the schema would otherwise shift
             # every value one place to the left without erroring.
             await db.execute(
-                "INSERT INTO chats (id, title, owner_id, cube_url, source_name, branch,"
+                "INSERT INTO chats (id, title, owner_id, source_name, kind, branch,"
                 " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     chat.id,
                     chat.title,
                     chat.owner_id,
-                    chat.cube_url,
                     chat.source_name,
+                    chat.kind,
                     chat.branch,
                     chat.created_at,
                     chat.updated_at,
@@ -89,7 +88,7 @@ class ChatStore:
         are listed beside the branch they edit rather than in the chat sidebar."""
         async with self._db() as db:
             rows = await db.execute_fetchall(
-                "SELECT * FROM chats WHERE owner_id = ? AND source_name = ''"
+                "SELECT * FROM chats WHERE owner_id = ? AND kind = 'question'"
                 " ORDER BY updated_at DESC",
                 (owner_id,),
             )
@@ -97,13 +96,13 @@ class ChatStore:
 
     async def create_model_chat(self, source_name: str, branch: str, owner_id: str = "local"):
         """A chat that edits `source_name`'s model."""
-        return await self.create(f"Editing {branch}", owner_id, source_name, branch)
+        return await self.create(f"Editing {branch}", owner_id, source_name, "model", branch)
 
     async def model_chats(self, source_name: str) -> list[dict]:
         async with self._db() as db:
             rows = await db.execute_fetchall(
                 "SELECT id, title, updated_at, branch FROM chats"
-                " WHERE source_name = ? ORDER BY updated_at DESC",
+                " WHERE source_name = ? AND kind = 'model' ORDER BY updated_at DESC",
                 (source_name,),
             )
         return [dict(r) for r in rows]
@@ -112,7 +111,7 @@ class ChatStore:
         """Which source this chat edits, or "" when it is a question chat."""
         async with self._db() as db:
             rows = await db.execute_fetchall(
-                "SELECT source_name FROM chats WHERE id = ?", (chat_id,)
+                "SELECT source_name FROM chats WHERE id = ? AND kind = 'model'", (chat_id,)
             )
         return rows[0]["source_name"] if rows else ""
 

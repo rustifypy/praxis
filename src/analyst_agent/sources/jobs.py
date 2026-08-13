@@ -24,7 +24,7 @@ class Busy(RuntimeError):
 @contextlib.contextmanager
 def hold(description: str):
     """Take the machine-wide job lock, or raise `Busy` naming the current holder."""
-    path = settings.sources_db_path.parent / LOCK_NAME
+    path = settings.dir_path / LOCK_NAME
     path.parent.mkdir(parents=True, exist_ok=True)
     handle = path.open("a+")
     try:

@@ -12,7 +12,7 @@ from typing import Literal, get_args
 from pydantic import validate_call
 
 from ..config import settings
-from ..db import DASHBOARDS_SCHEMA, connect, migrate
+from ..db import SCHEMA, connect
 
 ROWS_KEPT = 2
 """Runs deep a tile keeps its rows — what a delta against the previous refresh needs."""
@@ -84,9 +84,7 @@ class DashboardStore:
 
     async def init(self) -> None:
         async with self._db() as db:
-            # This file's version, not this store's — either store may open it first.
-            await migrate(db)
-            await db.executescript(DASHBOARDS_SCHEMA)
+            await db.executescript(SCHEMA)
             await db.commit()
 
     # --- dashboards ---------------------------------------------------------------

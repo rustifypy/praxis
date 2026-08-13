@@ -13,10 +13,10 @@ from analyst_agent.sources import jobs
 
 @pytest.fixture(autouse=True)
 def scratch_lock(tmp_path, monkeypatch):
-    """The lock lives beside sources.db, so point that somewhere disposable."""
+    """The lock lives in the data directory, so point that somewhere disposable."""
     from analyst_agent.config import settings
 
-    monkeypatch.setattr(settings, "sources_db", str(tmp_path / "sources.db"))
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
 
 
 async def drain(runner: jobs.Runner) -> list[jobs.Event]:

@@ -45,7 +45,7 @@ SHOP = Source(
 
 @pytest.fixture
 async def store(tmp_path) -> SourceStore:
-    s = SourceStore(tmp_path / "sources.db")
+    s = SourceStore(tmp_path / "analyst.db")
     await s.init()
     return s
 

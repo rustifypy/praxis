@@ -60,7 +60,7 @@ async def connect(source: Source, store: SourceStore, report: Report | None = No
     if not created.ok:
         raise StepFailed(f"could not start {source.service}: {created.message}")
 
-    _say(report, "connect", {"message": f"testing the connection via {source.url}/readyz"})
+    _say(report, "connect", {"message": f"testing the connection via {source.cube_url}/readyz"})
     result, attempts = await health.wait_until_ready(source)
     if not result.ok:
         # The container is left running on purpose. The logs are the diagnosis, and
