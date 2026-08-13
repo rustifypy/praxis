@@ -103,11 +103,19 @@ async def _probe(cache: dict, source: Source, running: bool) -> dict:
     return probed
 
 
-async def _view(request: Request, source: Source, containers: dict[str, str], steps: dict) -> dict:
+async def _view(
+    request: Request,
+    source: Source,
+    containers: dict[str, str],
+    steps: dict,
+    catalog_read: bool = False,
+) -> dict:
     state = containers.get(source.service, "")
     running = state == "running"
     probed = await _probe(request.app.state.health, source, running)
-    body = public(source, steps=steps, running=running, health=probed["health"])
+    body = public(
+        source, steps=steps, running=running, health=probed["health"], catalog_read=catalog_read
+    )
     body["serving"] = probed["serving"]
     body["container_state"] = state or "missing"
     # The checked-out branch is the model this source serves, so anywhere a query can be
@@ -174,11 +182,16 @@ async def drivers() -> dict:
 @router.get("/sources")
 async def list_sources(request: Request) -> dict:
     store = store_of(request)
-    sources, steps, containers = await asyncio.gather(store.all(), store.all_steps(), docker.ours())
+    sources, steps, containers, read = await asyncio.gather(
+        store.all(), store.all_steps(), docker.ours(), store.all_catalog_read()
+    )
     # Concurrently: a cold cache costs each source a /readyz and a /v1/meta, and a
     # stopped-but-listening one can burn five seconds before the next even starts.
     views = await asyncio.gather(
-        *(_view(request, s, containers, steps.get(s.name, {})) for s in sources)
+        *(
+            _view(request, s, containers, steps.get(s.name, {}), read.get(s.name, False))
+            for s in sources
+        )
     )
     # A blocking connect_ex per candidate port, off the event loop.
     port = await asyncio.to_thread(next_port, [s.port for s in sources])

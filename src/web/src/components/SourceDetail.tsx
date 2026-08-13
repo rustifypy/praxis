@@ -16,7 +16,6 @@ import {
   STAGE_LABEL,
   STEP_LABEL,
   healthOf,
-  nextStage,
   servingSummary,
   stageBlocker,
   stageState,
@@ -75,7 +74,7 @@ export function SourceDetail({
 
   const health = healthOf(source);
   const catalogRead = Boolean(catalog?.read);
-  const upcoming = nextStage(source, catalogRead);
+  const upcoming = source.next_stage;
 
   const loadCatalog = useCallback(() => {
     void api
@@ -183,7 +182,7 @@ export function SourceDetail({
     void guard(() => api.runAction(source.name, name), "stage");
 
   const selected = stage;
-  const blocker = selected ? stageBlocker(selected, source, catalogRead) : "";
+  const blocker = selected ? stageBlocker(selected, source) : "";
   const record = selected && selected !== "read" ? source.steps[selected] : undefined;
   // Server-computed: the same rule that performs the deletion, so a warning cannot
   // promise something different from what happens.
@@ -217,7 +216,7 @@ export function SourceDetail({
           {upcoming ? (
             <button
               className="primary"
-              disabled={busy || Boolean(stageBlocker(upcoming, source, catalogRead))}
+              disabled={busy || Boolean(stageBlocker(upcoming, source))}
               onClick={() => {
                 setStage(upcoming);
                 // Cubes is the one stage a button cannot start: a person picks the tables
@@ -334,7 +333,7 @@ export function SourceDetail({
 
         <ol className="stepper">
           {STAGES.map((name, index) => {
-            const state = stageState(name, source, catalogRead);
+            const state = stageState(name, source);
             return (
               <li key={name} className={`step ${state} ${selected === name ? "on" : ""}`}>
                 <button
@@ -412,7 +411,7 @@ export function SourceDetail({
                 title={blocker || undefined}
                 onClick={() => runStage(selected)}
               >
-                {stageState(selected, source, catalogRead) === "done"
+                {stageState(selected, source) === "done"
                   ? `Run ${STAGE_LABEL[selected]} again`
                   : STAGE_LABEL[selected]}
               </button>

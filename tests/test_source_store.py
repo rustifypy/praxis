@@ -20,10 +20,13 @@ from analyst_agent.sources.model.state import (
 from analyst_agent.sources.model.warehouse import Column, ForeignKey, Schema, Table
 from analyst_agent.sources.registry import Source
 from analyst_agent.sources.store import (
+    STEPS,
     SourceStore,
+    blocked_by,
     invalidated_by,
     merge_credentials,
     public,
+    stages,
 )
 
 CREDENTIALS = {
@@ -291,3 +294,57 @@ async def test_state_survives_sqlite(store):
     state = await store.state("shop")
     assert load_schema(state["schema"]) == SCHEMA
     assert load_enrichment(state["enrichment"]) == ENRICHMENT
+
+
+# --- the stage rail, decided once and shipped -------------------------------
+
+
+def test_cubes_is_blocked_by_connect_not_by_read():
+    """The browser blocked it on `read` and the server on `connect`, so a source with a
+    connection and no cached catalog got two different answers. `cubes` reads the catalog
+    itself when none is cached, so `connect` is the real prerequisite."""
+    steps = {"connect": {"status": "done"}}
+    assert blocked_by(steps, "cubes") == ""
+    assert blocked_by({}, "cubes") == "connect"
+
+
+def test_read_is_gated_by_nothing():
+    """It records no step, and `run.action` does not gate it — it is reachable on its own so
+    the picker has something to show."""
+    assert blocked_by({}, "read") == ""
+
+
+def test_the_first_step_is_never_blocked():
+    assert blocked_by({}, "connect") == ""
+
+
+def test_the_rail_reports_read_from_the_cached_catalog():
+    steps = {"connect": {"status": "done"}}
+    by_name = {s["name"]: s for s in stages(steps, catalog_read=True)}
+    assert by_name["read"]["state"] == "done"
+    assert {s["name"]: s["state"] for s in stages(steps, catalog_read=False)}["read"] == "todo"
+
+
+def test_a_failed_step_is_reported_as_an_error_not_as_todo():
+    rail = {s["name"]: s["state"] for s in stages({"connect": {"status": "error"}}, False)}
+    assert rail["connect"] == "error"
+
+
+def test_next_stage_is_the_first_one_not_done():
+    """One answer, so a sidebar and a page cannot name different next steps."""
+    body = public(
+        SHOP,
+        steps={"connect": {"status": "done"}},
+        running=True,
+        health={},
+        catalog_read=False,
+    )
+    assert body["next_stage"] == "read"
+    done = public(
+        SHOP,
+        steps={s: {"status": "done"} for s in STEPS},
+        running=True,
+        health={},
+        catalog_read=True,
+    )
+    assert done["next_stage"] is None

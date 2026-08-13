@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from ...config import settings
 from .. import docker, health
 from ..registry import Source, scaffold_source_dirs
-from ..store import STEPS, SourceStore
+from ..store import STEPS, SourceStore, blocked_by
 from . import build, decide, publish, read, selection, vcs
 from .state import dump_enrichment, dump_schema, load_enrichment, load_schema
 from .warehouse import Schema
@@ -336,15 +336,10 @@ async def action(
     if name not in ACTIONS:
         raise StepFailed(f"unknown action {name!r} — one of {', '.join(ACTIONS)}")
 
-    # A step may only run once the one before it has succeeded. Enforced here rather
-    # than in the browser, which is advice, not a guarantee.
-    if name in STEPS:
-        index = STEPS.index(name)
-        if (
-            index
-            and (await store.steps(source.name)).get(STEPS[index - 1], {}).get("status") != "done"
-        ):
-            raise StepFailed(f"run {STEPS[index - 1]} first")
+    # A step may only run once the one before it has succeeded. Enforced here rather than in
+    # the browser, which is advice — and shipped to it, so the advice cannot say otherwise.
+    if blocker := blocked_by(await store.steps(source.name), name):
+        raise StepFailed(f"run {blocker} first")
 
     model_dir = source.model_dir()
     if name in WRITES_MODEL:
