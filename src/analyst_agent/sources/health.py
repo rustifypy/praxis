@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from ..config import settings
+from ..cube.client import ADMIN_TIMEOUT_S, CubeError, catalog_of
 from .registry import Source
 
 
@@ -60,19 +60,18 @@ class Serving:
     described: int
 
 
-async def serving(source: Source, timeout: float = 10.0) -> Serving | None:
-    """The compiled entities, or None when Cube cannot say."""
+async def serving(source: Source, timeout: float = ADMIN_TIMEOUT_S) -> Serving | None:
+    """The compiled entities, or None when Cube cannot say. Counted over cubes only — a view's
+    members are the same members re-exported, so counting every entity counts the model twice."""
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            body = (await client.get(f"{source.url}{settings.cube_base_path}/v1/meta")).json()
-        entities = body.get("cubes") or []
-        return Serving(
-            cubes=sum(1 for e in entities if e.get("type") != "view"),
-            views=[e["name"] for e in entities if e.get("type") == "view"],
-            described=sum(1 for e in entities if e.get("description")),
-        )
-    except (httpx.RequestError, ValueError, KeyError, TypeError):
+        catalog = await catalog_of(source, timeout=timeout)
+    except CubeError:
         return None
+    return Serving(
+        cubes=sum(1 for e in catalog.entities if not e.is_view),
+        views=[e.name for e in catalog.views],
+        described=sum(1 for e in catalog.entities if e.description),
+    )
 
 
 async def wait_until_ready(

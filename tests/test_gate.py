@@ -1,3 +1,5 @@
+import pytest
+
 from analyst_agent.cube import gate
 from analyst_agent.cube.schema import CubeQuery
 
@@ -169,3 +171,76 @@ def test_missing_values_reports_only_the_filter_branch():
     assert len(errors) == 1
     assert "requires values" in errors[0]
     assert "FilterGroup" not in errors[0] and "function-after[" not in errors[0]
+
+
+# --- tiers 3 and 4, over a fake session -------------------------------------
+
+
+async def test_check_compiles_and_executes_nothing(catalog, cube):
+    """`check` exists apart from `run` so a dashboard can know a query is sound without
+    reading any data — the whole reason the seam is where it is."""
+    result = await gate.check({"measures": ["orders.count"]}, catalog, cube, max_rows=500)
+    assert result.ok
+    assert result.sql == "SELECT 1"
+    assert result.rows is None
+    assert cube.loaded == []  # compiled, never executed
+    assert cube.compiled[0]["measures"] == ["orders.count"]
+
+
+async def test_check_caps_the_limit_it_sends(catalog, cube):
+    """The row ceiling is not optional, and an absent limit is capped too."""
+    await gate.check(
+        {"measures": ["orders.count"], "limit": 40_000, "order": {"orders.count": "desc"}},
+        catalog,
+        cube,
+        max_rows=500,
+    )
+    assert cube.compiled[0]["limit"] == 500
+
+
+async def test_a_bad_member_never_reaches_cube(catalog, cube):
+    result = await gate.check({"measures": ["orders.nope"]}, catalog, cube, max_rows=500)
+    assert not result.ok
+    assert cube.compiled == []
+
+
+async def test_check_reports_cubes_refusal_without_raising(catalog, cube):
+    cube.refuse = "Member not found: orders.count"
+    result = await gate.check({"measures": ["orders.count"]}, catalog, cube, max_rows=500)
+    assert not result.ok
+    assert "Member not found" in result.errors[0]
+
+
+async def test_execute_carries_the_sql_and_warnings_checked_produced(catalog, cube):
+    """Why it takes a GateResult rather than the query: tiers 2-3's work survives into the
+    executed result instead of being compiled a second time."""
+    cube.rows = [{"orders.count": 42}]
+    cube.resolved_ranges = {"orders.created_at": ["2026-01-01", "2026-01-31"]}
+    checked = await gate.check(
+        {"measures": ["orders.count"], "limit": 40_000}, catalog, cube, max_rows=500
+    )
+    assert checked.warnings
+    loaded = await gate.execute(checked, cube)
+    assert loaded.ok
+    assert loaded.rows == [{"orders.count": 42}]
+    assert loaded.sql == "SELECT 1"
+    assert loaded.warnings == checked.warnings
+    assert loaded.resolved_ranges == cube.resolved_ranges
+
+
+async def test_execute_refuses_a_result_that_did_not_pass_check(catalog, cube):
+    """An ordering constraint in the interface: without the parsed query there is nothing
+    to send, and re-parsing here would compile the payload twice."""
+    refused = await gate.check({"measures": ["orders.nope"]}, catalog, cube, max_rows=500)
+    with pytest.raises(ValueError, match="passed check"):
+        await gate.execute(refused, cube)
+
+
+async def test_a_stopped_container_fails_the_execution_rather_than_the_caller(catalog, cube):
+    """`dashboards.run` marks the tile failed; nothing above it sees an exception."""
+    checked = await gate.check({"measures": ["orders.count"]}, catalog, cube, max_rows=500)
+    cube.down = "cube did not answer"
+    result = await gate.execute(checked, cube)
+    assert not result.ok
+    assert "did not answer" in result.errors[0]
+    assert result.sql == "SELECT 1"

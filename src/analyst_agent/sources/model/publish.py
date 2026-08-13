@@ -5,9 +5,10 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import httpx
 import yaml
 
+from ...cube.client import CubeClient, CubeError
+from ...cube.schema import CubeQuery
 from .. import docker
 from ..registry import Source, project_root
 from .decide import CubeDecision, Enrichment, MeasureDecision, ViewDecision, exposed_members
@@ -163,98 +164,81 @@ async def check(
     """Read compile errors from /v1/meta, then compile queries through /v1/sql."""
     out = Validation()
 
-    # Poll /v1/meta until it serves a compiled model. Startup races look like errors
-    # too, so only a compile error is terminal — anything else is worth retrying.
-    meta: dict = {}
-    deadline = asyncio.get_running_loop().time() + timeout
-    last = "no response"
-    async with httpx.AsyncClient(timeout=15) as client:
-        while asyncio.get_running_loop().time() < deadline:
-            try:
-                r = await client.get(f"{source.url}/cubejs-api/v1/meta")
-                json_response = r.headers.get("content-type", "").startswith("application")
-                body = r.json() if json_response else {}
-                if r.status_code == 200 and "cubes" in body:
-                    meta = body
-                    break
-                if isinstance(body, dict) and body.get("error"):
-                    error = str(body["error"])
-                    if "Compile errors" in error or "Error: " in error:
-                        out.compile_error = error
-                        return out
-                    last = error[:300]
-                else:
-                    last = r.text[:300]
-            except httpx.RequestError as exc:
-                last = type(exc).__name__
-            await asyncio.sleep(2)
-        else:
-            out.compile_error = f"no compiled model within {timeout:.0f}s — {last}"
+    async with CubeClient.for_source(source) as cube:
+        try:
+            # Startup races look like errors too, so the session retries anything but a
+            # genuine compile error, which it raises rather than waiting out the deadline.
+            catalog = await cube.wait_until_compiled(timeout=timeout)
+        except CubeError as exc:
+            out.compile_error = str(exc)
             return out
 
-    out.compiled = True
-    out.entities = [c["name"] for c in meta.get("cubes", [])]
-    if not members:
-        return out
+        out.compiled = True
+        out.entities = [e.name for e in catalog.entities]
+        if not members:
+            return out
 
-    # (member, context, endpoint, query). Compile probes come first, so when a measure
-    # fails both ways the plain compile error is the one reported.
-    probes: list[tuple[str, str, str, dict]] = []
-    for entity in meta.get("cubes", []):
-        measures = [m["name"] for m in entity.get("measures", [])]
-        # Take the names meta reports rather than assuming `<entity>.count` exists — a
-        # cube always has one, but a view has it only if it includes one.
-        if every_measure:
-            chosen = measures
-        else:
-            smoke = next((m for m in measures if m.endswith(".count")), None)
-            chosen = [smoke or measures[0]] if measures else []
-        probes += [(m, "", "sql", {"measures": [m], "limit": 1}) for m in chosen]
+        # (member, context, executed, query). Compile probes come first, so when a measure
+        # fails both ways the plain compile error is the one reported.
+        probes: list[tuple[str, str, bool, dict]] = []
+        for entity in catalog.entities:
+            measures = [m.id for m in entity.members if m.kind == "measure"]
+            # Take the names meta reports rather than assuming `<entity>.count` exists — a
+            # cube always has one, but a view has it only if it includes one.
+            if every_measure:
+                chosen = measures
+            else:
+                smoke = next((m for m in measures if m.endswith(".count")), None)
+                chosen = [smoke or measures[0]] if measures else []
+            probes += [(m, "", False, {"measures": [m], "limit": 1}) for m in chosen]
 
-    if every_measure and enrichment:
-        # Which underlying cube each exposed view member came from, so a measure can be
-        # paired with a dimension that forces Cube to join.
-        origins = {
-            view.name: {name: path for path, _, name, _ in exposed_members(view)}
-            for view in enrichment.views
-        }
-        for entity in meta.get("cubes", []):
-            paths = origins.get(entity["name"])
-            if not paths:
-                continue
-            # A string dimension, so the impossible filter below cannot fail on a cast.
-            elsewhere = {
-                paths.get(d["name"].split(".", 1)[-1]): d["name"]
-                for d in entity.get("dimensions", [])
-                if d.get("type") == "string"
+        if every_measure and enrichment:
+            # Which underlying cube each exposed view member came from, so a measure can be
+            # paired with a dimension that forces Cube to join.
+            origins = {
+                view.name: {name: path for path, _, name, _ in exposed_members(view)}
+                for view in enrichment.views
             }
-            for measure in (m["name"] for m in entity.get("measures", [])):
-                home = paths.get(measure.split(".", 1)[-1])
-                partner = next(
-                    (d for path, d in elsewhere.items() if path not in (None, home)), None
-                )
-                if partner:
-                    probes.append(
-                        (
-                            measure,
-                            f"joined with {partner}: ",
-                            "load",
-                            {
-                                "measures": [measure],
-                                "dimensions": [partner],
-                                # The database resolves column references while planning, so
-                                # a filter nothing can match still catches an ambiguous
-                                # reference while aggregating almost no rows.
-                                "filters": [
-                                    {"member": partner, "operator": "equals", "values": [NO_MATCH]}
-                                ],
-                                "limit": 1,
-                            },
-                        )
+            for entity in catalog.entities:
+                paths = origins.get(entity.name)
+                if not paths:
+                    continue
+                # A string dimension, so the impossible filter below cannot fail on a cast.
+                elsewhere = {
+                    paths.get(m.id.split(".", 1)[-1]): m.id
+                    for m in entity.members
+                    if m.kind == "dimension" and m.type == "string"
+                }
+                for measure in (m.id for m in entity.members if m.kind == "measure"):
+                    home = paths.get(measure.split(".", 1)[-1])
+                    partner = next(
+                        (d for path, d in elsewhere.items() if path not in (None, home)), None
                     )
+                    if partner:
+                        probes.append(
+                            (
+                                measure,
+                                f"joined with {partner}: ",
+                                True,
+                                {
+                                    "measures": [measure],
+                                    "dimensions": [partner],
+                                    # The database resolves column references while planning,
+                                    # so a filter nothing can match still catches an ambiguous
+                                    # reference while aggregating almost no rows.
+                                    "filters": [
+                                        {
+                                            "member": partner,
+                                            "operator": "equals",
+                                            "values": [NO_MATCH],
+                                        }
+                                    ],
+                                    "limit": 1,
+                                },
+                            )
+                        )
 
-    async with httpx.AsyncClient(timeout=60) as client:
-        results = await asyncio.gather(*(_probe(client, source, *probe) for probe in probes))
+        results = await asyncio.gather(*(_probe(cube, *probe) for probe in probes))
     for member, context, error in results:
         if error and member not in out.member_errors:
             out.member_errors[member] = context + error
@@ -262,19 +246,18 @@ async def check(
 
 
 async def _probe(
-    client: httpx.AsyncClient, source: Source, member: str, context: str, endpoint: str, query: dict
+    cube: CubeClient, member: str, context: str, executed: bool, query: dict
 ) -> tuple[str, str, str]:
-    """One coroutine per probe, so `check` can gather them."""
+    """One coroutine per probe, so `check` can gather them. A compile probe reports Cube's
+    refusal; an executed one is how an ambiguous column reference surfaces at all."""
     try:
-        r = await client.post(f"{source.url}/cubejs-api/v1/{endpoint}", json={"query": query})
-    except httpx.RequestError as exc:
-        return member, context, type(exc).__name__
-    body = {}
-    try:
-        body = r.json()
-    except ValueError:
-        return member, context, r.text[:300] if r.status_code != 200 else ""
-    # /v1/load answers 200 with an `error` key for some failures, so status is not enough.
-    if r.status_code != 200 or "error" in body:
-        return member, context, str(body.get("error", r.text))[:300]
+        parsed = CubeQuery.model_validate(query)
+        if executed:
+            await cube.load(parsed)
+        else:
+            compiled = await cube.compile(parsed)
+            if not compiled.ok:
+                return member, context, (compiled.error or "")[:300]
+    except CubeError as exc:
+        return member, context, str(exc)[:300]
     return member, context, ""

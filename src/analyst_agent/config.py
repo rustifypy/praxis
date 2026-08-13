@@ -10,9 +10,10 @@ class Settings(BaseSettings):
     cube_base_path: str = "/cubejs-api"
     # Must equal CUBEJS_API_SECRET and be at least 32 bytes — mint_token enforces it.
     cube_api_secret: str = ""
-    # Passed to every source container we create. It serves the playground UI and
-    # SKIPS JWT verification, so a mismatched secret will not surface while it is on.
-    cubejs_dev_mode: bool = False
+    # Serves the playground, watches the model mount, and SKIPS JWT verification. On because
+    # the local design assumes all three; `docker.argv` still defaults it off, so it is never
+    # on by accident.
+    cubejs_dev_mode: bool = True
 
     azure_openai_api_key: str = ""
     azure_openai_endpoint: str = ""

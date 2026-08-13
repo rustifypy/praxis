@@ -2,8 +2,7 @@ from fastapi import FastAPI, Header
 from pydantic import BaseModel
 
 from .agent.build import SecurityContext, ask
-from .cube.catalog import Catalog
-from .cube.client import CubeClient, mint_token
+from .cube.client import CubeClient
 
 app = FastAPI(title="analyst-agent")
 
@@ -30,17 +29,13 @@ async def ask_endpoint(
 
 @app.get("/catalog")
 async def catalog_endpoint() -> dict:
-    client = CubeClient(mint_token(SecurityContext().as_claims()))
-    try:
-        catalog = Catalog.from_meta(await client.meta())
-        return {
-            "entities": [
-                {"name": e.name, "view": e.is_view, "members": len(e.members)}
-                for e in catalog.entities
-            ]
-        }
-    finally:
-        await client.aclose()
+    async with CubeClient.active(claims=SecurityContext().as_claims()) as cube:
+        catalog = await cube.catalog()
+    return {
+        "entities": [
+            {"name": e.name, "view": e.is_view, "members": len(e.members)} for e in catalog.entities
+        ]
+    }
 
 
 @app.get("/healthz")

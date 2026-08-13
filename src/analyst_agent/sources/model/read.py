@@ -1,6 +1,5 @@
 """Stage 1 — read the database, through Cube's own driver."""
 
-import asyncio
 import shutil
 import socket
 from dataclasses import dataclass, field
@@ -9,6 +8,8 @@ import httpx
 import yaml
 
 from ...config import settings
+from ...cube.client import CubeClient, CubeError
+from ...cube.schema import CubeQuery
 from .. import docker
 from ..drivers import credentials_for, image_for
 from ..registry import Source
@@ -17,6 +18,8 @@ from .warehouse import Column, ForeignKey, Schema, Table
 PROBE_MODEL_DIR = "probe-model"
 CONTAINER = "analyst-probe"
 BOOT_TIMEOUT_S = 90.0
+PROBE_QUERY_TIMEOUT_S = 180.0
+"""A catalog query scans pg_constraint across every schema; the boot poll has its own."""
 ROW_LIMIT = 50_000
 """Cube's own ceiling. A database with more constraints or column statistics than this
 is reported as truncated rather than silently half-read."""
@@ -189,27 +192,21 @@ async def read_catalog(source: Source, timeout: float = BOOT_TIMEOUT_S) -> Catal
 
     api = f"http://localhost:{port}"
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            # Wait for Cube to compile and serve the probe model.
-            deadline = asyncio.get_running_loop().time() + timeout
-            last = "no response"
-            while asyncio.get_running_loop().time() < deadline:
-                try:
-                    r = await client.get(f"{api}/cubejs-api/v1/meta")
-                    if r.status_code == 200 and "cubes" in r.text:
-                        break
-                    last = r.text[:300]
-                except httpx.RequestError as exc:
-                    last = type(exc).__name__
-                await asyncio.sleep(2)
-            else:
-                raise RuntimeError(
-                    f"probe container did not serve /v1/meta within {timeout:.0f}s — {last}"
-                )
+        # `secret=None` is the only unauthenticated session there is, and this is what it is
+        # for: the probe's container is started with a 5-byte secret nothing can sign with.
+        async with CubeClient(
+            f"{api}{settings.cube_base_path}", None, timeout=PROBE_QUERY_TIMEOUT_S
+        ) as cube:
+            try:
+                await cube.wait_until_compiled(timeout=timeout)
+            except CubeError as exc:
+                raise RuntimeError(f"probe container did not serve /v1/meta: {exc}") from None
 
             # Tables, columns and types — all Cube's own introspection exposes. It
-            # returns every schema keyed by name, which is why this reads them all.
-            r = await client.get(f"{api}/playground/db-schema", timeout=180)
+            # returns every schema keyed by name, which is why this reads them all. Raw httpx:
+            # `/playground` is outside the API's base path and dev mode alone serves it.
+            async with httpx.AsyncClient(timeout=PROBE_QUERY_TIMEOUT_S) as raw:
+                r = await raw.get(f"{api}/playground/db-schema")
             if r.status_code != 200:
                 raise RuntimeError(
                     f"/playground/db-schema returned {r.status_code} — is dev mode enabled?"
@@ -221,21 +218,19 @@ async def read_catalog(source: Source, timeout: float = BOOT_TIMEOUT_S) -> Catal
             for name, _, columns in probes:
                 if not columns:
                     continue
-                query = {"dimensions": [f"{name}.{c}" for c in columns], "limit": ROW_LIMIT}
-                answer = await client.post(
-                    f"{api}/cubejs-api/v1/load", json={"query": query}, timeout=180
+                query = CubeQuery.model_validate(
+                    {"dimensions": [f"{name}.{c}" for c in columns], "limit": ROW_LIMIT}
                 )
-                body = answer.json()
-                if "error" in body:
+                try:
+                    loaded = await cube.load(query)
+                except CubeError as exc:
                     # Keys make joins legal, so losing them is fatal. Statistics only
                     # sharpen the model's judgment, so losing them is a note.
                     if name == "probe_keys":
-                        raise RuntimeError(f"{name}: {str(body['error'])[:400]}")
-                    catalog.notes.append(f"statistics unavailable: {str(body['error'])[:400]}")
+                        raise RuntimeError(f"{name}: {str(exc)[:400]}") from None
+                    catalog.notes.append(f"statistics unavailable: {str(exc)[:400]}")
                     continue
-                rows[name] = [
-                    {c: row.get(f"{name}.{c}") for c in columns} for row in body.get("data", [])
-                ]
+                rows[name] = [{c: row.get(f"{name}.{c}") for c in columns} for row in loaded.rows]
                 if len(rows[name]) >= ROW_LIMIT:
                     catalog.truncated = True
                     catalog.notes.append(
