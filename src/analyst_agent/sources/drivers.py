@@ -139,8 +139,7 @@ def split_mounts(spec: Driver, values: dict[str, str]) -> tuple[dict[str, str], 
 
 def required_envs(spec: Driver) -> list[str]:
     """The connection fields a person has to fill in. Shipped with the driver so the form and
-    `POST /sources` cannot disagree about what is needed — the form used to skip booleans where
-    this skips fixed values, which agreed only because no driver has a required boolean."""
+    `POST /sources` answer this from one place. A boolean counts; a fixed value does not."""
     return [f.env for f in spec.fields if f.required and not f.fixed]
 
 

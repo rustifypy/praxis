@@ -355,8 +355,8 @@ async def action(
         elif name == "views":
             result = await views(source, store, report)
         else:
-            # A sixth name in STAGES used to land here and silently run `views`, because the
-            # membership check above had already accepted it.
+            # The membership check above accepts anything in STAGES, so a name added there
+            # without a branch here has to be refused rather than fall through to `views`.
             raise StepFailed(f"{name!r} is a stage with no branch in `action`")
     except StepFailed as exc:
         if name in STEPS:
@@ -365,8 +365,8 @@ async def action(
             await vcs.commit(model_dir, f"{name} — failed: {exc}"[:200])
         raise
 
-    # Both paths test `WRITES_MODEL`, rather than the success path relying on `connect` and
-    # `read` having returned early — moving either return would have committed a catalog read.
+    # Both paths test `WRITES_MODEL` explicitly rather than relying on the dispatch above:
+    # committing after a catalog read would put a commit in the model repo for nothing.
     if name in WRITES_MODEL:
         detail = ", ".join(f"{k}={v}" for k, v in result.summary.items() if not isinstance(v, list))
         committed = await vcs.commit(model_dir, f"{name} — {detail}"[:200])

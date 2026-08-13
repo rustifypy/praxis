@@ -118,9 +118,8 @@ function Row({
 /**
  * The chat mode's whole sidebar.
  *
- * Grouped by day and searchable, because the list only grows: `chats.map` is fine at ten
- * and unusable at two hundred, and until now there was no way to find an old conversation
- * except scrolling for its title.
+ * Grouped by day and searchable, because the list only grows: `chats.map` is fine at ten and
+ * unusable at two hundred, where the only way to find an old conversation is its title.
  */
 export function ChatNav({
   chats,

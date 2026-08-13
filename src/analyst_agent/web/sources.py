@@ -123,9 +123,8 @@ async def _view(
 ) -> dict:
     state = containers.get(source.service, "")
     running = state == "running"
-    # Looked up unless the caller already has it. It used to default to False, which meant
-    # every response but the list claimed `read` had not run — and now that the stepper
-    # renders the shipped rail rather than deriving one, that default would erase a tick.
+    # Looked up unless the caller already has it, never defaulted: the stepper renders the
+    # shipped rail, so a wrong answer here erases a tick rather than being merely imprecise.
     if catalog_read is None:
         catalog_read = await store_of(request).catalog_read(source.name)
     probed = await _probe(request.app.state.health, source, running)

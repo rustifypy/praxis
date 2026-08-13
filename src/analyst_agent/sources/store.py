@@ -195,8 +195,8 @@ def invalidated_by(steps: dict, step: str) -> list[str]:
 
 def blocked_by(steps: dict, stage: str) -> str:
     """The step that must succeed before `stage` may run, or "". `run.action` enforces this and
-    the browser explains it, from this one answer — they disagreed about `cubes`, which needs
-    `connect` and not `read` because `cubes` reads the catalog itself when none is cached."""
+    the browser explains it, both from this one answer. `cubes` needs `connect` and not `read`,
+    because `cubes` reads the catalog itself when none is cached."""
     if stage not in STEPS:
         return ""
     index = STEPS.index(stage)

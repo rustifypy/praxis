@@ -261,13 +261,13 @@ happens in: made in chat, bound to a source. The mode is read off the hash and n
 bar after a back button. A hash and not a router — three views do not justify one.
 
 `ChatHeader` is where "which source am I querying" lives: the chip carries the name, the
-health dot and `servingSummary` — the size of the model, which is what says a source is
+health dot and `servingNote` — the size of the model, which is what says a source is
 *built* and not merely connected — and its panel is a source **switcher and nothing
-else**. It briefly hosted `ServedModel` too, on the reasoning that "what can I ask about"
-is a question you have with a cursor in the composer. That was the wrong depth for a
-dropdown: clicking the chip to check which database you were on opened an admin screen
-over the transcript. `ServedModel` lives on the source page only, one deliberate click
-away via "Manage sources"; the panel is sized to its own longest row now, not to that
+else**. `ServedModel` does not belong in it: "what can I ask about" feels like a question
+you have with a cursor in the composer, but it is the wrong depth for a dropdown — clicking
+the chip to check which database you are on would open an admin screen over the transcript.
+`ServedModel` lives on the source page only, one deliberate click
+away via "Manage sources"; the panel is sized to its own longest row, not to that
 component.
 
 `ServedModel` is **master–detail, not accordions**: the entity list is a fixed column and
@@ -295,27 +295,26 @@ which is the thing to keep straight when editing it: the model needs the contain
 Cube compiling, grounding is markdown on this machine. So a Cube failure is a banner over
 empty Views and Cubes, never an early return over the whole list, and `unavailable` (a
 stopped container) is a separate prop from `model.serving === false` (Cube answered
-badly). Four early returns used to hide grounding for reasons that had nothing to do with
-it; they are the sections' empty copy now.
+badly). Anything that would early-return over the whole list is the sections' empty copy
+instead — a Cube problem must not hide grounding, which has nothing to do with it.
 
 The default selection stays on the model when there is one — an artefact only opens when
 nothing else survives the filter, or when there is no model at all.
 
 `SourceDetail` shows **five** stages where `store.STEPS` has four: `read` writes no step
 row, but hiding it inside "Build cubes" meant expanding the second of four steps offered
-a button that did something else. `STAGES` in `src/web/src/sources.ts` is the UI's list
-and `run.generate`'s own order; `stageState` is the one place that knows `read`'s state
-comes from the cached catalog rather than from `steps`.
+a button that did something else. `store.STAGES` is the one definition of the sequence and
+`store.stages` is the one place that knows `read`'s state comes from the cached catalog
+rather than from `steps`; the browser iterates the rail it ships on `SourceRow.stages`.
 
 ## Sources
 
 One Cube container per data source, and **one row in `sources.db` is the whole source** —
 credentials included. `sources/docker.py` starts each container with `docker run -e` built
 from that row, so there is nothing on disk that can drift from it: no registry file, no
-per-source credential file, no generated compose file. All three existed before and were
-removed with `sources/compose.py` and the one-time importer. `docker-compose.yml` is hand-written and
-holds only the shared Cube Store, on an explicitly named `analyst-net` network that
-standalone containers join.
+per-source credential file, no generated compose file, and do not add one.
+`docker-compose.yml` is hand-written and holds only the shared Cube Store, on an explicitly
+named `analyst-net` network that standalone containers join.
 
 `sources.db` lives at `SOURCES_DB` (`~/.analyst/sources.db`), deliberately **not** under
 `DATA_DIR`: pointing `--data-dir` at a scratch file to protect chat history must not hide
@@ -391,8 +390,7 @@ branch, at a time).
 - **Cube Core *does* hot-reload model files when `CUBEJS_DEV_MODE=true`** — which is how every
   source container here runs. A new `views/x.yml` was served in under a second with no restart,
   and a file with a bad `join_path` took the whole source to a compile error just as fast, then
-  recovered the moment it was deleted. (This bullet previously claimed the opposite. It was
-  wrong.) Two consequences: a save is **live**, so the edit gate refusing bad YAML *before* the
+  recovered the moment it was deleted. Two consequences: a save is **live**, so the edit gate refusing bad YAML *before* the
   write is what keeps a source up, not the restart afterwards; and a restart is still what
   `publish.install` and a branch checkout use, because a whole model changing at once should be
   compiled from a known state rather than from whatever the watcher saw mid-write.
@@ -412,25 +410,24 @@ branch, at a time).
   directory belongs to whoever installed this — it is a dependency, and their `cube/` is
   theirs to version. Everything else machine-local goes under
   `~/.analyst`: `sources.db`, the job lock, and `probe-model/` (the catalog probe's
-  throwaway cubes, cleared on every read). There used to be a `.cube-probe/` in the
-  project root holding the probe and model backups; both are gone. Do not put scratch
-  back into the project. Note the probe directory is **bind-mounted**, which is why it is
+  throwaway cubes, cleared on every read). Do not put scratch — a probe directory, a model
+  backup — into the project. Note the probe directory is **bind-mounted**, which is why it is
   under `~/.analyst` rather than a system tempdir — Docker Desktop's default file sharing
   covers `/Users` reliably and `/var/folders` not always.
 - **`publish.write` unlinks every `*.yml` before writing, so re-running `cubes` destroys
   the views and descriptions.** There is no undo in the code: **the model directory is
-  the user's, and version control is the only way back.** A snapshot/restore pair existed
-  and was deliberately removed — one-deep, silently overwritten, and strictly worse than
-  a `git diff` that shows what the rebuild actually changed. The picker warns before a run
+  the user's, and version control is the only way back.** Do not add a snapshot/restore
+  pair: one-deep, silently overwritten, and strictly worse than a `git diff` that shows what
+  the rebuild actually changed. The picker warns before a run
   that discards later steps; committing first is on whoever runs it. This also means a
-  `cubes` build Cube rejects now leaves the rejected YAML on disk rather than rolling
+  `cubes` build Cube rejects leaves the rejected YAML on disk rather than rolling
   back, which is the right trade only because the directory is versioned — if you ever
   point this at an untracked model directory, there is nothing to recover with.
 - **A container's environment cannot be changed.** Editing credentials means `docker rm`
   plus `docker run`, which is what the `connect` step does; `restart` would keep the old
   password. The same applies to `CUBEJS_DEV_MODE` and `CUBEJS_API_SECRET`.
-- **`docker run --network` needs a network that already exists.** Compose used to create
-  one; nothing does now, so `docker.ensure_network` runs before every create. Compose
+- **`docker run --network` needs a network that already exists.** Nothing else creates one,
+  so `docker.ensure_network` runs before every create. Compose
   prefixes container names with its project (`analyst-ds-cubestore-router-1`) but the
   service name is the alias on the network, which is what sources resolve — so a
   `--filter name=^...$` anchored on the service name matches nothing.
@@ -480,11 +477,10 @@ branch, at a time).
   `data` — which is also what `events` calls its JSON blob. Adding a *table* to `SCHEMA`
   works on an existing `analyst.db`; adding a *column* silently does not, because
   `CREATE TABLE IF NOT EXISTS` does not diff and there is no migration mechanism.
-- **New CSS goes on new class names — check `styles.css` first.** `.source` and `.dot`
-  were already taken by the old sidebar footer and the brand dot; reusing them for the
-  sources panel inherited `display: flex` and a monospace font, and every card laid out
-  sideways. `.source` is gone with that footer, `.dot` is now the rail's brand, and the
-  rule that caught it still applies.
+- **New CSS goes on new class names — check `styles.css` first.** `.dot` is the rail's brand
+  dot; reusing a taken name for the sources panel inherits `display: flex` and a monospace
+  font, and every card lays out sideways. The trap is that a name may be claimed by markup
+  rather than by CSS, so grepping the stylesheet alone will not find it.
 - **A FastAPI path parameter as broad as `/sources/{name}/{action}` swallows its
   siblings**, so `/sources/{name}/read` never matched. Container actions live under
   `/container/{action}`.

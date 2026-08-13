@@ -64,10 +64,9 @@ SERVING_STATES = ("stopped", "unreachable", "broken", "empty", "ok")
 
 
 def serving_state(running: bool, healthy: bool, served: "Serving | None") -> str:
-    """Why `serving` is what it is. It was `None` for two unrelated reasons — a stopped
-    container and a model Cube refused to compile — and the sources list rendered the second as
-    "no model yet", which is a wrong statement about a source with thirteen cubes rather than a
-    vague one. Structured for the same reason `Health.as_dict` is: so nothing matches on prose.
+    """Why `serving` is what it is. A null `Serving` has two unrelated causes — a stopped
+    container, and a model Cube refuses to compile — and only `broken` may be reported as
+    anything other than "no model yet". Structured like `Health.as_dict`, so nothing infers it.
     """
     if not running:
         return "stopped"

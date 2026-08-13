@@ -8,7 +8,7 @@ import { ResultChart } from "./ResultChart";
  * One tile: a title, the window it read, and either its chart or its table.
  *
  * Reuses `ResultChart` with no table under it, which is only safe because every palette slot
- * clears 3:1 unaided — three light hues used to rely on that table for contrast relief.
+ * clears 3:1 unaided — a light hue leaning on that table for contrast relief would not.
  *
  * The window label is `resolved_ranges`: the only thing distinguishing a tile whose window
  * moves on refresh from one pinned to a fixed period. Both are legal; a board where you

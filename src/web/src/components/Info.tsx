@@ -6,9 +6,9 @@ import { useDismiss } from "../hooks";
 /**
  * An explanation, one click away instead of in the reading path.
  *
- * Everything this project knows about a screen used to be set at body weight directly
- * under the heading, which put three paragraphs between the user and the controls. The
- * words are worth keeping; the position was not.
+ * Everything this project knows about a screen, set at body weight directly under the
+ * heading, puts three paragraphs between the user and the controls. The words are worth
+ * keeping; that position is not.
  *
  * Positioned `fixed` and measured, not absolute. These icons sit inside the sources
  * list column (about 200px wide) and inside the chat header's popover, which scrolls —
