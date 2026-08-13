@@ -2,8 +2,8 @@
 
 from dataclasses import dataclass, field
 
-import httpx
-
+from ...cube.client import CubeClient, CubeError
+from ...cube.schema import CubeQuery
 from ..registry import Source
 from .warehouse import Schema, Table
 
@@ -235,17 +235,16 @@ async def build_menu(source: Source, schema: Schema) -> Menu:
             wanted.append(f"{table.name}.{column.name}")
             picked += 1
 
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with CubeClient.for_source(source) as cube:
         for member in wanted:
-            query = {"dimensions": [member], "limit": SAMPLE_LIMIT}
+            query = CubeQuery.model_validate({"dimensions": [member], "limit": SAMPLE_LIMIT})
             try:
-                r = await client.post(f"{source.url}/cubejs-api/v1/load", json={"query": query})
-                body = r.json()
-            except (httpx.RequestError, ValueError):
+                loaded = await cube.load(query)
+            except CubeError:
+                # A sample only sharpens the model's judgment; a column that will not
+                # aggregate is not a reason to fail the build.
                 continue
-            if "error" in body:
-                continue
-            values = [str(row.get(member)) for row in body.get("data", []) if row.get(member)]
+            values = [str(row.get(member)) for row in loaded.rows if row.get(member)]
             if values:
                 menu.samples[member] = values[:SAMPLE_LIMIT]
     return menu
