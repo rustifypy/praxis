@@ -38,11 +38,17 @@ async def run_turn(
     question: str,
     store: ChatStore,
     cancel: asyncio.Event | None = None,
+    files: list[str] | None = None,
 ) -> AsyncIterator[Event]:
     """One agent's stream as events, stored as they arrive. Shared by the query chat and the
-    model editor: what may reach a transcript is subtle, and two copies would drift."""
+    model editor: what may reach a transcript is subtle, and two copies would drift.
+
+    `files` are workspace paths the question arrived with. They ride on the user event rather than
+    an event of their own: an upload happens between turns and would have no turn to belong to,
+    and this is the turn that used it.
+    """
     turn_id = uuid.uuid4().hex
-    user_event = Event(type="user", data={"text": question})
+    user_event = Event(type="user", data={"text": question, "files": files or []})
     await store.append(chat_id, turn_id, user_event)
     yield user_event
 
@@ -108,6 +114,7 @@ async def stream_turn(
     saver,
     cube: CubeClient,
     cancel: asyncio.Event | None = None,
+    files: list[str] | None = None,
 ) -> AsyncIterator[Event]:
     """`cube` is the app's session for the active source — borrowed, never closed here. It
     re-mints its own token, so a chat outliving the 15-minute JWT no longer 403s mid-thought."""
@@ -141,7 +148,7 @@ async def stream_turn(
             ),
         )
 
-    async for event in run_turn(build, chat_id, question, store, cancel):
+    async for event in run_turn(build, chat_id, question, store, cancel, files):
         yield event
 
 

@@ -19,7 +19,7 @@ from ..cube.client import CubeClient
 from ..cube.shape import Column, export_value
 from ..sandbox import container, scratch
 from ..transcript import ChatStore, checkpointer
-from . import dashboards, jobs, model_edit, sources, state, system
+from . import dashboards, files, jobs, model_edit, sources, state, system
 from .stream import sse
 
 STATIC = Path(__file__).parent / "static"
@@ -38,6 +38,9 @@ class Rename(BaseModel):
 
 class Message(BaseModel):
     question: str
+    files: list[str] = []
+    """Workspace paths the composer attached, from `POST /files`. The user event carries them,
+    which is how an upload reaches the transcript at all."""
 
 
 @asynccontextmanager
@@ -50,11 +53,6 @@ async def lifespan(app: FastAPI):
     # One session for the active source, for the life of the process: `CUBE_URL` fixes which
     # source that is at boot, and its catalog cache is what every query turn reads.
     async with checkpointer() as saver, CubeClient.active() as cube:
-        # Warmed in the background, and never awaited: the first ever run builds the image, which
-        # is ~90 seconds, and a portal that will not answer until an image compiles is a portal
-        # that looks broken. Every `run_python` calls `ensure_up` anyway and a lock serialises
-        # them, so a slow or failed warm costs the first script latency rather than function.
-        # Held on `app.state` only so the task is not garbage-collected mid-build.
         app.state.sandbox = asyncio.create_task(container.rebuild())
         app.state.store = store
         app.state.saver = saver
@@ -70,6 +68,7 @@ app.include_router(sources.router)
 app.include_router(jobs.router)
 app.include_router(dashboards.router)
 app.include_router(model_edit.router)
+app.include_router(files.router)
 
 
 @app.middleware("http")
@@ -114,8 +113,6 @@ async def rename_chat(chat_id: str, body: Rename, request: Request) -> dict:
 @app.delete("/api/chats/{chat_id}")
 async def delete_chat(chat_id: str, request: Request) -> dict:
     await request.app.state.store.delete(chat_id)
-    # The workspace belongs to the chat, so it goes with it. The container does not — it is
-    # shared, and removing it here would take every other chat's sandbox down with this one.
     scratch.remove(chat_id)
     return {"ok": True}
 
@@ -147,6 +144,8 @@ async def send(chat_id: str, body: Message, request: Request) -> StreamingRespon
 
     cancel = asyncio.Event()
     request.app.state.cancels[chat_id] = cancel
+    # Only files actually in the workspace, so the transcript cannot name one that is not there.
+    attached = [p for p in body.files if p in scratch.listing(chat_id, "**/*")]
 
     async def events():
         try:
@@ -157,6 +156,7 @@ async def send(chat_id: str, body: Message, request: Request) -> StreamingRespon
                 request.app.state.saver,
                 request.app.state.cube,
                 cancel,
+                attached,
             ):
                 yield event
                 # A closed tab should not leave the agent burning model calls.
@@ -193,10 +193,6 @@ async def result_csv(result_id: str, request: Request) -> Response:
     if record is None:
         raise HTTPException(404, f"no result with id {result_id!r}")
     buffer = io.StringIO()
-    # The stored header, so the file's columns are the table's columns in the table's
-    # order. Labels rather than member ids — a spreadsheet is read by a person. Note Cube
-    # returns a grouped time dimension under *two* keys, the grain and the bare member, so
-    # the header is what says which one belongs in the file.
     columns = [Column(**c) for c in record["columns"]]
     writer = csv.writer(buffer)
     writer.writerow([c.label for c in columns])

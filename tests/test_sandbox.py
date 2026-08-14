@@ -171,6 +171,33 @@ def test_listing_a_missing_workspace_is_empty_rather_than_an_error():
     assert scratch.listing("never-used") == []
 
 
+# --- files in and out --------------------------------------------------------
+
+
+def test_an_upload_is_kept_apart_from_what_a_script_wrote(data_dir):
+    """`uploads/` is the whole record that a file came from the user rather than from a run —
+    there is no table saying so, and the directory is what the prompt reads."""
+    scratch.save_upload(CHAT, "orders.csv", b"a,b\n")
+    (scratch.ensure(CHAT) / "chart.png").write_bytes(b"png")
+
+    assert scratch.uploaded(CHAT) == ["uploads/orders.csv"]
+    assert sorted(scratch.listing(CHAT, "**/*")) == ["chart.png", "uploads/orders.csv"]
+
+
+def test_a_snapshot_notices_a_file_rewritten_under_the_same_name(data_dir):
+    """Size and mtime, not names: a script that re-draws `chart.png` adds no new name, and a set
+    difference would report the run whose picture is on screen as having written nothing."""
+    root = scratch.ensure(CHAT)
+    (root / "chart.png").write_bytes(b"one")
+    before = scratch.snapshot(CHAT)
+
+    (root / "chart.png").write_bytes(b"two")
+    os.utime(root / "chart.png", ns=(0, 0))
+    after = scratch.snapshot(CHAT)
+
+    assert [p for p, mark in after.items() if before.get(p) != mark] == ["chart.png"]
+
+
 # --- what the model reads of a command's output ------------------------------
 
 

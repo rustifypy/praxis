@@ -18,15 +18,21 @@ from ...cube.shape import Column, export_value
 from ...sandbox import container, scratch
 from ..session import Session
 
-EVENT_KEYS = frozenset({"tool", "label", "ok", "note", "errors", "exit_code", "output"})
+EVENT_KEYS = frozenset({"tool", "label", "ok", "note", "errors", "exit_code", "output", "wrote"})
 """Every key one of these events may carry — asserted by a test. Absent on purpose: the script
 body, the exported rows, and the whole of a command's output. A transcript records that a script
-ran and how it ended; the workspace holds the script and the data, `.logs/` holds what it said."""
+ran and how it ended; the workspace holds the script and the data, `.logs/` holds what it said.
+`wrote` is paths and not contents, for the same reason: the file is on disk in a bind mount, and
+the download route is how it is read."""
 
 OUTPUT_LIMIT = 4_000
 """What a script's output is trimmed to. One number for both the model and the event, unlike a
 query result's two: the log file is where the rest is read from, so a bigger event would put a
 second copy of it through the event log for nobody's benefit."""
+
+WROTE_LIMIT = 10
+"""How many of a run's files are named. A script that writes three hundred PNGs has said what it
+did by the tenth, and the event is the transcript's copy — the workspace holds them all."""
 
 
 def build_code_tools(session: Session) -> list:
@@ -91,8 +97,13 @@ def build_code_tools(session: Session) -> list:
 
         pandas, polars, duckdb, pyarrow, numpy, scipy, matplotlib and openpyxl are available and
         **there is no network**, so nothing can be downloaded or installed. The working directory
-        is the workspace, so a file `export_result` wrote is right beside the script. Every call
-        is a fresh interpreter — only files carry over — so print whatever you need to see.
+        is the workspace, so a file `export_result` wrote — or one the user uploaded to
+        `uploads/` — is right beside the script. Every call is a fresh interpreter — only files
+        carry over — so print whatever you need to see.
+
+        Any file the script writes is shown to the user and offered as a download, images
+        included, so a chart you save is a chart they can see. Give it a name that says what it
+        is.
         """
         saved = scratch.save_script(chat_id, script)
         _start("run_python", saved)
@@ -102,12 +113,28 @@ def build_code_tools(session: Session) -> list:
             _end("run_python", False, errors=[up.message])
             return f"The sandbox is not available: {up.message}"
 
+        # Either side of the run, so a chart the script drew is named rather than left for
+        # someone to find with `ls`. The model has no reason to mention a file it did not print,
+        # and until this the browser had no way to learn the file existed at all.
+        before = scratch.snapshot(chat_id)
         result = await container.execute(chat_id, f"python {saved}")
+        wrote = [p for p, mark in scratch.snapshot(chat_id).items() if before.get(p) != mark]
+
         both = "\n".join(part for part in (result.out.rstrip(), result.err.rstrip()) if part)
         shown, log = scratch.record(chat_id, "run", both, OUTPUT_LIMIT)
-        _end("run_python", result.ok, exit_code=result.code, output=shown)
+        _end(
+            "run_python",
+            result.ok,
+            exit_code=result.code,
+            output=shown,
+            wrote=wrote[:WROTE_LIMIT],
+        )
 
         head = f"{saved} exited {result.code}"
+        if wrote:
+            named = ", ".join(wrote[:WROTE_LIMIT])
+            more = len(wrote) - WROTE_LIMIT
+            head += f"; wrote {named}" + (f" and {more} more" if more > 0 else "")
         if result.code in (124, 137):
             head += f" — killed at the {container.EXEC_TIMEOUT_S:.0f}s limit"
         # The memory and process limits belong to the container, not to this script, so a script

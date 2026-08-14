@@ -10,6 +10,7 @@ import { DashboardNav } from "./components/DashboardNav";
 import type { ComposerHandle } from "./components/Composer";
 import { Composer } from "./components/Composer";
 import { DataNav } from "./components/DataNav";
+import { FileBlock } from "./components/FileBlock";
 import { Rail } from "./components/Rail";
 import { ResultBlock } from "./components/ResultBlock";
 import { SourceDetail } from "./components/SourceDetail";
@@ -206,7 +207,7 @@ export default function App() {
     return () => window.removeEventListener("keydown", keys);
   }, [create]);
 
-  const send = async (question: string) => {
+  const send = async (question: string, files: string[]) => {
     if (!activeId) return;
     const controller = new AbortController();
     abort.current = controller;
@@ -215,7 +216,7 @@ export default function App() {
     pinned.current = true;
 
     try {
-      for await (const event of api.sendMessage(activeId, question, controller.signal)) {
+      for await (const event of api.sendMessage(activeId, question, files, controller.signal)) {
         setItems((prev) => applyEvent(prev, event));
       }
     } catch (err) {
@@ -414,6 +415,20 @@ export default function App() {
                 return (
                   <div key={i} className="row user">
                     {item.text}
+                    {item.files.length > 0 && (
+                      <div className="attached sent">
+                        {item.files.map((path) => (
+                          <a
+                            key={path}
+                            className="attach"
+                            href={activeId ? api.chatFileUrl(activeId, path) : undefined}
+                            download
+                          >
+                            <span className="attach-name">{path.replace(/^uploads\//, "")}</span>
+                          </a>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               case "thinking":
@@ -460,6 +475,12 @@ export default function App() {
                     />
                   </div>
                 );
+              case "files":
+                return (
+                  <div key={i} className="row">
+                    <FileBlock chatId={activeId ?? ""} label={item.label} paths={item.paths} />
+                  </div>
+                );
               case "compacted":
                 return (
                   <div key={i} className="row compacted">
@@ -481,11 +502,12 @@ export default function App() {
 
         <Composer
           ref={composer}
+          chatId={activeId}
           busy={busy}
           disabled={!activeId}
           startedAt={turnStart}
           status={statusOf(items, busy)}
-          onSend={(q) => void send(q)}
+          onSend={(q, files) => void send(q, files)}
           onStop={() => void stop()}
         />
       </main>

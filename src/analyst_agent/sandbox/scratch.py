@@ -16,6 +16,14 @@ LOGS = ".logs"
 """Where a trimmed command's whole output goes. Dotted, so `listing` keeps it out of the way:
 the log is somewhere to look when something was cut, not part of the work."""
 SCRIPTS = "scripts"
+UPLOADS = "uploads"
+"""Where a file the user handed over lands, and the whole of what makes an upload
+distinguishable from something a script wrote. Nothing records which files arrived from the
+browser — `uploads/*` *is* that record, so a listing is enough to tell the agent what it was
+given without a table saying so."""
+PROFILES = ".profiles"
+"""One JSON per upload, plus the profiler that produced it. Dotted for the same reason as
+`.logs` — and so the profiler's own script is not read as an artifact a run wrote."""
 
 
 def ensure(chat_id: str) -> Path:
@@ -60,6 +68,54 @@ def listing(chat_id: str, pattern: str = "*") -> list[str]:
         if found.is_file() and not any(part.startswith(".") for part in relative.parts):
             out.append(str(relative))
     return sorted(out)
+
+
+def snapshot(chat_id: str) -> dict[str, tuple[int, int]]:
+    """Every file's `(size, mtime)`, so two snapshots either side of a run say what it wrote.
+
+    Size and mtime rather than names alone: a script that re-draws `chart.png` produces no new
+    name, and a set difference would report the second run as having made nothing — which is the
+    run whose picture is on screen.
+    """
+    root = settings.dir_path / ROOT / chat_id
+    out = {}
+    for path in listing(chat_id, "**/*"):
+        stat = (root / path).stat()
+        out[path] = (stat.st_size, stat.st_mtime_ns)
+    return out
+
+
+def save_upload(chat_id: str, filename: str, data: bytes) -> str:
+    """Write a file the user handed over and return its path, relative to the workspace.
+
+    The name is a browser's, so it is untrusted twice over: `Path.name` throws away any
+    directory part, and `resolve` is what proves the result is still inside this chat's
+    workspace. Numbered on collision rather than overwritten — the same reason `save_script`
+    numbers: a figure in an earlier answer came from the earlier file, and silently replacing it
+    would make that answer unauditable.
+    """
+    uploads = ensure(chat_id) / UPLOADS
+    uploads.mkdir(parents=True, exist_ok=True)
+    # Leading dots go, and not as a second escape check: `listing` skips dotted paths, so
+    # `.secret.csv` would land on disk invisible to the agent, to `snapshot` and to the profiler
+    # — an upload that appears to have worked and cannot be used. The tail slice is the
+    # filesystem's own 255-byte component limit, which would otherwise be an unexplained 500.
+    stem = Path(filename).name.lstrip(".")[-120:] or "upload"
+    target, refused = resolve(chat_id, f"{UPLOADS}/{stem}")
+    if target is None:
+        raise ValueError(refused)
+    n = 1
+    while target.exists():
+        n += 1
+        target = uploads / f"{Path(stem).stem}-{n}{Path(stem).suffix}"
+    target.write_bytes(data)
+    return f"{UPLOADS}/{target.name}"
+
+
+def uploaded(chat_id: str) -> list[str]:
+    """What this chat was given, newest last. `uploads/` is the only record that a file arrived
+    from the browser rather than from a script, which is why the directory is the rule."""
+    return listing(chat_id, f"{UPLOADS}/*")
 
 
 def save_script(chat_id: str, script: str) -> str:

@@ -74,6 +74,9 @@ export interface ToolEnd {
   /** What a dashboard tool did, in a few words — the whole of what those tools say, since
    *  they may not put state in an event. Used as the trace step's summary. */
   note?: string;
+  /** Workspace paths a script wrote or changed, from `run_python`. Paths only: the files are on
+   *  disk in the bind mount, and the download route is how they are read. */
+  wrote?: string[];
 }
 
 /**
@@ -82,7 +85,9 @@ export interface ToolEnd {
  * chat renders instantly instead of pretending to work.
  */
 export type Item =
-  | { kind: "user"; text: string }
+  /** `files` are workspace paths the question arrived with. They ride on the user event because
+   *  an upload happens between turns and has no turn of its own to belong to. */
+  | { kind: "user"; text: string; files: string[] }
   | { kind: "thinking"; text: string; open: boolean; live: boolean; startedAt?: number; ms?: number }
   | { kind: "answer"; text: string; live: boolean }
   | {
@@ -110,6 +115,13 @@ export type Item =
       rowCount: number;
       chart: ChartSpec | null;
     }
+  /**
+   * What a script wrote, as its own block below the answer.
+   *
+   * No new event type: `run_python` names its files on `tool_end`, the same way `set_chart`
+   * authors its own events. `label` is the script that made them.
+   */
+  | { kind: "files"; label: string; paths: string[] }
   | { kind: "compacted"; before: number; after: number }
   | { kind: "error"; message: string };
 

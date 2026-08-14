@@ -1314,6 +1314,73 @@ textarea {
   font-size: 12px;
 }
 
+/* ---------- what a script wrote, below the answer ----------
+   `wrote-`, not `file-` or `artifact-`: "artefact" already means a grounding file on the
+   sources page, and one word for two things is how the `.dot` trap was sprung. Same frame as
+   `.res` because it plays the same part — evidence sitting under the claim. */
+
+.wrote {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  overflow: hidden;
+}
+
+.row:has(> .answer) + .row:has(> .wrote) {
+  margin-top: calc(-8px - var(--control));
+}
+
+.wrote-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.wrote-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wrote-figure {
+  display: block;
+  padding: 12px;
+  text-decoration: none;
+}
+
+.wrote-figure img {
+  display: block;
+  max-width: 100%;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.wrote-caption {
+  display: block;
+  margin-top: 6px;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.wrote-list {
+  margin: 0;
+  padding: 8px 12px 10px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.wrote-list a {
+  color: var(--accent);
+}
+
 /* ---------- the categorical palette ----------
    Eight slots, assigned in fixed order and never cycled — `visualize.MAX_SERIES` caps
    series at eight so a ninth is refused rather than repeated. The order is the
@@ -1595,6 +1662,9 @@ textarea {
 
 .composer {
   display: flex;
+  /* Wraps so the attachment row takes a line of its own above the textarea rather than
+     sitting beside it — see `.attached`. */
+  flex-wrap: wrap;
   gap: 10px;
   align-items: flex-end;
   padding: 10px;
@@ -1604,6 +1674,23 @@ textarea {
   transition:
     border-color 0.2s,
     box-shadow 0.2s;
+}
+
+/* A file dragged anywhere over the composer. The same accent as focus, because it is the
+   same statement: this is what your next action lands in. */
+.composer.over {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.composer-failed {
+  margin: 0 0 6px;
+  color: var(--bad);
+  font-size: 12.5px;
+}
+
+.composer-picker {
+  display: none;
 }
 
 .composer:focus-within {
@@ -1655,6 +1742,98 @@ textarea {
 .composer .stop {
   background: var(--bad);
   animation: rise 0.2s var(--ease);
+}
+
+/* ---------- attachments ----------
+   One row of chips, in the composer while a file is pending and under the question once it
+   has been sent. `.attach` is a chip in both places: the same object, before and after. */
+
+.attached {
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.attached.sent {
+  margin-top: 8px;
+}
+
+.attach {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  padding: 3px 4px 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--ink);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.attach.pending {
+  opacity: 0.7;
+}
+
+.attach-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.attach-meta {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sent chips carry no button, so the padding that makes room for one goes with it. */
+.attached.sent .attach {
+  padding-right: 9px;
+}
+
+.composer .attach-drop,
+.composer .attach-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  padding: 0;
+  line-height: 1;
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.composer .attach-drop {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 0;
+  background: none;
+  font-size: 11px;
+}
+
+.composer .attach-drop:hover {
+  color: var(--bad);
+  background: var(--panel);
+}
+
+/* Beside Send, at the same height as the other controls on that row. */
+.composer .attach-add {
+  width: var(--control);
+  height: var(--control);
+  border-radius: 9px;
+  font-size: 18px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+}
+
+.composer .attach-add:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .square {
