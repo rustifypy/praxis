@@ -242,9 +242,12 @@ anything here.
 | module | role |
 |---|---|
 | `sandbox/container.py` | one `docker run` and one `docker exec`, as pure argv plus lifecycle |
-| `sandbox/scratch.py` | one chat's directory, the only place a model-supplied path may land, and where saved scripts and trimmed output go |
+| `sandbox/scratch.py` | one chat's directory, the only place a model-supplied path may land, and where saved scripts, uploads and trimmed output go |
+| `sandbox/profile.py` | what an uploaded file *is*, read once on arrival and kept beside it |
+| `sandbox/profiler.py` | that reading, as it runs inside the container. Never imported here |
 | `sandbox/image/Dockerfile` | the analysis stack, built on demand and tagged by its own digest |
 | `agent/tools/code.py` | two tools: `export_result` and `run_python` |
+| `web/files.py` | the HTTP surface: a file in, a file out, and taking one back |
 
 **`--network none` is what keeps the gate load-bearing, not a second agent.** `run_query` and a
 Python interpreter are in the same hands, and that is safe because the sandbox cannot reach Cube or
@@ -279,10 +282,35 @@ available: docker not found on PATH`. `ensure_up` still runs before every script
 `asyncio.Lock` serialises it, so a script arriving mid-build waits rather than racing — two callers
 both finding no container is how the loser's `remove` kills the winner's.
 
+**A file the user sends is the same workspace, and there is no `files` table.** `POST
+/api/chats/{id}/files` writes into `uploads/`, `GET .../files/{path}` reads anything in the
+workspace back out, and that directory *is* the record — a row could only ever describe what `ls`
+already answers. Three rules hold it together:
+
+1. **`uploads/` is what makes an upload distinguishable** from something a script wrote, so no
+   state has to say which is which. `profile.saved` reads that directory and the prompt is built
+   from it every turn — which is why the composer's ✕ deletes the file rather than only the chip.
+2. **An upload writes no event of its own.** It happens *between* turns and would have no
+   `turn_id` to belong to, and an event authored by an HTTP route would be the first. What records
+   it is the **user event** of the turn it is attached to (`POST /messages` takes the paths), so a
+   replayed transcript shows the file above the question that used it.
+3. **A script's own files are named back to it.** `run_python` snapshots the workspace either side
+   of the run and reports what changed, on the event as `wrote` and in what the model reads —
+   otherwise a chart it drew is a file nobody knows exists.
+
+**The profile is what makes an upload usable rather than merely present.** Without it the first
+move after every upload is a `run_python` to discover the columns: it works, costs a round trip,
+and comes out differently each time — and a 200 MB CSV cannot go into a context at all, so a
+summary is the only safe thing to hand over whole. It is read by duckdb *in the sandbox* (`SUMMARIZE`
+plus one exact `count(DISTINCT)` pass, so "this column is unique" is a fact rather than an
+approximation), never raises, and a file it cannot read is a note the agent can act on rather than
+a failed upload.
+
 **`make sandbox-check` is the other half of `make test`.** The suite covers the argv, the path
-resolution, the CSV export and the trimming; what a container actually *does* — no egress, no
-capabilities, a read-only root, a kill at the timeout — is asserted against a live one by
-`scripts/sandbox_check.py`, with `--stale` for the mount recovery and `--ask` for a real turn.
+resolution, the CSV export, the trimming and both file routes; what a container actually *does* —
+no egress, no capabilities, a read-only root, a kill at the timeout, and what the profiler makes
+of a real CSV — is asserted against a live one by `scripts/sandbox_check.py`, with `--stale` for
+the mount recovery, `--ask` for a real turn and `--file` to attach something to it.
 
 **The web portal** (`web/`, `src/web/`, and the transcript beneath it) — `analyst` opens a
 browser the way Jupyter does. One flat event stream is the contract between agent and browser:
@@ -299,6 +327,8 @@ browser the way Jupyter does. One flat event stream is the contract between agen
 | `src/web/src/components/ChatHeader.tsx` | the active source, and switching it — nothing deeper |
 | `src/web/src/components/ServedModel.tsx` | the compiled model **and** this source's grounding, one list |
 | `src/web/src/components/ResultBlock.tsx` | one query's data: the table, the chart above it, CSV |
+| `src/web/src/components/FileBlock.tsx` | what a script wrote: images inline, everything else a download |
+| `src/web/src/components/Composer.tsx` | the question, and the files it arrives with |
 | `src/web/src/components/ResultChart.tsx` | line / bar / kpi as inline SVG, from a spec |
 | `src/web/src/components/Dashboard.tsx` | one board: the grid, the insight, and **the only Refresh** |
 | `src/web/src/components/Tile.tsx` | one tile: its chart or table, its window, its delta |
@@ -337,7 +367,13 @@ which is why charts needed **no new `EventType`**.
 answer. Scoped to the turn, not to the tail: the agent reasons *after* reading a result, so
 items arrive as `[… tool, result, thinking, text]` and a rule that only moved trailing
 results left the table above the answer. The trace stays above; only data moves down, and a
-turn that produced no answer keeps its results where they are rather than hiding them.
+turn that produced no answer keeps its results where they are rather than hiding them. A
+`files` item — what a script wrote — is lifted by the same rule and for the same reason: a
+chart the agent drew is evidence for the sentence about it.
+
+`files` needed **no new `EventType`** either. `run_python` names its files on its own `tool_end`
+as `wrote`, which is the `set_chart` argument again — paths only, because the file is on disk in
+the bind mount and the download route is how it is read.
 
 **The browser is separate products, so it is separate modes.** `Rail.tsx` owns the switch
 and the column beside it swaps whole — `ChatNav`, `DashboardNav` or `DataNav`, never two.
@@ -413,6 +449,11 @@ plaintext JSON and the file mode is the whole guard.
 One person on one machine: the token guard is the whole access story, and
 `cube/client.py`'s `LOCAL_CLAIMS` is the single literal signed into the Cube JWT.
 
+**A file is not a row.** An uploaded CSV, a chart a script drew and a file's profile all live in
+`DATA_DIR/workspaces/<chat>/`, and none of them has a table. That directory is bind-mounted into
+the sandbox, so a row describing it could only ever be a second copy of `ls` — and the copy is
+what would go stale. Deleting a chat takes the workspace with it (`scratch.remove`).
+
 ## Sources
 
 One Cube container per data source, and **one row in `sources` is the whole source** —
@@ -453,6 +494,22 @@ branch, at a time).
 
 ## Things that will cost you an hour
 
+- **`python-multipart` is a separate dependency and `UploadFile` fails at *request* time
+  without it.** Not at import, so the upload route looks like a working route until the first
+  file — `import multipart` raising `ModuleNotFoundError` is the whole diagnosis.
+- **`read_csv_auto` will read a PDF and report a shape for it.** duckdb sniffs anything as one
+  column of nonsense rather than refusing, so `profiler.view` matches named extensions and raises
+  for the rest. A confident wrong profile is worse than "not a tabular file".
+- **A literal `../` never reaches a route — every client collapses it before it is sent.** So
+  `GET /files/../../analyst.db` arrives as `/api/analyst.db` and answers 405, and a test written
+  that way proves nothing. The guard cannot be the URL's shape; it is `scratch.resolve` on the
+  *resolved* target, and the test has to percent-encode (`%2e%2e%2f`) to reach it at all.
+- **A file dropped anywhere but the drop target is *navigated to*, replacing the page.** So the
+  composer's listeners are on `window` rather than on itself — it only exists in the chat view, so
+  that is the right scope — and a drop lands in the composer wherever it was released.
+- **A run's new files cannot be a set difference of names.** A script that re-draws `chart.png`
+  adds no name, and the run whose picture is on screen would report having written nothing.
+  `scratch.snapshot` keys on `(size, mtime)` for exactly that.
 - **`get_stream_writer()` fails two different ways, and a unit test hid the second.** With
   no config at all it raises the documented `RuntimeError`. Calling a tool's own
   `.ainvoke()` outside a graph produces a config that exists but holds no runtime, and the
@@ -585,7 +642,9 @@ branch, at a time).
 - **`.container button` also matches buttons inside components nested in that container.**
   `.detail-primary button` was restyling the overflow menu's items into bordered grey
   boxes, because it is later in the file than `.menu-panel button` at equal specificity.
-  Use `>` when a container holds a child component that renders its own controls.
+  Use `>` when a container holds a child component that renders its own controls. `.composer
+  button` is the same trap sprung again — it paints Send, and it reached the ✕ on every
+  attachment chip, so both chip buttons are styled at `.composer .attach-*` to outrank it.
 - **`overflow-y: auto` computes `overflow-x` to `auto` as well.** An absolutely positioned
   popover wider than such a container does not spill out of it — it makes that container
   scroll sideways, and the content is unreachable. `Info` is `position: fixed` and placed
@@ -694,7 +753,9 @@ branch, at a time).
   `run.py` each meant two unrelated things at once, and a reader could not tell which from
   the import. Grep before naming: `cube.catalog` owns `Catalog`/`Entity`/`MemberDoc`/`Folder`
   for the *served* model, so the generation side is `Introspection`, `Definition`,
-  `MemberDescription` and `FolderDecision`.
+  `MemberDescription` and `FolderDecision`. An uploaded file's shape is a third such thing and is
+  `Profile`; the transcript block for what a script wrote is `files`/`.wrote` and not "artifact",
+  because "artefact" already means a grounding file on the sources page.
 - **No single-caller private helpers.** If a function has one call site, inline it —
   procedural flow reads better than a chain of one-use hops. Functions with two or more
   callers stay, especially where they exist to stop two code paths drifting

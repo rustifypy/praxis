@@ -30,9 +30,12 @@ export async function claimToken(): Promise<void> {
  * chat and the sources panel show the same quality of error.
  */
 export async function json<T>(path: string, init?: RequestInit): Promise<T> {
+  // An upload sends FormData, and the browser has to set that content type itself — it carries
+  // the multipart boundary, which nothing here can know.
+  const form = init?.body instanceof FormData;
   const response = await fetch(path, {
     ...init,
-    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
+    headers: form ? init?.headers : { "content-type": "application/json", ...(init?.headers ?? {}) },
   });
   const body = await response.text();
   if (!response.ok) {
@@ -80,6 +83,32 @@ export const resultPage = (id: string, offset: number, limit: number) =>
  *  bare `{result_id}` route and never reach this one. */
 export const resultCsvUrl = (id: string) => `/api/results/${id}/csv`;
 
+/** What one upload landed as. `rows` is 0 when the sandbox could not read it, and `note` says
+ *  why — an upload with no profile is still an upload. */
+export interface Upload {
+  path: string;
+  bytes: number;
+  rows: number;
+  columns: number;
+  note: string;
+}
+
+export async function uploadFile(chatId: string, file: File): Promise<Upload> {
+  const body = new FormData();
+  body.append("file", file);
+  return json<Upload>(`/api/chats/${chatId}/files`, { method: "POST", body });
+}
+
+/** A workspace file as a plain link, like the result CSV — the cookie authenticates it. */
+export const chatFileUrl = (chatId: string, path: string) =>
+  `/api/chats/${chatId}/files/${path.split("/").map(encodeURIComponent).join("/")}`;
+
+/** Take a file back off the workspace. Only the composer calls it, and only before the question
+ *  it was attached to has been sent — the prompt is built from the directory, so dropping the
+ *  chip without dropping the file would leave the agent still holding it. */
+export const deleteChatFile = (chatId: string, path: string) =>
+  json(chatFileUrl(chatId, path), { method: "DELETE" });
+
 /**
  * Stream one turn.
  *
@@ -90,12 +119,13 @@ export const resultCsvUrl = (id: string) => `/api/results/${id}/csv`;
 export async function* sendMessage(
   id: string,
   question: string,
+  files: string[],
   signal: AbortSignal,
 ): AsyncGenerator<AgentEvent> {
   const response = await fetch(`/api/chats/${id}/messages`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, files }),
     signal,
   });
   if (!response.body) throw new Error("no response body");

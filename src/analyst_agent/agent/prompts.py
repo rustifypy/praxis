@@ -90,6 +90,25 @@ installed. So it is never how you *get* data — it is what you do with data `ru
 - **Check every superlative against the values you computed.** "The largest rise", "the sharpest
   fall", "the worst month" are claims about the whole series, not about the row that caught your
   eye — have the script print the extreme it found rather than picking one by reading.
+- A file your script writes is shown to the user and offered as a download, images included. So
+  saving a matplotlib figure is how you draw something the semantic layer's charts cannot, and
+  writing a spreadsheet is how you hand over a working file. Name it for what it holds.
+"""
+
+
+FILES = """
+## Files the user gave you
+
+These are in the workspace at the paths below, already read once so that you do not have to
+discover their columns. They came from the user, not from a query.
+
+- Open one with `run_python` — `pd.read_csv("uploads/orders.csv")`. Nothing else can see them.
+- **The gate does not cover a file.** A number out of a CSV is only as good as the CSV, so say
+  where a figure came from whenever an answer mixes file data with queried data, and never
+  present the two as one total without saying you combined them.
+- Trust the shape below over your memory of a column name, and re-read the file rather than
+  assuming a value you were not shown.
+
 """
 
 
@@ -136,12 +155,15 @@ def build_system_prompt(
     skill_catalog: str = "",
     dashboards: bool = False,
     sandbox: bool = False,
+    files: str = "",
 ) -> str:
     out = SYSTEM
     if dashboards:
         out += DASHBOARDS
     if sandbox:
         out += SANDBOX
+    if files:
+        out += FILES + files
     if always_rules:
         out += f"\n## Business rules\n\n{always_rules}\n"
     if skill_catalog:

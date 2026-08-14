@@ -152,6 +152,136 @@ async def test_deleting_a_chat_takes_its_workspace_with_it(api, tmp_path):
     assert not workspace.exists()
 
 
+# --- files in and out of a workspace -----------------------------------------
+
+
+@pytest.fixture
+def unprofiled(monkeypatch):
+    """Profiling runs a script in the sandbox, and this suite starts no containers. What the
+    route does with the answer is what is asserted here; the profile itself is its own test."""
+    from analyst_agent.sandbox.profile import Profile
+    from analyst_agent.web import files
+
+    async def fake(chat_id: str, path: str) -> Profile:
+        return Profile(path=path, bytes=4, rows=2, note="not profiled")
+
+    monkeypatch.setattr(files.profile, "of", fake)
+
+
+async def upload(api, chat_id: str, name: str, body: bytes = b"a,b\n1,2\n"):
+    return await api.post(f"/api/chats/{chat_id}/files", files={"file": (name, body, "text/csv")})
+
+
+async def test_an_uploaded_file_lands_in_the_chats_workspace(api, unprofiled, tmp_path):
+    chat = (await api.post("/api/chats", json={})).json()
+    body = (await upload(api, chat["id"], "orders.csv")).json()
+
+    assert body["path"] == "uploads/orders.csv"
+    written = tmp_path / "workspaces" / chat["id"] / "uploads" / "orders.csv"
+    assert written.read_bytes() == b"a,b\n1,2\n"
+
+
+async def test_a_browser_filename_cannot_choose_where_the_file_goes(api, unprofiled, tmp_path):
+    """The name is untrusted input. `save_upload` takes the basename and `scratch.resolve`
+    checks the resolved target, which is the one check that covers `..`, an absolute path and a
+    symlink."""
+    chat = (await api.post("/api/chats", json={})).json()
+    secret = tmp_path / "analyst.db"
+    before = secret.read_bytes()
+
+    for name in ("../../analyst.db", "/etc/passwd", "a/../../b.csv"):
+        body = (await upload(api, chat["id"], name)).json()
+        assert body["path"].startswith("uploads/")
+        assert "/" not in body["path"][len("uploads/") :]
+    assert secret.read_bytes() == before
+
+
+async def test_a_dotted_filename_does_not_land_invisible(api, unprofiled):
+    """`scratch.listing` skips dotted paths, so `.secret.csv` would be on disk and invisible to
+    the agent, to the snapshot and to the profiler — an upload that appears to have worked."""
+    chat = (await api.post("/api/chats", json={})).json()
+    body = (await upload(api, chat["id"], ".secret.csv")).json()
+    assert body["path"] == "uploads/secret.csv"
+
+
+async def test_uploading_the_same_name_twice_keeps_both(api, unprofiled):
+    """A figure in an earlier answer came from the earlier file. Numbered, like a saved script."""
+    chat = (await api.post("/api/chats", json={})).json()
+    first = (await upload(api, chat["id"], "orders.csv")).json()
+    second = (await upload(api, chat["id"], "orders.csv")).json()
+    assert (first["path"], second["path"]) == ("uploads/orders.csv", "uploads/orders-2.csv")
+
+
+async def test_a_file_over_the_cap_is_refused_with_the_limit_named(api, unprofiled):
+    from analyst_agent.web import files
+
+    chat = (await api.post("/api/chats", json={})).json()
+    response = await upload(api, chat["id"], "big.csv", b"x" * (files.MAX_BYTES + 1))
+    assert response.status_code == 413
+    assert "100 MB" in response.json()["detail"]
+
+
+async def test_uploading_to_an_unknown_chat_is_a_404(api, unprofiled):
+    assert (await upload(api, "ghost", "orders.csv")).status_code == 404
+
+
+async def test_a_written_file_comes_back_out(api):
+    """The workspace is the store — there is no table behind this, and the route is a read
+    through the same `resolve` the tools use."""
+    from analyst_agent.sandbox import scratch
+
+    chat = (await api.post("/api/chats", json={})).json()
+    (scratch.ensure(chat["id"]) / "chart.png").write_bytes(b"\x89PNG\r\n")
+
+    response = await api.get(f"/api/chats/{chat['id']}/files/chart.png")
+    assert response.status_code == 200
+    assert response.content == b"\x89PNG\r\n"
+    assert response.headers["content-type"] == "image/png"
+    # Inline, so the transcript can render it as an image rather than downloading it.
+    assert "content-disposition" not in response.headers
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+
+async def test_a_csv_is_a_download_and_a_missing_file_is_a_404_not_a_400(api):
+    from analyst_agent.sandbox import scratch
+
+    chat = (await api.post("/api/chats", json={})).json()
+    (scratch.ensure(chat["id"]) / "summary.csv").write_text("a,b\n")
+
+    served = await api.get(f"/api/chats/{chat['id']}/files/summary.csv")
+    assert "attachment" in served.headers["content-disposition"]
+
+    assert (await api.get(f"/api/chats/{chat['id']}/files/nope.csv")).status_code == 404
+    # Percent-encoded, because every client collapses a literal `../` before it is sent — which
+    # is exactly why the guard cannot be the URL's shape. `resolve` checks the resolved target.
+    escape = await api.get(f"/api/chats/{chat['id']}/files/%2e%2e%2f%2e%2e%2fanalyst.db")
+    assert escape.status_code == 400
+    assert "outside the workspace" in escape.json()["detail"]
+
+
+async def test_a_file_can_be_taken_back_before_the_question_is_sent(api, unprofiled):
+    """The composer's ✕. The prompt is built from the directory, so dropping the chip without
+    dropping the file would leave the agent still holding it."""
+    from analyst_agent.sandbox import profile, scratch
+
+    chat = (await api.post("/api/chats", json={})).json()
+    path = (await upload(api, chat["id"], "orders.csv")).json()["path"]
+    assert scratch.uploaded(chat["id"]) == [path]
+
+    assert (await api.delete(f"/api/chats/{chat['id']}/files/{path}")).status_code == 200
+    assert scratch.uploaded(chat["id"]) == []
+    assert profile.saved(chat["id"]) == []
+    assert (await api.delete(f"/api/chats/{chat['id']}/files/{path}")).status_code == 404
+
+
+async def test_a_dotted_filename_does_not_swallow_the_download_route(api):
+    """`{path:path}` under a chat, and the fixed segments above it still match first."""
+    routes = {getattr(r, "path", "") for r in server.app.routes}
+    assert "/api/chats/{chat_id}/events" in routes
+    chat = (await api.post("/api/chats", json={})).json()
+    assert (await api.get(f"/api/chats/{chat['id']}/events")).json() == []
+
+
 # --- results: the rows the event does not carry ------------------------------
 
 COLUMNS = [

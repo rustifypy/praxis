@@ -2,6 +2,7 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 
 from ..core.llm import build_model
+from ..sandbox import profile
 from .middleware import AuditLog, CompactionNotice
 from .prompts import build_editor_prompt, build_system_prompt
 from .session import Session
@@ -40,6 +41,9 @@ def build_agent(
             skill_catalog=session.grounding.catalog_lines(),
             dashboards=True,
             sandbox=True,
+            files="\n\n".join(p.as_prompt() for p in profile.saved(session.chat_id))
+            if session.chat_id
+            else "",
         ),
         middleware=[
             AuditLog(),

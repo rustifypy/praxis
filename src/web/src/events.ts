@@ -55,7 +55,10 @@ export function applyEvent(items: Item[], event: AgentEvent): Item[] {
 
   switch (event.type) {
     case "user":
-      return [...settle(items), { kind: "user", text: whole ?? "" }];
+      return [
+        ...settle(items),
+        { kind: "user", text: whole ?? "", files: event.data.files ?? [] },
+      ];
 
     case "thinking":
       return (
@@ -91,11 +94,14 @@ export function applyEvent(items: Item[], event: AgentEvent): Item[] {
         settled.findLastIndex((item) => item.kind === "user" || item.kind === "answer") + 1;
       const turn = settled.slice(start);
       const answer: Item = { kind: "answer", text: delta ?? whole ?? "", live: streaming };
+      // Files a script wrote move with the results, for the same reason: a chart the agent drew
+      // is evidence for the sentence about it, and the tool event carrying it arrived first.
+      const data = (item: Item) => item.kind === "result" || item.kind === "files";
       return [
         ...settled.slice(0, start),
-        ...turn.filter((item) => item.kind !== "result"),
+        ...turn.filter((item) => !data(item)),
         answer,
-        ...turn.filter((item) => item.kind === "result"),
+        ...turn.filter(data),
       ];
     }
 
@@ -137,6 +143,11 @@ export function applyEvent(items: Item[], event: AgentEvent): Item[] {
           rowCount: end.rows_total ?? end.preview.length,
           chart: end.chart ?? null,
         });
+      }
+      // A file a script wrote earns a block too — otherwise a chart it drew is a file nobody
+      // knows exists. `wrote` is paths; the block fetches each one from the workspace.
+      if (tool.tool === "run_python" && end.wrote?.length) {
+        next.push({ kind: "files", label: tool.label, paths: end.wrote });
       }
       // The agent overriding the chart it was given. It authors its own tool events like
       // everything else, so this needs no new event type — and it lands on the newest
