@@ -7,22 +7,16 @@ from dataclasses import asdict
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from ..agent.build import SecurityContext
-from ..config import settings
+from ..core.config import settings
 from ..cube.client import CubeClient, CubeError
 from ..cube.shape import Column
 from ..dashboards import delta
 from ..dashboards import layout as layouts
-from ..dashboards import run as runner
+from ..dashboards import refresh as runner
 from ..dashboards import tiles as tilecheck
 from ..dashboards.store import DashboardStore
 
 router = APIRouter(prefix="/api/dashboards")
-
-# Resolved server-side and never read off a header — it is signed into the Cube JWT, so a
-# trusted header would be the hole under any row-level security added later. The same
-# hardcoded local identity `sources.py` uses.
-OWNER = SecurityContext(user_id="local")
 
 
 class NewDashboard(BaseModel):
@@ -40,11 +34,19 @@ async def init_state(app) -> None:
     app.state.dashboards = store
 
 
+async def active_name(request: Request) -> str:
+    """The source `CUBE_URL` points at, or "" when it points outside the registry. Resolved
+    here because the registry is the web layer's to reach — `dashboards` takes it as an
+    argument so that package can stay ignorant of `sources`."""
+    active = await request.app.state.sources.active()
+    return active.name if active else ""
+
+
 @router.get("")
 async def list_dashboards(request: Request) -> list[dict]:
     store = request.app.state.dashboards
     out = []
-    for board in await store.list_dashboards(OWNER.user_id):
+    for board in await store.list_dashboards():
         tiles = await store.tiles(board.id)
         last = await store.latest_run(board.id)
         out.append(
@@ -60,14 +62,14 @@ async def list_dashboards(request: Request) -> list[dict]:
 @router.post("")
 async def create_dashboard(body: NewDashboard, request: Request) -> dict:
     """Binds to the source the portal is querying; without one its tiles query nothing."""
-    active = await runner.active_source_name()
+    active = await active_name(request)
     if not active:
         raise HTTPException(
             400,
             "No registered source is active. Set CUBE_URL to a source in the registry and "
             "restart before creating a dashboard.",
         )
-    board = await request.app.state.dashboards.create(body.title, active, OWNER.user_id)
+    board = await request.app.state.dashboards.create(body.title, active)
     return board.__dict__
 
 
@@ -123,11 +125,12 @@ async def read_dashboard(dashboard_id: str, request: Request) -> dict:
     # Asked once. A mismatch also skips the compile pass — checking tiles against another
     # source's catalog reports every member as missing, which reads as a broken dashboard
     # rather than as the wrong database.
-    mismatch = await runner.source_mismatch(board.source_name)
+    active = await active_name(request)
+    mismatch = runner.source_mismatch(board.source_name, active)
     checks = (
         {"available": False, "reason": mismatch, "broken": []}
         if mismatch
-        else await _checks(dashboard_id, store, request.app.state.cube)
+        else await _checks(dashboard_id, store, request.app.state.cube, active)
     )
 
     return {
@@ -162,12 +165,14 @@ async def read_dashboard(dashboard_id: str, request: Request) -> dict:
     }
 
 
-async def _checks(dashboard_id: str, store: DashboardStore, cube: CubeClient) -> dict:
+async def _checks(dashboard_id: str, store: DashboardStore, cube: CubeClient, active: str) -> dict:
     """Compile every tile without executing it, and never fail the page for trying. Turns a
     member dropped by a model rebuild into a banner on arrival."""
     try:
         catalog = await cube.catalog()
-        outcome = await runner.validate(dashboard_id, store, catalog, cube, settings.max_rows)
+        outcome = await runner.validate(
+            dashboard_id, store, catalog, cube, settings.max_rows, active_name=active
+        )
     except CubeError as exc:
         # The session wraps transport failures, so a stopped container arrives here rather than
         # as a ConnectError — which once escaped an `except OSError` and 500'd the page.
@@ -200,9 +205,12 @@ async def refresh_dashboard(dashboard_id: str, request: Request) -> dict:
     """Execute every tile's stored query. Atomic: all of them compile, or none of them run."""
     store = request.app.state.dashboards
     cube = request.app.state.cube
+    active = await active_name(request)
     try:
         catalog = await cube.catalog()
-        outcome = await runner.refresh(dashboard_id, store, catalog, cube, settings.max_rows)
+        outcome = await runner.refresh(
+            dashboard_id, store, catalog, cube, settings.max_rows, active_name=active
+        )
     except CubeError as exc:
         # 502 rather than 500: the container being down is not this server malfunctioning,
         # and the message is what the button shows.

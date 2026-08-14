@@ -3,12 +3,11 @@
 import pytest
 import yaml
 
-from analyst_agent.chat.store import ChatStore
+from analyst_agent.agent.tools import editor as tools
 from analyst_agent.dashboards.store import DashboardStore
-from analyst_agent.sources import registry
-from analyst_agent.sources.edit import tools
-from analyst_agent.sources.model import vcs
+from analyst_agent.sources import registry, vcs
 from analyst_agent.sources.registry import Source
+from analyst_agent.transcript import ChatStore
 
 SOURCE = Source(name="shop", description="", driver="postgres", port=4001)
 ALBUM = {
@@ -122,9 +121,9 @@ async def test_editor_chats_are_not_in_the_chat_list(tmp_path):
     store = ChatStore(tmp_path / "analyst.db")
     await store.init()
     await store.create("What was revenue?")
-    edit = await store.create_model_chat("shop", "add-margin")
+    edit = await store.create("Editing add-margin", "shop", "model", "add-margin")
 
     assert [c.title for c in await store.list_chats()] == ["What was revenue?"]
-    assert [c["id"] for c in await store.model_chats("shop")] == [edit.id]
-    assert await store.model_chat_source(edit.id) == "shop"
-    assert await store.model_chat_source("nope") == ""
+    assert [c.id for c in await store.list_chats("model", "shop")] == [edit.id]
+    assert (await store.get(edit.id)).source_name == "shop"
+    assert await store.get("nope") is None

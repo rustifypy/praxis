@@ -4,16 +4,16 @@ from dataclasses import MISSING, fields
 import pytest
 
 from analyst_agent.sources import registry
-from analyst_agent.sources.model.decide import (
+from analyst_agent.sources.modelgen.decide import (
     CubeDecision,
     Enrichment,
     MeasureDecision,
-    MemberDoc,
+    MemberDescription,
     ViewCube,
     ViewDecision,
 )
-from analyst_agent.sources.model.state import dump_schema, load_schema
-from analyst_agent.sources.model.warehouse import Column, ForeignKey, Schema, Table
+from analyst_agent.sources.modelgen.state import dump_schema, load_schema
+from analyst_agent.sources.modelgen.warehouse import Column, ForeignKey, Schema, Table
 from analyst_agent.sources.registry import Source
 from analyst_agent.sources.store import (
     STEPS,
@@ -256,7 +256,7 @@ ENRICHMENT = Enrichment(
     cubes={
         "invoice_line": CubeDecision(
             description="One line of an invoice.",
-            members=[MemberDoc(name="unit_price", description="Price per unit.")],
+            members=[MemberDescription(name="unit_price", description="Price per unit.")],
             measures=[
                 MeasureDecision(
                     column="unit_price",

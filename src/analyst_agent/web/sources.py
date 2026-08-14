@@ -8,13 +8,13 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from ..config import settings
+from ..core.config import settings
 from ..cube.client import CubeError, catalog_of
-from ..grounding import for_source
-from ..sources import docker, model
+from ..sources import docker, modelgen, vcs
 from ..sources.drivers import credentials_for, get, split_mounts
-from ..sources.edit import edits, workspace
-from ..sources.model import selection, vcs
+from ..sources.editing import edits, workspace
+from ..sources.grounding import for_source
+from ..sources.modelgen import selection
 from ..sources.registry import Source, next_port, scaffold_source_dirs, validate_new
 from ..sources.store import merge_credentials
 from .state import find, view
@@ -80,7 +80,8 @@ async def source_catalog(name: str, request: Request) -> dict:
     await find(request, name)
     state = await store.state(name)
     catalog = {
-        schema: model.state.load_schema(raw) for schema, raw in (state.get("catalog") or {}).items()
+        schema: modelgen.state.load_schema(raw)
+        for schema, raw in (state.get("catalog") or {}).items()
     }
     return {
         "read": bool(catalog),
@@ -217,7 +218,7 @@ async def closure(name: str, body: TableSelection, request: Request) -> dict:
     raw = (await request.app.state.sources.state(name)).get("catalog") or {}
     if body.schema_name not in raw:
         raise HTTPException(404, f"schema {body.schema_name!r} has not been read")
-    schema = model.state.load_schema(raw[body.schema_name])
+    schema = modelgen.state.load_schema(raw[body.schema_name])
     picked = body.tables or []
     chosen = sorted(selection.closure(schema, picked))
     return {

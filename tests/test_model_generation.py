@@ -2,12 +2,12 @@
 
 import yaml
 
-from analyst_agent.sources.model import build, publish
-from analyst_agent.sources.model.decide import (
+from analyst_agent.sources.modelgen import build, publish
+from analyst_agent.sources.modelgen.decide import (
     CubeDecision,
-    Folder,
+    FolderDecision,
     MeasureDecision,
-    MemberDoc,
+    MemberDescription,
     ViewCube,
     ViewDecision,
     exposed_members,
@@ -16,7 +16,7 @@ from analyst_agent.sources.model.decide import (
     validate_paths,
     validate_views,
 )
-from analyst_agent.sources.model.warehouse import Column, ForeignKey, Schema, Table
+from analyst_agent.sources.modelgen.warehouse import Column, ForeignKey, Schema, Table
 
 
 def col(name, data_type="integer", distinct=None, null_fraction=None):
@@ -310,7 +310,7 @@ def test_two_measures_with_one_name_keep_the_first():
 def test_documentation_for_unknown_members_is_dropped():
     schema = chinook()
     decision, _ = validate_cube(
-        CubeDecision(description="", members=[MemberDoc(name="nope", description="x")]),
+        CubeDecision(description="", members=[MemberDescription(name="nope", description="x")]),
         schema.table("album"),
         _menu(schema),
     )
@@ -401,7 +401,7 @@ def test_folders_keep_only_exposed_members():
         description="",
         ai_context="",
         cubes=[ViewCube(join_path="invoice_line", includes=["count", "quantity"])],
-        folders=[Folder(name="Volume", includes=["count", "ghost"])],
+        folders=[FolderDecision(name="Volume", includes=["count", "ghost"])],
     )
     kept, _ = validate_views([view], _fake_roots(available), {})
     assert kept[0].folders[0].includes == ["count"]
@@ -460,7 +460,9 @@ def test_descriptions_and_ai_context_land_on_members():
         CubeDecision(
             description="One album.",
             members=[
-                MemberDoc(name="title", description="Album title.", ai_context="Prefer this.")
+                MemberDescription(
+                    name="title", description="Album title.", ai_context="Prefer this."
+                )
             ],
         ),
     )

@@ -1,4 +1,4 @@
-"""Dashboards, tiles, layouts and refresh history, in `analyst.db`. The schema is in `db.py`
+"""Dashboards, tiles, layouts and refresh history, in `analyst.db`. The schema is in `core/db.py`
 with the rest of that file's tables — see there for why it is not beside this module.
 """
 
@@ -11,8 +11,8 @@ from typing import Literal, get_args
 
 from pydantic import validate_call
 
-from ..config import settings
-from ..db import SCHEMA, connect
+from ..core.config import settings
+from ..core.db import SCHEMA, connect
 
 ROWS_KEPT = 2
 """Runs deep a tile keeps its rows — what a delta against the previous refresh needs."""
@@ -20,8 +20,7 @@ ROWS_KEPT = 2
 Status = Literal["validating", "running", "ok", "refused", "failed"]
 """`refused` is tiles that did not compile, and nothing ran; `failed` is tiles that compiled
 and then broke. Separate because only the first is fixable by editing a tile. Annotating with
-this refuses an unknown one, so neither writer tests the tuple — they had that test twice, ten
-lines apart.
+this refuses an unknown one, so no writer has to test the tuple itself.
 """
 STATUSES: tuple[Status, ...] = get_args(Status)
 
@@ -30,7 +29,6 @@ STATUSES: tuple[Status, ...] = get_args(Status)
 class Dashboard:
     id: str
     title: str
-    owner_id: str
     source_name: str
     created_at: float
     updated_at: float
@@ -89,32 +87,28 @@ class DashboardStore:
 
     # --- dashboards ---------------------------------------------------------------
 
-    async def create(self, title: str, source_name: str, owner_id: str = "local") -> Dashboard:
+    async def create(self, title: str, source_name: str) -> Dashboard:
         now = time.time()
         board = Dashboard(
             id=uuid.uuid4().hex,
             title=title,
-            owner_id=owner_id,
             source_name=source_name,
             created_at=now,
             updated_at=now,
         )
         async with self._db() as db:
             await db.execute(
-                "INSERT INTO dashboards (id, title, owner_id, source_name, created_at, "
-                "updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (board.id, title, owner_id, source_name, now, now),
+                "INSERT INTO dashboards (id, title, source_name, created_at, "
+                "updated_at) VALUES (?, ?, ?, ?, ?)",
+                (board.id, title, source_name, now, now),
             )
             await db.commit()
         return board
 
     # Not `list` — that name shadows the builtin for every annotation later in the class body.
-    async def list_dashboards(self, owner_id: str = "local") -> list[Dashboard]:
+    async def list_dashboards(self) -> list[Dashboard]:
         async with self._db() as db:
-            rows = await db.execute_fetchall(
-                "SELECT * FROM dashboards WHERE owner_id = ? ORDER BY updated_at DESC",
-                (owner_id,),
-            )
+            rows = await db.execute_fetchall("SELECT * FROM dashboards ORDER BY updated_at DESC")
         return [Dashboard(**dict(r)) for r in rows]
 
     async def get(self, dashboard_id: str) -> Dashboard | None:

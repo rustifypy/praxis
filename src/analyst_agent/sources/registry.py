@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..config import settings
+from ..core.config import settings
 from .drivers import Driver, get, missing_fields
 
 MODEL_ROOT = "cube/sources"

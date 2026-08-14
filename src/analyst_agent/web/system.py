@@ -5,8 +5,8 @@ import asyncio
 
 from fastapi import APIRouter, HTTPException, Request
 
-from ..config import settings
-from ..sources import docker, model
+from ..core.config import settings
+from ..sources import docker, modelgen
 from ..sources.drivers import DRIVERS, LOCAL_HOSTS, LOCALHOST_NOTE, required_envs
 from ..sources.registry import NAME_PATTERN
 
@@ -47,7 +47,7 @@ async def drivers() -> dict:
             {
                 "key": spec.key,
                 "label": spec.label,
-                "extracts_tables": key in model.read.DIALECTS,
+                "extracts_tables": key in modelgen.read.DIALECTS,
                 "required_envs": required_envs(spec),
                 "fields": [
                     {

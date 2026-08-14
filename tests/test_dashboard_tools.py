@@ -8,7 +8,8 @@ event-shape assertions need to observe.
 
 import pytest
 
-from analyst_agent.dashboards import layout, tools
+from analyst_agent.agent.tools import dashboards as tools
+from analyst_agent.dashboards import layout
 from analyst_agent.dashboards.store import DashboardStore, Tile
 
 QUERY = {"measures": ["orders.net_revenue"], "dimensions": ["orders.status"]}

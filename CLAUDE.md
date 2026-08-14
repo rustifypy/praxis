@@ -40,9 +40,42 @@ The launcher cannot be replaced by pointing uvicorn at the app. `web.server.TOKE
 minted at import and nothing else announces it, so `uvicorn analyst_agent.web.server:app`
 serves a portal nobody can authenticate against.
 
-## Five subsystems
+## Layering
 
-**Query time** (`cube/`, `agent/`, `grounding.py`) — the agent answers
+Packages are tiered, and **a package may import only its own tier or below**.
+`tests/test_layering.py` parses the imports and asserts it; it is not a convention.
+
+| tier | package | may reach |
+|---|---|---|
+| 0 | `core/` | nothing in this project |
+| 1 | `cube/`, `transcript.py`, `sandbox/` | core |
+| 2 | `dashboards/` | core, cube |
+| 3 | `sources/` | core, cube, dashboards |
+| 4 | `agent/` | core, cube, transcript, dashboards, sources |
+| 5 | `web/` | anything |
+
+`core/` is settings, the database file, the event format, the chat model, the job runner and
+the subprocess wrapper — **and it is a junk drawer the moment that rule is relaxed**, so the
+membership test is exactly "imports nothing from this project except its siblings."
+
+`core.llm.build_model` and `core.events.emit` are the two that make the rule load-bearing:
+nearly everything needs them, so whichever package holds them is one every other package
+must depend on. Put either in a feature package and that feature is imported by its peers.
+
+Three rules keep the tiers honest when a feature wants to cross one:
+
+- **A tool is agent vocabulary wherever the state it edits lives.** All three toolsets are in
+  `agent/tools/`, importing the stores they write through.
+- **What a lower tier cannot look up, it takes as an argument.** `dashboards.refresh` is
+  handed `active_name`; it never opens the registry. That is the whole reason `dashboards`
+  and `sources` are orderable at all.
+- **Annotate against a shape, not a package.** `cube.client.Addressable` is "somewhere to
+  send a request", so the Cube client does not name the registry that depends on it. An
+  import inside `if TYPE_CHECKING:` is a cycle that has not failed yet, not a solution.
+
+## Six subsystems
+
+**Query time** (`cube/`, `agent/`, `sources/grounding.py`) — the agent answers
 questions about **one** source: `CUBE_URL` picks it, `grounding.for_active_source` is
 the only place that resolves it, and its grounding is whatever that source carries.
 It never writes SQL. It emits Cube JSON queries that pass a four-tier gate
@@ -61,9 +94,9 @@ with the agent writing Semantic SQL, for the expressiveness a fixed schema canno
 Do not follow them without deciding what happens to the gate: tier 2 can check operators,
 granularities and WHERE/HAVING mixing precisely *because* it is inspecting a `CubeQuery`,
 and none of it survives parsing SQL. The expressiveness gap is real — `CubeQuery` is
-`extra="forbid"` with no `ungrouped`, so a ratio or a period delta cannot be expressed and
-the model does that arithmetic in prose today. Deterministic post-processing over rows that
-already passed the gate is the way to close it without giving up the gate.
+`extra="forbid"` with no `ungrouped`, so a ratio or a period delta cannot be expressed. That gap
+is closed the way it should be: post-processing over rows that already passed the gate, in the
+sandbox, rather than by widening what the gate inspects. See **Code execution** below.
 
 Grounding is **per source and has no global layer** — it names members, so one shared
 set is wrong the moment there are two warehouses, and the agent was being handed
@@ -72,18 +105,19 @@ set is wrong the moment there are two warehouses, and the agent was being handed
 source row behind it grounds on nothing rather than erroring, which is what
 `Grounding.is_empty` is for.
 
-**Model generation** (`sources/model/`) — builds the Cube data model a source exposes:
+**Model generation** (`sources/modelgen/`) — builds the Cube data model a source exposes.
+`modelgen` and not `model`, because "model" in this codebase is also the LLM:
 
 | module | stage |
 |---|---|
 | `warehouse.py` | the vocabulary: `Column`, `Table`, `Schema` |
-| `read.py` | probe container → `Catalog` (every schema: keys, columns, statistics) |
+| `read.py` | probe container → `Introspection` (every schema: keys, columns, statistics). Not `Catalog` — that name is `cube.catalog.Catalog`, the *served* model, which is close to the opposite thing |
 | `selection.py` | which tables to model, as a filter on one `Schema` |
 | `build.py` | `Schema` → cube bodies + the menu of choices (pure, no LLM) |
 | `decide.py` | LLM descriptions/measures/views, and the guards on them |
 | `publish.py` | decisions → YAML, then write/restart/validate |
 | `state.py` | what one step leaves for the next, as JSON |
-| `run.py` | the four steps, and `generate()` for all of them in order |
+| `steps.py` | the four steps, and `generate()` for all of them in order |
 
 Three invariants hold throughout: **the LLM returns decisions, never YAML** (pydantic
 objects via `with_structured_output`, then checked against a derived menu); **Cube is the
@@ -94,7 +128,7 @@ minutes or days apart, so each writes what the next needs into the `sources` row
 `publish.install` is the only way a model reaches a container: write → restart → ask.
 
 **Four steps, not one pass.** `connect` → `cubes` → `describe` → `views`, each runnable
-on its own and re-runnable. **`run.action` is the only way to run one** — a caller
+on its own and re-runnable. **`steps.action` is the only way to run one** — a caller
 chooses *which* actions and in what order, never how, so nothing can drift on the order
 rule (a step needs the previous one done) or on what a failed step records.
 `read` is a fifth action with no step row: it produces the catalog the picker needs, so
@@ -104,8 +138,8 @@ it must be triggerable alone, and `cubes` runs it itself when nothing is cached.
 a foreign key whose target is absent (it was written that way for keys into another
 schema), and a deselected table is indistinguishable from that.
 
-**Editing & branching** (`sources/edit/{edits,impact,tools,workspace}.py`,
-`sources/model/vcs.py`, `web/model_edit.py`,
+**Editing & branching** (`sources/editing/{edits,impact,workspace}.py`,
+`sources/vcs.py`, `agent/tools/editor.py`, `web/model_edit.py`,
 `src/web/src/components/{ModelEditor,EditorChat}.tsx`) — a source's model directory is a git
 repo, and the checked-out branch is what the container serves, because the directory is a bind
 mount rather than something copied in. There is no per-branch endpoint the way Cube Cloud has
@@ -114,11 +148,11 @@ one mount rather than a sandbox beside it.
 
 | module | role |
 |---|---|
-| `model/vcs.py` | git as a subprocess against the model directory — branches, diff, merge, and `files_at` for reading main's blobs out of `.git` without checking main out. Under `model/` and not `edit/` because `publish.install` versions what it writes |
+| `sources/vcs.py` | git as a subprocess against the model directory — branches, diff, merge, and `files_at` for reading main's blobs out of `.git` without checking main out. Beside `modelgen/` and `editing/` rather than inside either: generation commits what it writes and editing branches off it |
 | `edits.py` | tiers 1-2: valid YAML, then append-only cubes vs. freely-rewritable views, diffed against **main**, never against the branch's own previous state |
-| `workspace.py` | the directory as a working tree: `write` and `delete`, which both the HTTP routes and the editor agent's tools go through — that shared path is what stops the two drifting, and they had drifted |
+| `workspace.py` | the directory as a working tree: `write` and `delete`, which both the HTTP routes and the editor agent's tools go through — one path, so the two cannot disagree on what a valid edit is |
 | `impact.py` | every dashboard tile and certified query bound to the source, checked against the *served* catalog — not a member-diff of main against the branch, because "is what this tile reads still here" is the question that survives whatever caused the breakage |
-| `tools.py` | the editor agent's six tools — no merge, checkout or branch-create; those restart the container and land work, so they stay buttons on the page |
+| `agent/tools/editor.py` | the editor agent's six tools — no merge, checkout or branch-create; those restart the container and land work, so they stay buttons on the page |
 | `web/model_edit.py` | the HTTP surface: branches, files, validate (tier 3), commit, merge, and the editor chat |
 
 Two invariants:
@@ -147,7 +181,7 @@ three invariants; read it before changing anything here:
 
 1. **The row is the truth, and a tool event carries only intent.** A dashboard is mutable
    state and the chat's contract is that the event log *is* the transcript; both cannot
-   be true of a layout the agent edits. So `tools._start`/`_end` are the only way these
+   be true of a layout the agent edits. So `agent.tools.dashboards._start`/`_end` are the only way these
    tools reach the stream and **have no parameter that could carry a layout, a tile list
    or a chart spec** — that is the enforcement, not a rule to remember. `EVENT_KEYS`
    asserts it. Undo comes from `layouts` being append-only instead.
@@ -165,10 +199,10 @@ three invariants; read it before changing anything here:
 | `store.py` | `dashboards`/`tiles`/`layouts`/`runs`/`tile_results` in `analyst.db` |
 | `tiles.py` | what a valid tile is: `validate` at authoring, `outgrown` on every refresh |
 | `layout.py` | placement only; a partial layout is *completed*, never treated as hiding |
-| `run.py` | `validate` (tiers 1-3) and `refresh` (+ tier 4), the atomic pass |
+| `refresh.py` | `validate` (tiers 1-3) and `refresh` (+ tier 4), the atomic pass. Takes the active source's name rather than resolving it, so this package never imports `sources` |
 | `delta.py` | change since the previous refresh, single-row results only |
 | `insights.py` | one model call per refresh for the whole board, never per tile |
-| `tools.py` | the eight agent tools — which do **not** include refreshing |
+| `agent/tools/dashboards.py` | the eight agent tools — which do **not** include refreshing |
 | `web/dashboards.py` | the HTTP surface; refresh lives here and nowhere else |
 
 **The agent authors and arranges; the page runs.** Refresh is a button, deliberately: an
@@ -186,7 +220,7 @@ renderer cannot draw makes the tile misrepresent itself. **Renderer branch first
 second.** (`tools.add_tile`'s docstring still advertises the wider list to the model; the
 validator refuses it, so the failure is a rejection rather than a wrong picture.)
 
-`db.SCHEMA` will **never gain a column** — `CREATE TABLE IF NOT EXISTS` does not diff, so
+`core.db.SCHEMA` will **never gain a column** — `CREATE TABLE IF NOT EXISTS` does not diff, so
 adding a table to a live `analyst.db` works and adding a column silently does not. There is
 no migration mechanism and deliberately so: this runs on one machine for one person, and
 recreating the database is a cheaper answer than a chain nobody else will ever run. Every
@@ -201,15 +235,64 @@ rearranging is chat-only); per-tile insights (`tile_results.insight`, rejected a
 model calls for a weaker result than the one cross-tile paragraph); promoting a tile to a
 `certified_queries/` file.
 
-**The web portal** (`chat/`, `web/`, `src/web/`) — `analyst` opens a browser the way
-Jupyter does. One flat event stream is the contract between agent and browser:
+**Code execution** (`sandbox/`, `agent/tools/code.py`) — a Python sandbox on the *query* agent,
+not an agent of its own. `sandbox/__init__.py` holds the three invariants; read it before changing
+anything here.
 
 | module | role |
 |---|---|
-| `chat/events.py` | the `Event` schema and `emit()` — the wire format |
-| `chat/store.py` | the `chats` and `events` tables, and the LangGraph checkpointer beside them |
+| `sandbox/container.py` | one `docker run` and one `docker exec`, as pure argv plus lifecycle |
+| `sandbox/scratch.py` | one chat's directory, the only place a model-supplied path may land, and where saved scripts and trimmed output go |
+| `sandbox/image/Dockerfile` | the analysis stack, built on demand and tagged by its own digest |
+| `agent/tools/code.py` | two tools: `export_result` and `run_python` |
+
+**`--network none` is what keeps the gate load-bearing, not a second agent.** `run_query` and a
+Python interpreter are in the same hands, and that is safe because the sandbox cannot reach Cube or
+the warehouse — there is no route to a number that did not come through the four tiers.
+`export_result` is the only way rows cross over. What this buys is the arithmetic a `CubeQuery`
+cannot express — a ratio, a period delta, a share of a total — which CLAUDE.md listed as an open
+gap and the agent was doing in prose.
+
+**Two tools and not a filesystem.** The arithmetic is a dozen lines, so a script arrives whole and
+its output comes back; `scratch.save_script` keeps it anyway, which is what leaves a computed
+figure's provenance on disk and lets a second attempt not overwrite the first. Filtering, grouping
+and totalling stay in `run_query`, where the gate checks them and pre-aggregations serve them.
+
+**One container for the machine, not one per chat** — a deliberate choice, measured rather than
+assumed: an idle container is under a megabyte (`--memory` is a cap, not a reservation), a
+`docker exec` is ~65ms against ~150ms for a whole ephemeral `docker run`. The costs are that
+`--memory` and `--pids-limit` are shared, so a script exhausting either kills the container for
+every chat, and that a script sees the whole `workspaces` root while `export_result` is confined to
+one chat's directory. Both are survivable rather than silent: the workspace is the state, so
+`ensure_up` rebuilds and `run_python` says that is what happened.
+
+**The container is disposable precisely because the workspace is the state.** Every `run_python` is
+a fresh interpreter, so nothing is lost by removing the container mid-conversation — which makes
+recovery from a reboot, a restart, an OOM kill or a stale mount a 150ms retry rather than a lost
+session.
+
+**`container.rebuild` runs at startup and is never awaited.** The portal warms the sandbox as a
+background task, because the first ever run *builds the image* — ninety seconds, and a portal that
+will not answer until an image compiles is a portal that looks broken. Measured: healthz at ~1s,
+sandbox up at ~500ms, and with docker absent the portal starts anyway and logs `sandbox is not
+available: docker not found on PATH`. `ensure_up` still runs before every script and an
+`asyncio.Lock` serialises it, so a script arriving mid-build waits rather than racing — two callers
+both finding no container is how the loser's `remove` kills the winner's.
+
+**`make sandbox-check` is the other half of `make test`.** The suite covers the argv, the path
+resolution, the CSV export and the trimming; what a container actually *does* — no egress, no
+capabilities, a read-only root, a kill at the timeout — is asserted against a live one by
+`scripts/sandbox_check.py`, with `--stale` for the mount recovery and `--ask` for a real turn.
+
+**The web portal** (`web/`, `src/web/`, and the transcript beneath it) — `analyst` opens a
+browser the way Jupyter does. One flat event stream is the contract between agent and browser:
+
+| module | role |
+|---|---|
+| `core/events.py` | the `Event` schema and `emit()` — the wire format, in `core` because every toolset writes it |
+| `transcript.py` | the `chats`, `events` and `results` tables, and the LangGraph checkpointer beside them. Storage only: turning a transcript back into provenance is `agent.session.replay` |
 | `web/stream.py` | `sse()` — the wire framing and the headers, for both streams |
-| `chat/service.py` | `stream_turn()` — one turn as an async iterator of events |
+| `agent/turn.py` | `stream_turn()` — one turn as an async iterator of events |
 | `web/server.py` | routes, SSE, token auth, static mount |
 | `src/web/` | React source; **builds into `analyst_agent/web/static/`** |
 | `src/web/src/components/Rail.tsx` | the mode switch — chat, boards or data, and nothing else |
@@ -222,7 +305,7 @@ Jupyter does. One flat event stream is the contract between agent and browser:
 | `src/web/src/format.ts` | how a result value renders — cells, axis ticks, sort order |
 
 Two invariants: **the event log is the transcript** — replaying a chat replays its
-events, and `Session` provenance is rebuilt from it (`replay_session`), so nothing lives
+events, and `Session` provenance is rebuilt from it (`agent.session.replay`), so nothing lives
 only in memory. And **tools author their own events** through LangGraph's stream writer
 rather than the service inferring them from chunks, so a gate rejection reaches the
 browser with its reasons attached.
@@ -313,19 +396,22 @@ rather than from `steps`; the browser iterates the rail it ships on `SourceRow.s
 
 ## Storage
 
-**One file, one schema.** `db.SCHEMA` is every table this process creates, and
+**One file, one schema.** `core.db.SCHEMA` is every table this process creates, and
 `~/.analyst/analyst.db` holds all of them: `chats` and `events` (the transcript),
 `results`, `dashboards`/`tiles`/`layouts`/`runs`/`tile_results`, `sources`, and
 LangGraph's `checkpoints`/`writes` — those last two created by `AsyncSqliteSaver` rather
-than here. `db.connect` is how it is opened, so `PRAGMA foreign_keys` cannot drift between
+than here. `core.db.connect` is how it is opened, so `PRAGMA foreign_keys` cannot drift between
 the three stores that open it.
 
-The schema lives in `db.py` rather than beside each store because **the unit is the file,
+The schema lives in `core/db.py` rather than beside each store because **the unit is the file,
 not the store**: `ChatStore`, `DashboardStore` and `SourceStore` all write it and none owns
 it, and a schema split across three modules reads as three databases.
 
 The file is **chmod 600** — `SourceStore.init` sets it, because `sources.credentials` is
 plaintext JSON and the file mode is the whole guard.
+
+One person on one machine: the token guard is the whole access story, and
+`cube/client.py`'s `LOCAL_CLAIMS` is the single literal signed into the Cube JWT.
 
 ## Sources
 
@@ -354,7 +440,7 @@ each scanning the registry.
 both share this table and the transcript format and differ only there. `list_chats`
 filters on it, so the sidebar shows question chats and the model editor shows its own.
 
-`sources/jobs.py` runs **one job at a time, machine-wide**, guarded by a `flock` — the
+`core/jobs.py` runs **one job at a time, machine-wide**, guarded by a `flock` — the
 probe container has one name, so a second portal process must wait rather than delete it
 underneath the first. A job is not stored: it lives in memory, streams to whoever is watching, and
 writes its outcome onto the source's `steps` as it goes. Refreshing the browser
@@ -371,15 +457,38 @@ branch, at a time).
   no config at all it raises the documented `RuntimeError`. Calling a tool's own
   `.ainvoke()` outside a graph produces a config that exists but holds no runtime, and the
   lookup dies with `KeyError('__pregel_runtime')` — which sailed through the bare
-  `except RuntimeError` in `chat/events.py` and killed the call. Fourteen passing tests
+  `except RuntimeError` in `core/events.py` and killed the call. Fourteen passing tests
   missed it because the ones that assert on events **monkeypatch `emit`**, so the real
   no-op path had no coverage until a script drove `add_tile` directly. When a fixture
   replaces the thing under test, add one case without the fixture.
+- **`docker exec` reports "OCI runtime exec failed" on *stdout*, with exit 127.** Not stderr.
+  A recovery branch keyed on `result.err` matches nothing and silently never runs — which is
+  how `container.execute`'s stale-mount retry passed review and did nothing until it was driven
+  against a real container. Check `result.out + result.err` for anything docker says about the
+  exec itself, as opposed to what the command printed.
+- **A running container's bind mount survives the host directory being deleted, and points at
+  the dead inode.** `DATA_DIR/workspaces` removed and recreated leaves the container up and
+  healthy by every check `docker inspect` can answer, while every `exec` into it fails to
+  `chdir`. So `ensure_up` returning early on "running" is not sufficient, and the recovery has
+  to `remove()` before calling it — `ensure_up` would otherwise find the broken container
+  healthy and hand back the same mount.
 - **`httpx` transport errors do not subclass `OSError`.** An `except OSError` around a Cube
   call catches nothing useful — a plain `ConnectError` went straight through and 500'd the
   whole dashboard page for a stopped container, which is the exact failure that branch
   existed to prevent. The established pair here is `(CubeError, httpx.RequestError)`; grep
   for an existing except-clause before writing a new one.
+- **Cube's `order` has two shapes and the agent invents a third.** Cube takes
+  `{"member": "asc"}` *and* `[["member", "asc"]]`, so `CubeQuery` normalises both to the
+  object form. The model reaches for `[{"id": ..., "desc": true}]` — the Playground's
+  internal format, which the query API does not accept — and pydantic's own rejection for
+  it reads "Input should be a valid dictionary", which says what arrived and never what to
+  send. A tier-1 message the agent cannot act on costs a whole retry, so
+  `accept_both_order_forms` names both shapes and names the Playground one as the mistake.
+- **`ChartSpec` is a pydantic model and `Column` is a dataclass**, and `run_query` serialises
+  one of each into the same event. `asdict` on the model raises `TypeError` while the event
+  is being *built*, which kills the turn — and every event assertion still passes, because
+  those tests monkeypatch `emit`. `tests/test_query_tools.py` drives the tools with `emit`
+  left alone for exactly this.
 - **A stored `dateRange` is not a window — Cube resolves it at execution time.** So
   `"last 30 days"` moves on every refresh and `["2026-01-01", "2026-01-31"]` never does,
   and nothing in the stored query distinguishes them. `LoadResult.resolved_ranges` reads
@@ -467,7 +576,7 @@ branch, at a time).
 - **Source ports are published on `127.0.0.1` only.** `CUBEJS_DEV_MODE=true` disables JWT
   verification, and a `0.0.0.0` bind would answer the whole network unauthenticated.
 - **A progress sink may return a value.** The web's sink returns the `Event` it emitted, so
-  `run.Report` is `Callable[[str, dict], object]` and `_say` calls it without reading the
+  `steps.Report` is `Callable[[str, dict], object]` and `_say` calls it without reading the
   result. Awaiting that result kills the job on its first progress call.
 - **`body { line-height: 1.6 }` is inherited by buttons but not by inputs**, so identical
   padding gives a 32px button beside a 27px input beside a 27px icon button. Every control
@@ -508,7 +617,7 @@ branch, at a time).
   `/api/results/{id}/csv` — the same lesson as `/sources/{name}/{action}`, one layer down.
 - **`ROWS` is a SQLite keyword**, so the `results` table stores its rows in a column named
   `data` — which is also what `events` calls its JSON blob.
-- **Editing `db.SCHEMA` changes new databases only.** `CREATE TABLE IF NOT EXISTS` does not
+- **Editing `core.db.SCHEMA` changes new databases only.** `CREATE TABLE IF NOT EXISTS` does not
   diff, so a new *table* appears on an existing `analyst.db` and a new *column* silently does
   not. There is no migration mechanism; changing a column means recreating the file, which is
   affordable precisely because this is one local install. Every INSERT still names its
@@ -529,22 +638,22 @@ branch, at a time).
   it fails the moment dev mode goes off.
 - **Reasoning summaries need Azure api-version `2025-03-01-preview` or later.** Below it
   the same deployment returns plain string content, zero reasoning tokens, and a 400 on
-  `use_responses_api`. `model.py` refuses to build rather than silently serving an empty
-  thinking panel.
+  `use_responses_api` — so a wrong `AZURE_OPENAI_API_VERSION` shows up as a failed model
+  call rather than an empty thinking panel.
 - **`reasoning: {"summary": "auto"}` frequently emits nothing.** On short planning calls
   the model decides a summary is not worth it. `REASONING_SUMMARY=detailed` is the
   setting that actually fills the panel.
 - **Enabling the Responses API changes `.content` from `str` to a list of blocks.** Never
-  read it directly — `agent/content.py` (`text_of`, `reasoning_of`) is the only correct
+  read it directly — `core/llm.py` (`text_of`, `reasoning_of`) is the only correct
   accessor, and every entry point goes through it.
 - **`stream_mode="messages"` carries ToolMessages and the summarizer's output too.**
   Unfiltered, `run_query`'s JSON row dump renders in the transcript as the agent's
-  answer. `service.py` keeps only `AIMessageChunk` and skips anything tagged
+  answer. `agent/turn.py` keeps only `AIMessageChunk` and skips anything tagged
   `COMPACTION_TAG` — the summarizing model runs inside the graph like any other call.
 - **`get_stream_writer()` raises outside a runnable context**, which is how unit tests
   invoke a tool directly. It is a no-op under `ainvoke`, so a caller that invokes a tool
   that way is unaffected.
-  `chat.events.emit` swallows exactly that `RuntimeError`.
+  `core.events.emit` swallows exactly that `RuntimeError`.
 - **A method named `list` shadows the builtin for every annotation later in the class
   body**, and `list[dict]` then fails at import. `ChatStore.list_chats` is named that way
   for this reason.
@@ -552,14 +661,14 @@ branch, at a time).
   being written twice: what a valid new source is (`registry.validate_new`), what
   re-running a step discards (`store.invalidated_by`, shipped to the browser as
   `invalidates` rather than recomputed there), which source is active
-  (`Source.is_active`), and what a failed step record looks like (`run._record`, written
-  only by `run.action`). Health goes over the wire structured (`Health.as_dict`) for the
+  (`Source.is_active`), and what a failed step record looks like (`steps._record`, written
+  only by `steps.action`). Health goes over the wire structured (`Health.as_dict`) for the
   same reason — the browser was matching on the word "down". Collapsing source management
   onto the portal alone was the same problem at a larger scale. `drivers.split_mounts` is
   the newest one: create and edit both have to turn a typed host path into a mount plus a
   container path, and only one of them getting it right is a key file Cube cannot find.
   Dashboards add two: `layout.validate` is what both the agent's `set_layout` and the
-  browser's `POST /{id}/layout` go through, and `run.source_mismatch` is the only thing
+  browser's `POST /{id}/layout` go through, and `refresh.source_mismatch` is the only thing
   standing between a saved query and a number from the wrong warehouse — two sources can
   both have `sales.revenue`, nothing downstream would error, and the tile would render a
   plausible figure about a different database.
@@ -577,6 +686,15 @@ branch, at a time).
 
 ## Conventions
 
+- **Tiers before packages.** A new module's home is decided by what it imports, not by what
+  it is about — see **Layering** above. If it needs something from a tier above, that thing
+  is passed in as an argument or moved down; `tests/test_layering.py` will not let it import
+  upward. A new top-level package has to be given a tier or the test fails on it.
+- **A name is taken once.** `Catalog`, `Entity`, `MemberDoc`, `Folder`, `Result`, `Event` and
+  `run.py` each meant two unrelated things at once, and a reader could not tell which from
+  the import. Grep before naming: `cube.catalog` owns `Catalog`/`Entity`/`MemberDoc`/`Folder`
+  for the *served* model, so the generation side is `Introspection`, `Definition`,
+  `MemberDescription` and `FolderDecision`.
 - **No single-caller private helpers.** If a function has one call site, inline it —
   procedural flow reads better than a chain of one-use hops. Functions with two or more
   callers stay, especially where they exist to stop two code paths drifting

@@ -24,6 +24,15 @@ test:
 lint:
 	uv run ruff check . && uv run ruff format --check .
 
+# The other half of `test`: what a real sandbox container does, which the suite deliberately
+# does not mock. Needs docker; builds the image on its first run. Uses a scratch DATA_DIR, so
+# it never touches ~/.analyst.
+#   make sandbox-check ARGS="--stale"        also prove recovery from a replaced mount
+#   make sandbox-check ARGS='--ask "..."'    one real turn, needs model credentials
+ARGS ?=
+sandbox-check:
+	uv run python scripts/sandbox_check.py $(ARGS)
+
 fmt:
 	uv run ruff format . && uv run ruff check --fix .
 
@@ -44,4 +53,4 @@ web: web-build serve
 serve:
 	uv run analyst
 
-.PHONY: install up down logs test lint fmt api web-build web serve
+.PHONY: install up down logs test lint fmt sandbox-check api web-build web serve

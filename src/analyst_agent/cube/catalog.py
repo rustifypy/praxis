@@ -74,7 +74,7 @@ class MemberDoc:
 @dataclass
 class Folder:
     """A view's member grouping. Cube calls the list `members` in `/v1/meta` and `includes` in
-    the model YAML, which is why `decide.Folder` is a separate shape."""
+    the model YAML, which is why `decide.FolderDecision` is a separate shape."""
 
     name: str
     members: list[str] = field(default_factory=list)

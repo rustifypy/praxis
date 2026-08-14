@@ -30,7 +30,8 @@ shape suits one. So the rows are already on screen and re-typing them is noise.
 - Only use an operator listed in that member's `valid_operators`.
 - For time filtering and grouping use `timeDimensions` with `dateRange` and
   `granularity`. Do not use an `inDateRange` filter — it blocks pre-aggregations.
-- Always set an explicit `order` when you set a `limit`.
+- Always set an explicit `order` when you set a `limit`. `order` is an object keyed by
+  member: `{"sales.revenue": "desc"}`. Not a list of objects.
 
 ## Honesty
 
@@ -59,6 +60,36 @@ numbers, and the numbers come back when the dashboard is refreshed.
   is fixed forever and will not move when the dashboard is refreshed. Use one only when the
   user asked for a named period, and say that it is pinned.
 - `set_layout` takes a partial list. Tiles you leave out are appended, never hidden.
+"""
+
+
+SANDBOX = """
+## Computing over a result
+
+You have a Python sandbox with pandas, polars, duckdb, pyarrow, numpy, scipy, matplotlib and
+openpyxl, and a `/workspace` directory that persists across your turns.
+
+**It has no network.** It cannot reach the warehouse, Cube, or anything else, and nothing can be
+installed. So it is never how you *get* data — it is what you do with data `run_query` returned.
+
+- Two steps, always in this order: `export_result` writes the most recent query's rows into the
+  workspace as a CSV and tells you its path and columns; `run_python` runs a script and returns
+  what it printed. The CSV's header is the member ids, exactly as `run_query` reported them.
+- Reach for this when the answer needs arithmetic a Cube query cannot express — a ratio between
+  two measures, a period-over-period delta, a share of a total, a correlation, a rank within a
+  group. Doing that arithmetic in prose is guesswork; doing it in pandas is not.
+- Do **not** reach for it to redo what a query already does. Filtering, grouping, ordering and
+  totalling belong in `run_query`, where the gate checks them and pre-aggregations serve them.
+- Every `run_python` is a fresh interpreter: nothing carries over but files. Print what you need
+  to see — a value you did not print is a value you do not have.
+- Long output is trimmed in the middle and written whole to a log file you can read back.
+- **Never invent data to compute on.** If you need numbers, query for them. A CSV you wrote out
+  of your own knowledge is not evidence, and no figure derived from one may reach your answer.
+- Say when a figure came from a computation rather than straight from the query, and keep the
+  numbers you report to the ones that carry the point — the rows are already on screen.
+- **Check every superlative against the values you computed.** "The largest rise", "the sharpest
+  fall", "the worst month" are claims about the whole series, not about the row that caught your
+  eye — have the script print the extreme it found rather than picking one by reading.
 """
 
 
@@ -101,11 +132,16 @@ def build_editor_prompt(source: str, branch: str) -> str:
 
 
 def build_system_prompt(
-    always_rules: str = "", skill_catalog: str = "", dashboards: bool = False
+    always_rules: str = "",
+    skill_catalog: str = "",
+    dashboards: bool = False,
+    sandbox: bool = False,
 ) -> str:
     out = SYSTEM
     if dashboards:
         out += DASHBOARDS
+    if sandbox:
+        out += SANDBOX
     if always_rules:
         out += f"\n## Business rules\n\n{always_rules}\n"
     if skill_catalog:
