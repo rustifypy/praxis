@@ -1,25 +1,32 @@
 """One session against one Cube container: its root, its token, and everything read from it.
 
-Every call to a Cube container goes through here, so authentication cannot be forgotten by a
-caller — which is how six raw `httpx` calls came to send no token at all. The two exceptions are
-`/readyz` (outside the base path, unauthenticated by design) and `/playground/db-schema`
-(dev-mode only, and the probe's alone).
+Every call to a Cube container goes through here, so a caller cannot forget to authenticate.
+The two exceptions are `/readyz` (outside the base path, unauthenticated by design) and
+`/playground/db-schema` (dev-mode only, and the probe's alone).
 """
 
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol
+from typing import Protocol
 
 import httpx
 import jwt
 
-from ..config import settings
+from ..core.config import settings
 from .catalog import Catalog
 from .schema import CubeQuery
 
-if TYPE_CHECKING:
-    from ..sources.registry import Source
+
+class Addressable(Protocol):
+    """Somewhere to send a request, which is all `for_source` and `catalog_of` need. A
+    `Source` satisfies it structurally; naming that type here would make the Cube client
+    depend on the registry that depends on the Cube client.
+    """
+
+    @property
+    def api_root(self) -> str: ...
+
 
 # HS256's key must be at least as long as its output, or the signature is weaker than
 # the algorithm claims. pyjwt warns below this on every single token it mints.
@@ -36,7 +43,8 @@ POLL_TIMEOUT_S = 90.0
 POLL_REQUEST_TIMEOUT_S = 15.0
 
 LOCAL_CLAIMS = {"user_id": "local"}
-"""The portal's own identity, same shape as `SecurityContext(user_id="local").as_claims()`."""
+"""What is signed into the Cube JWT. One literal, because there is one caller — this is
+also the seam Cube's `security_context` would read if row-level security is ever wanted."""
 
 
 def mint_token(claims: dict, secret: str, ttl_s: int = TOKEN_TTL_S) -> str:
@@ -84,15 +92,6 @@ class CubeError(RuntimeError):
         return self.cause is not None
 
 
-class Cube(Protocol):
-    """What `gate`, `agent.tools.Session`, `dashboards.run` and `EditContext` annotate against, so
-    a test can hand them a fake that the type checker holds to this same shape."""
-
-    async def catalog(self, *, refresh: bool = False) -> Catalog: ...
-    async def compile(self, query: CubeQuery) -> CompileResult: ...
-    async def load(self, query: CubeQuery) -> LoadResult: ...
-
-
 class CubeClient:
     """One Cube container, for as long as you hold it. Whoever constructs it closes it."""
 
@@ -126,7 +125,7 @@ class CubeClient:
 
     @classmethod
     def for_source(
-        cls, source: "Source", *, claims: dict | None = None, timeout: float | None = None
+        cls, source: Addressable, *, claims: dict | None = None, timeout: float | None = None
     ) -> "CubeClient":
         return cls(
             source.api_root,
@@ -258,7 +257,7 @@ class CubeClient:
         return r.status_code, body if isinstance(body, dict) else {}, r.text
 
 
-async def catalog_of(source: "Source", *, timeout: float = ADMIN_TIMEOUT_S) -> Catalog:
+async def catalog_of(source: Addressable, *, timeout: float = ADMIN_TIMEOUT_S) -> Catalog:
     """One source's served model. The admin screens want exactly this and nothing else."""
     async with CubeClient.for_source(source, timeout=timeout) as cube:
         return await cube.catalog()

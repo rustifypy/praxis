@@ -4,7 +4,7 @@ common answer**; one measure per line or bar, since mixed magnitudes flatten the
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .catalog import Catalog
 from .shape import Column, columns_of
@@ -30,14 +30,14 @@ class ChartSpec(BaseModel):
     number formats, and duplicating them here is how the two would come to disagree.
 
     A model rather than a dataclass because `set_chart` is handed one by the agent: a bare
-    string for `y` used to be iterated character by character, and a misspelled key was
+    string for `y` would otherwise be iterated character by character, and a misspelled key
     accepted in silence.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["line", "bar", "kpi"]
-    y: list[str]
+    y: list[str] = Field(min_length=1)
     x: str = ""
     series: str = ""
     """Column whose values split `y` into one line each. Empty for a single series."""
@@ -63,11 +63,10 @@ def chart_for(query: dict, catalog: Catalog, rows: list[dict]) -> ChartSpec | No
 
     if axes:
         axis = axes[0]
-        if not dimensions:
-            return ChartSpec(type="line", x=axis.id, y=[measures[0].id])
-        series = dimensions[0]
-        count = len({str(row.get(series.id)) for row in rows})
-        # One distinct value is a single line that a legend would only clutter.
+        # No dimension and one distinct dimension value draw the same picture: a single
+        # line, which a legend would only clutter.
+        series = dimensions[0] if dimensions else None
+        count = len({str(row.get(series.id)) for row in rows}) if series else 1
         if count == 1:
             return ChartSpec(type="line", x=axis.id, y=[measures[0].id])
         if count <= MAX_SERIES:
@@ -103,8 +102,6 @@ def validate_spec(spec: dict, columns: list[Column]) -> tuple[ChartSpec | None, 
     kind, y, x, series = parsed.type, parsed.y, parsed.x, parsed.series
     errors: list[str] = []
 
-    if not y:
-        errors.append("y must name at least one measure column")
     for member_id in y:
         column = by_id.get(member_id)
         if column is None:

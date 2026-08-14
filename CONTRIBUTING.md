@@ -83,7 +83,7 @@ is the only way back.
 Ruff, line length 100. Beyond that, two habits this codebase holds to:
 
 **Inline single-caller helpers.** A private function with one call site is a hop the
-reader has to follow for no benefit. The pipeline in `sources/model/` is procedural on
+reader has to follow for no benefit. The pipeline in `sources/modelgen/` is procedural on
 purpose — it reads top to bottom. Helpers earn their place at two or more callers, and
 especially when they exist so two code paths cannot drift apart.
 
@@ -109,7 +109,7 @@ own. Drivers needing a different image or platform set `image` / `platform`; a f
 holding a host path (a key file) sets `mount_to`, and the form then renders it as a typed
 path — a file input would hand the browser the contents and never the location.
 
-**Extracting tables** — add a `Dialect` to `sources/model/read.py` with SQL returning
+**Extracting tables** — add a `Dialect` to `sources/modelgen/read.py` with SQL returning
 `KEY_COLUMNS` (and optionally `STAT_COLUMNS`). Those SELECTs run as probe cubes through
 Cube's own driver, so no new database client is needed. `DIALECTS` is the single list of
 drivers that can extract tables — the form's `no table extraction yet` label reads from
@@ -120,7 +120,7 @@ go on when deciding which numbers are worth aggregating.
 
 ## Changing model generation
 
-`sources/model/` has one module per stage. `run.action` is the only way to run one — a
+`sources/modelgen/` has one module per stage. `steps.action` is the only way to run one — a
 caller chooses *which* actions and in what order, never how, so the order rule and what a
 failed step records cannot drift across callers. Before changing it, know the three
 invariants:
@@ -140,8 +140,8 @@ reason, a predicate. The id shows up in the rejection line, so failures stay cou
 
 ## Changing the model editor
 
-`sources/edit/{edits,impact,tools,workspace}.py`, `sources/model/vcs.py` and
-`web/model_edit.py` let a branch of a
+`sources/editing/{edits,impact,workspace}.py`, `sources/vcs.py`,
+`agent/tools/editor.py` and `web/model_edit.py` let a branch of a
 source's model be edited safely, on the same bind mount the container is serving live —
 there's no isolated dev endpoint the way Cube Cloud has one per branch. Two invariants
 hold before you touch it:

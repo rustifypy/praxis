@@ -6,9 +6,9 @@ picking the source `CUBE_URL` names.
 
 import pytest
 
-from analyst_agent.config import settings
-from analyst_agent.grounding import Grounding, for_active_source, for_source
+from analyst_agent.core.config import settings
 from analyst_agent.sources import registry
+from analyst_agent.sources.grounding import Grounding, for_active_source, for_source
 from analyst_agent.sources.registry import ARTEFACT_DIRS, Source
 from analyst_agent.sources.store import SourceStore
 

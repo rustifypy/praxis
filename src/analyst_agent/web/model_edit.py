@@ -14,12 +14,12 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ..chat.service import stream_edit_turn
+from ..agent.turn import stream_edit_turn
 from ..cube.client import CubeError, catalog_of
-from ..grounding import for_source
-from ..sources import docker
-from ..sources.edit import impact, workspace
-from ..sources.model import publish, vcs
+from ..sources import docker, vcs
+from ..sources.editing import impact, workspace
+from ..sources.grounding import for_source
+from ..sources.modelgen import publish
 from ..sources.registry import Source
 from .state import find
 from .stream import sse
@@ -315,7 +315,8 @@ async def commit(name: str, body: CommitBody, request: Request) -> dict:
 @router.get("/sources/{name}/chats")
 async def list_edit_chats(name: str, request: Request) -> list[dict]:
     await find(request, name)
-    return await request.app.state.store.model_chats(name)
+    chats = await request.app.state.store.list_chats("model", name)
+    return [c.__dict__ for c in chats]
 
 
 @router.post("/sources/{name}/chats")
@@ -323,7 +324,7 @@ async def create_edit_chat(name: str, request: Request) -> dict:
     """A chat bound to this source. Editing needs a branch, so refuse on main."""
     source = await find(request, name)
     branch = await _on_a_branch(source)
-    chat = await request.app.state.store.create_model_chat(name, branch)
+    chat = await request.app.state.store.create(f"Editing {branch}", name, "model", branch)
     return {"id": chat.id, "title": chat.title, "branch": branch}
 
 
@@ -333,7 +334,8 @@ async def send_edit_message(
 ) -> StreamingResponse:
     source = await find(request, name)
     store = request.app.state.store
-    if await store.model_chat_source(chat_id) != name:
+    chat = await store.get(chat_id)
+    if chat is None or chat.kind != "model" or chat.source_name != name:
         raise HTTPException(404, f"no model chat {chat_id!r} on {name!r}")
 
     cancel = asyncio.Event()

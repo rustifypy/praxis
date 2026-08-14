@@ -3,7 +3,7 @@ no containers, no model calls."""
 
 import pytest
 
-from analyst_agent.sources.model import vcs
+from analyst_agent.sources import vcs
 
 
 @pytest.fixture
@@ -37,8 +37,8 @@ async def test_ensure_on_a_missing_directory_fails_rather_than_creating_one(tmp_
 
 
 async def test_ensure_captures_an_existing_model_as_the_initial_commit(repo):
-    """The backfill case: a source built before any of this existed. Its current model has to
-    reach history before the rewrite that would otherwise lose it."""
+    """An unversioned model directory: whatever is already on disk has to reach history
+    before the rewrite that would otherwise lose it."""
     assert (await vcs.run(repo, "show", "HEAD:cubes/album.yml")).out.strip().startswith("cubes:")
 
 

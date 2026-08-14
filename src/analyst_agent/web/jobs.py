@@ -9,9 +9,9 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ..sources import docker, model
-from ..sources import jobs as job_runner
-from ..sources.model.run import StepFailed
+from ..core import jobs as job_runner
+from ..sources import docker, modelgen
+from ..sources.modelgen.steps import StepFailed
 from ..sources.store import STAGES
 from .state import find
 from .stream import sse
@@ -62,7 +62,7 @@ async def run_action(name: str, name_of_action: str, body: RunStep, request: Req
         job.current = name_of_action
         runner.emit("step_start", step=name_of_action)
         try:
-            result = await model.run.action(
+            result = await modelgen.steps.action(
                 name_of_action,
                 source,
                 store,

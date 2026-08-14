@@ -262,4 +262,4 @@ def test_an_empty_y_is_rejected(catalog):
     query = {"measures": ["orders.count"]}
     spec, errors = validate_spec({"type": "kpi", "y": []}, columns(query, catalog))
     assert spec is None
-    assert "at least one measure" in errors[0]
+    assert "y: list should have at least 1 item" in errors[0]

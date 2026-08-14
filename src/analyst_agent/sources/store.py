@@ -1,5 +1,5 @@
 """The source registry, credentials included, in `analyst.db` with everything else. The
-schema is in `db.py`."""
+schema is in `core/db.py`."""
 
 import json
 import time
@@ -9,8 +9,8 @@ from typing import Literal, get_args
 import aiosqlite
 from pydantic import validate_call
 
-from ..config import settings
-from ..db import SCHEMA, connect
+from ..core.config import settings
+from ..core.db import SCHEMA, connect
 from .registry import Source
 
 Step = Literal["connect", "cubes", "describe", "views"]

@@ -2,7 +2,7 @@ import logging
 
 from langchain.agents.middleware import AgentMiddleware, SummarizationMiddleware
 
-from ..chat.events import Event, emit
+from ..core.events import Event, emit
 
 log = logging.getLogger("analyst.audit")
 
@@ -10,17 +10,8 @@ log = logging.getLogger("analyst.audit")
 class AuditLog(AgentMiddleware):
     """Records every tool call. Swap the log sink for your warehouse table."""
 
-    def __init__(self, user: str = "anonymous"):
-        super().__init__()
-        self.user = user
-
     def _record(self, request) -> None:
-        log.info(
-            "tool=%s user=%s args=%s",
-            request.tool_call["name"],
-            self.user,
-            request.tool_call.get("args"),
-        )
+        log.info("tool=%s args=%s", request.tool_call["name"], request.tool_call.get("args"))
 
     def wrap_tool_call(self, request, handler):
         result = handler(request)
@@ -43,7 +34,6 @@ def _notice(state, result) -> None:
             type="compacted",
             data={
                 "before": len(state["messages"]),
-                # The rewritten list opens with a RemoveMessage sentinel.
                 "after": max(len(result.get("messages", [])) - 1, 0),
             },
         )

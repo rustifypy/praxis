@@ -12,13 +12,13 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from ..agent.build import SecurityContext
-from ..chat.service import stream_turn
-from ..chat.store import ChatStore, checkpointer
-from ..config import settings
+from ..agent.turn import stream_turn
+from ..core.config import settings
 from ..cube.catalog import Catalog
 from ..cube.client import CubeClient
 from ..cube.shape import Column, export_value
+from ..sandbox import container, scratch
+from ..transcript import ChatStore, checkpointer
 from . import dashboards, jobs, model_edit, sources, state, system
 from .stream import sse
 
@@ -26,11 +26,6 @@ STATIC = Path(__file__).parent / "static"
 COOKIE = "analyst_token"
 # Regenerated every launch, like a Jupyter server token.
 TOKEN = secrets.token_urlsafe(24)
-
-
-def identity() -> SecurityContext:
-    """Who the caller is. Server-side, deliberately — see the module docstring."""
-    return SecurityContext(user_id="local")
 
 
 class NewChat(BaseModel):
@@ -49,15 +44,18 @@ class Message(BaseModel):
 async def lifespan(app: FastAPI):
     store = ChatStore()
     await store.init()
-    # Dashboards share `analyst.db` with the transcript but keep their own store: adding a
-    # table to a live database works, so this is safe against an existing file.
+    # All three stores open the same file; each runs the one SCHEMA, whoever is first.
     await dashboards.init_state(app)
-    # Data sources: their own database, their own job runner. Deliberately not under
-    # DATA_DIR, so `--data-dir` can scope chat history for testing without hiding them.
     await state.init_state(app)
     # One session for the active source, for the life of the process: `CUBE_URL` fixes which
     # source that is at boot, and its catalog cache is what every query turn reads.
-    async with checkpointer() as saver, CubeClient.active(claims=identity().as_claims()) as cube:
+    async with checkpointer() as saver, CubeClient.active() as cube:
+        # Warmed in the background, and never awaited: the first ever run builds the image, which
+        # is ~90 seconds, and a portal that will not answer until an image compiles is a portal
+        # that looks broken. Every `run_python` calls `ensure_up` anyway and a lock serialises
+        # them, so a slow or failed warm costs the first script latency rather than function.
+        # Held on `app.state` only so the task is not garbage-collected mid-build.
+        app.state.sandbox = asyncio.create_task(container.rebuild())
         app.state.store = store
         app.state.saver = saver
         app.state.cube = cube
@@ -95,7 +93,7 @@ async def healthz() -> dict:
 
 @app.get("/api/chats")
 async def list_chats(request: Request) -> list[dict]:
-    chats = await request.app.state.store.list_chats(identity().user_id)
+    chats = await request.app.state.store.list_chats()
     return [c.__dict__ for c in chats]
 
 
@@ -103,9 +101,7 @@ async def list_chats(request: Request) -> list[dict]:
 async def create_chat(body: NewChat, request: Request) -> dict:
     """A chat belongs to a source, and the active one is the only candidate today."""
     active = await request.app.state.sources.active()
-    chat = await request.app.state.store.create(
-        body.title, identity().user_id, active.name if active else ""
-    )
+    chat = await request.app.state.store.create(body.title, active.name if active else "")
     return chat.__dict__
 
 
@@ -118,6 +114,9 @@ async def rename_chat(chat_id: str, body: Rename, request: Request) -> dict:
 @app.delete("/api/chats/{chat_id}")
 async def delete_chat(chat_id: str, request: Request) -> dict:
     await request.app.state.store.delete(chat_id)
+    # The workspace belongs to the chat, so it goes with it. The container does not — it is
+    # shared, and removing it here would take every other chat's sandbox down with this one.
+    scratch.remove(chat_id)
     return {"ok": True}
 
 
@@ -157,7 +156,6 @@ async def send(chat_id: str, body: Message, request: Request) -> StreamingRespon
                 store,
                 request.app.state.saver,
                 request.app.state.cube,
-                identity(),
                 cancel,
             ):
                 yield event

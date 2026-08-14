@@ -4,8 +4,7 @@ every refresh and never carried forward. A failure returns "" rather than raisin
 
 import json
 
-from ..agent.content import text_of
-from ..agent.model import build_model
+from ..core.llm import build_model, text_of
 from ..cube.shape import Column
 from .delta import Delta
 from .tiles import insight_slice

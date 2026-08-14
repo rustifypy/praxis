@@ -75,8 +75,8 @@ def catalog() -> Catalog:
 
 @dataclass
 class FakeCube:
-    """The second adapter at the Cube seam — `client.Cube` with no HTTP. Anything taking a
-    session (`gate`, `Session`, `dashboards.run`, `EditContext`) takes one of these in a test."""
+    """The second adapter at the Cube seam — a `CubeClient` with no HTTP. Anything taking a
+    session (`gate`, `Session`, `dashboards.refresh`, `EditContext`) takes one in a test."""
 
     served: Catalog
     sql: str = "SELECT 1"

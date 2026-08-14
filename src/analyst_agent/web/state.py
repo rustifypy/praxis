@@ -9,8 +9,8 @@ import time
 
 from fastapi import HTTPException, Request
 
-from ..sources import health, jobs
-from ..sources.model import vcs
+from ..core import jobs
+from ..sources import health, vcs
 from ..sources.registry import Source
 from ..sources.store import SourceStore, public
 

@@ -1,10 +1,10 @@
 """Container lifecycle for one source, straight from its row in sources.db."""
 
-import asyncio
 import shutil
-from dataclasses import dataclass
 from pathlib import Path
 
+from ..core import proc
+from ..core.proc import Result
 from .drivers import credentials_for, image_for
 from .registry import Source
 
@@ -23,37 +23,9 @@ RESTART_POLICY = "unless-stopped"
 for sources any more."""
 
 
-@dataclass
-class Result:
-    code: int
-    out: str
-    err: str
-
-    @property
-    def ok(self) -> bool:
-        return self.code == 0
-
-    @property
-    def message(self) -> str:
-        """Whichever stream said something, trimmed for a UI."""
-        return (self.err or self.out).strip()[:800]
-
-
 async def run(*args: str, timeout: float = DEFAULT_TIMEOUT_S) -> Result:
     """One docker command. Never raises for a non-zero exit — callers read `ok`."""
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "docker", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-    except FileNotFoundError:
-        return Result(127, "", "docker not found on PATH")
-    try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout)
-    except TimeoutError:
-        proc.kill()
-        await proc.wait()
-        return Result(124, "", f"docker {args[0]} did not finish within {timeout:.0f}s")
-    return Result(proc.returncode or 0, out.decode(errors="replace"), err.decode(errors="replace"))
+    return await proc.run("docker", *args, timeout=timeout)
 
 
 def installed() -> bool:

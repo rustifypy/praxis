@@ -13,8 +13,9 @@ would make the same test answer differently on a laptop and in CI.
 import httpx
 import pytest
 
-from analyst_agent.config import settings
-from analyst_agent.sources import docker, jobs
+from analyst_agent.core import jobs
+from analyst_agent.core.config import settings
+from analyst_agent.sources import docker
 from analyst_agent.sources.registry import Source
 from analyst_agent.web import server
 
@@ -30,13 +31,12 @@ SHOP = Source(
 @pytest.fixture
 async def api(tmp_path, monkeypatch, cube):
     """The app with its state wired to tmp databases and a fake Cube."""
-    from analyst_agent.chat.store import ChatStore
     from analyst_agent.dashboards.store import DashboardStore
     from analyst_agent.sources.store import SourceStore
+    from analyst_agent.transcript import ChatStore
 
-    # `dashboards.run.active_source_name` builds its own `SourceStore()`, so pointing the
-    # setting is the only way to keep these routes off the real ~/.analyst. Same pattern as
-    # the dashboard-run tests. `cube_url` matches no source, so nothing is active.
+    # Every store defaults to `settings.db_path`, so pointing the setting is what keeps these
+    # routes off the real ~/.analyst. `cube_url` matches no source, so nothing is active.
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
     monkeypatch.setattr(settings, "cube_url", "http://localhost:4999")
 
@@ -136,6 +136,20 @@ async def test_a_replayed_transcript_is_the_event_log(api):
 async def test_stopping_a_chat_with_nothing_in_flight_is_not_an_error(api):
     chat = (await api.post("/api/chats", json={})).json()
     assert (await api.post(f"/api/chats/{chat['id']}/stop")).status_code == 200
+
+
+async def test_deleting_a_chat_takes_its_workspace_with_it(api, tmp_path):
+    """The sandbox container is shared between chats, so it survives; the workspace directory is
+    this chat's alone and goes with it."""
+    from analyst_agent.sandbox import scratch
+
+    chat = (await api.post("/api/chats", json={})).json()
+    workspace = scratch.ensure(chat["id"])
+    (workspace / "result.csv").write_text("a,b\n")
+    assert workspace.is_relative_to(tmp_path)
+
+    assert (await api.delete(f"/api/chats/{chat['id']}")).status_code == 200
+    assert not workspace.exists()
 
 
 # --- results: the rows the event does not carry ------------------------------

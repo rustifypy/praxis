@@ -67,9 +67,12 @@ def semantic_check(query: CubeQuery, catalog: Catalog) -> GateResult:
     """Tier 2. Every check the cached catalog can answer, in one pass."""
     errors: list[str] = []
     warnings: list[str] = []
+    # Both walk the filter tree, and several checks below want them.
+    referenced = query.referenced_members()
+    leaf_filters = list(query.iter_filters())
 
     # Does the member exist at all?
-    for member_id in query.referenced_members():
+    for member_id in referenced:
         if catalog.get(member_id) is None:
             hint = ", ".join(catalog.nearest(member_id)) or "none"
             errors.append(f"'{member_id}' does not exist. Closest matches: {hint}")
@@ -90,7 +93,7 @@ def semantic_check(query: CubeQuery, catalog: Catalog) -> GateResult:
             errors.append(f"timeDimensions.dimension '{td.dimension}' is type {doc.type}, not time")
 
     # Is the filter operator legal for that member's kind and type?
-    for f in query.iter_filters():
+    for f in leaf_filters:
         doc = catalog.get(f.member)
         if doc and doc.valid_operators and f.operator not in doc.valid_operators:
             errors.append(
@@ -112,7 +115,7 @@ def semantic_check(query: CubeQuery, catalog: Catalog) -> GateResult:
                 )
 
     # Reaching across entities with no view covering them may not be joinable.
-    known = [m for m in query.referenced_members() if catalog.get(m)]
+    known = [m for m in referenced if catalog.get(m)]
     cubes = {catalog.get(m).cube for m in known}
     if len(cubes) > 1 and not catalog.views_containing(known):
         warnings.append(
@@ -120,7 +123,7 @@ def semantic_check(query: CubeQuery, catalog: Catalog) -> GateResult:
             "view containing them all — verify they are joinable before trusting the result."
         )
 
-    for f in query.iter_filters():
+    for f in leaf_filters:
         if f.operator in ("inDateRange", "notInDateRange"):
             warnings.append(
                 f"'{f.operator}' on {f.member} blocks pre-aggregation matching. "

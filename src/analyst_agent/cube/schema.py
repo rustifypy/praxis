@@ -1,6 +1,6 @@
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Granularity = Literal["second", "minute", "hour", "day", "week", "month", "quarter", "year"]
 
@@ -73,6 +73,30 @@ class CubeQuery(BaseModel):
     limit: int | None = Field(default=None, ge=1, le=50_000)
     offset: int = Field(default=0, ge=0)
     timezone: str | None = None
+
+    @field_validator("order", mode="before")
+    @classmethod
+    def accept_both_order_forms(cls, value: Any) -> Any:
+        """Cube documents two shapes for `order` and takes either, so this takes either and
+        normalises to the object form. Anything else names both, because pydantic's own
+        "Input should be a valid dictionary" tells the agent what it got and never what to
+        send — and a rejection it cannot act on costs a whole retry.
+        """
+        if value is None or isinstance(value, dict):
+            return value
+        if isinstance(value, list) and all(
+            isinstance(pair, list | tuple) and len(pair) == 2 for pair in value
+        ):
+            return dict(value)
+        raise ValueError(
+            'order is {"member": "asc"|"desc"} or [["member", "asc"], ...] — '
+            f"got {type(value).__name__}"
+            + (
+                ". A list of {id, desc} objects is the Playground's format, not the query API's"
+                if isinstance(value, list)
+                else ""
+            )
+        )
 
     @model_validator(mode="after")
     def must_request_something(self):
