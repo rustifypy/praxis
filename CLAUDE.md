@@ -308,6 +308,17 @@ reaches *inside* — `echo $$` records the pid, the host reads it out of the bin
 `container.kill` sends the TERM — because killing the `docker exec` client leaves the command
 running. Measured live: dead 0.1s after the button, container still up, next script normal.
 
+**A script is shown before it runs, and that is not a safety gate.** The sandbox is what makes a
+script safe; `approve_scripts` exists because the moment before a run is the only one where the
+script is readable. So `run_python` emits an `approval` event carrying the script — **the one event
+that carries a body**, and it is not stored, because the file is already at `scripts/run-NNN.py`
+and the outcome is on `tool_end`. The answer comes back on a queue (`POST /chats/{id}/approve`),
+the same shape as the cancel flag rather than a LangGraph interrupt: a confirm should not close the
+stream and resume a thread. Two consequences worth keeping: **"always" is what makes it usable** —
+without it a write-run-fix loop is fifteen clicks and the setting gets turned off — and **stopping
+the turn answers the question with no**, which is what stops a closed tab leaving a script waiting
+on a queue nobody will put anything on.
+
 **Three caps, and the one that was missing.** `EXEC_TIMEOUT_S` bounds a call and `OUTPUT_LIMIT`
 bounds what it says, but forty model calls of each is eighty minutes and 160,000 characters — so
 `TURN_SECONDS`/`TURN_OUTPUT` bound the turn, and `ToolCallLimitMiddleware` bounds the count with
@@ -384,14 +395,13 @@ answer. `set_chart` lets the agent override, validated against that result's rea
 by `validate_spec`, and it authors its own `tool_start`/`tool_end` like any other tool —
 which is why charts needed **no new `EventType`**.
 
-*An answer owns the results of its turn.* Tool events arrive before the prose, so
-`events.ts` lifts every `result` item from the turn in progress to sit after the new
-answer. Scoped to the turn, not to the tail: the agent reasons *after* reading a result, so
-items arrive as `[… tool, result, thinking, text]` and a rule that only moved trailing
-results left the table above the answer. The trace stays above; only data moves down, and a
-turn that produced no answer keeps its results where they are rather than hiding them. A
-`files` item — what a script wrote — is lifted by the same rule and for the same reason: a
-chart the agent drew is evidence for the sentence about it.
+*The transcript is in the order things happened.* `events.ts` appends and never reorders, so a
+result sits under the query that fetched it and above the prose about it. `applyEvent` used to
+lift every `result` and `files` item to sit *after* the answer, on the argument that the claim
+should precede its evidence — which reads well for one query and badly for two, where both tables
+end up below the answer and the reader matches them to steps by name. If that is ever revisited,
+note that the fix is not a rule about the tail: the agent reasons *after* reading a result, so
+items arrive as `[… tool, result, thinking, text]`.
 
 `files` needed **no new `EventType`** either. `run_python` names its files on its own `tool_end`
 as `wrote`, which is the `set_chart` argument again — paths only, because the file is on disk in
@@ -693,8 +703,9 @@ branch, at a time).
 - **`.answer.streaming > :last-child::after` is the streaming caret**, so anything appended
   as the last child of `.answer` grows a blinking cursor. A result block is a sibling of
   `.answer` inside `.row`, never a child. Relatedly, `.answer-tools` reserves its height
-  while invisible; harmless when an answer ended the transcript, but it opened a ~38px hole
-  once a result followed one — hence the `:has()` rule pulling `.res` up under an answer.
+  while invisible, which opens a ~38px hole under an answer; there was a `:has()` rule pulling
+  `.res` back up, removed with the reordering — results now precede answers, so the two are
+  no longer adjacent. Anything that puts them back in that order needs it again.
 - **Cube returns a grouped time dimension under two keys**, the bare member *and*
   `member.grain` (`sales.invoiced_at` and `sales.invoiced_at.month`). `Object.keys(rows[0])`
   therefore invents a duplicate column, which is why a result's header is computed by

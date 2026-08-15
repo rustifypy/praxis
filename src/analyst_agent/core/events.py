@@ -14,6 +14,7 @@ EventType = Literal[
     "text",  # answer delta
     "tool_start",  # label + args, emitted by the tool itself
     "output",  # a running tool's partial output — never stored; `tool_end` carries the whole
+    "approval",  # a script waiting on a click — never stored; the workspace holds the script
     "tool_end",  # rows, sql, gate errors
     "compacted",  # SummarizationMiddleware rewrote the history
     "error",

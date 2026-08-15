@@ -286,6 +286,95 @@ async def test_a_chatty_script_stops_being_streamed_rather_than_flooding_the_pag
     assert 0 < len(streamed) <= 30, "the live view kept going past its limit"
 
 
+# --- approving a script -------------------------------------------------------
+
+
+async def ran(session, sandbox, script="print(1)"):
+    """Drive `run_python` against a container that always succeeds, and say what reached it."""
+    seen = []
+
+    async def execute(chat_id, command, timeout=None, on_output=None):
+        seen.append(command)
+        return Result(0, "done\n", "")
+
+    sandbox(execute)
+    out = await named(tools.build_code_tools(session), "run_python").ainvoke({"script": script})
+    return seen, out
+
+
+async def test_a_script_waits_for_a_click_and_the_event_carries_it_whole(session, sandbox, events):
+    """The one event that carries a script body. It is never stored — the workspace holds the
+    file, and this is asking about that file."""
+    session.approvals = asyncio.Queue()
+    session.approvals.put_nowait("yes")
+
+    seen, out = await ran(session, sandbox, "print('hello')")
+
+    asked = [e["data"] for e in events if e["type"] == "approval"]
+    assert len(asked) == 1
+    assert asked[0]["script"] == "print('hello')"
+    assert asked[0]["label"] == "scripts/run-001.py"
+    assert not set(asked[0]) - tools.EVENT_KEYS
+    assert seen, "an approved script did not run"
+    assert "exited 0" in out
+
+
+async def test_a_declined_script_never_reaches_the_container(session, sandbox, events):
+    session.approvals = asyncio.Queue()
+    session.approvals.put_nowait("no")
+
+    seen, out = await ran(session, sandbox)
+
+    assert seen == []
+    assert "declined to run" in out
+    assert [e["data"]["note"] for e in events if e["type"] == "tool_end"] == [
+        "declined by the user"
+    ]
+
+
+async def test_always_stops_asking_for_the_rest_of_the_turn(session, sandbox, events):
+    """Otherwise a write-run-fix loop is fifteen clicks, and the feature gets turned off."""
+    session.approvals = asyncio.Queue()
+    session.approvals.put_nowait("always")
+
+    run = named(tools.build_code_tools(session), "run_python")
+
+    async def execute(chat_id, command, timeout=None, on_output=None):
+        return Result(0, "done\n", "")
+
+    sandbox(execute)
+    for _ in range(3):
+        assert "exited 0" in await run.ainvoke({"script": "print(1)"})
+
+    assert len([e for e in events if e["type"] == "approval"]) == 1
+
+
+async def test_a_stop_while_the_question_is_open_answers_it_with_no(session, sandbox):
+    """Nobody is coming to click: the tab closed, which sets the same flag the stop button does.
+    Without this the turn waits on a queue nothing will ever be put on."""
+    session.approvals = asyncio.Queue()
+    session.cancel = asyncio.Event()
+
+    async def leave():
+        await asyncio.sleep(0.05)
+        session.cancel.set()
+
+    gone = asyncio.create_task(leave())
+    seen, out = await ran(session, sandbox)
+    await gone
+
+    assert seen == []
+    assert "declined to run" in out
+
+
+async def test_with_no_queue_nothing_is_asked(session, sandbox, events):
+    """`approve_scripts = false`, and the tool must not wait on a queue that is not there."""
+    seen, out = await ran(session, sandbox)
+
+    assert seen and "exited 0" in out
+    assert [e for e in events if e["type"] == "approval"] == []
+
+
 # --- the turn's budget --------------------------------------------------------
 
 

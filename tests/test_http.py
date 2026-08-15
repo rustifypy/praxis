@@ -54,6 +54,8 @@ async def api(tmp_path, monkeypatch, cube):
     server.app.state.health = {}
     server.app.state.cube = cube
     server.app.state.cancels = {}
+    server.app.state.approvals = {}
+    server.app.state.always = set()
     server.app.state.saver = None
 
     # Nothing is running, so every source reads as stopped — deterministic, and the state the
@@ -136,6 +138,35 @@ async def test_a_replayed_transcript_is_the_event_log(api):
 async def test_stopping_a_chat_with_nothing_in_flight_is_not_an_error(api):
     chat = (await api.post("/api/chats", json={})).json()
     assert (await api.post(f"/api/chats/{chat['id']}/stop")).status_code == 200
+
+
+async def test_approving_when_nothing_is_waiting_is_a_404_rather_than_a_silent_ok(api):
+    """A click that lands after the turn ended must not read as having approved anything."""
+    chat = (await api.post("/api/chats", json={})).json()
+    response = await api.post(f"/api/chats/{chat['id']}/approve", json={"decision": "yes"})
+    assert response.status_code == 404
+
+
+async def test_a_decision_reaches_the_waiting_script(api):
+    import asyncio
+
+    chat = (await api.post("/api/chats", json={})).json()
+    queue = asyncio.Queue()
+    server.app.state.approvals[chat["id"]] = queue
+
+    assert (
+        await api.post(f"/api/chats/{chat['id']}/approve", json={"decision": "always"})
+    ).status_code == 200
+    assert queue.get_nowait() == "always"
+    # And the chat is not asked again, which is what "always" means past this turn.
+    assert chat["id"] in server.app.state.always
+
+
+async def test_an_invented_decision_is_refused_by_the_schema(api):
+    """Before the handler, so a typo cannot land as a "yes" by falling through a comparison."""
+    chat = (await api.post("/api/chats", json={})).json()
+    response = await api.post(f"/api/chats/{chat['id']}/approve", json={"decision": "maybe"})
+    assert response.status_code == 422
 
 
 async def test_deleting_a_chat_takes_its_workspace_with_it(api, tmp_path):

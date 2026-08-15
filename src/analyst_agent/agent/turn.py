@@ -75,9 +75,10 @@ async def run_turn(
                 # Flush first: the thinking that led to a tool call belongs above it.
                 await flush()
                 event = Event(**payload)
-                # `output` is a running script's stdout and the one type that stays off the
-                # transcript: `tool_end` carries the whole of it, trimmed.
-                if event.type != "output":
+                # The two wire-only types. `tool_end` carries the whole of a script's output,
+                # trimmed, and the workspace holds the script an approval is asking about — so
+                # neither is state that would exist nowhere else.
+                if event.type not in ("output", "approval"):
                     await store.append(chat_id, turn_id, event)
                 yield event
             else:
@@ -117,6 +118,7 @@ async def stream_turn(
     cube: CubeClient,
     cancel: asyncio.Event | None = None,
     files: list[str] | None = None,
+    approvals: asyncio.Queue | None = None,
 ) -> AsyncIterator[Event]:
     """`cube` is the app's session for the active source — borrowed, never closed here. It
     re-mints its own token, so a chat outliving the 15-minute JWT no longer 403s mid-thought."""
@@ -133,6 +135,7 @@ async def stream_turn(
             chat_id=chat_id,
             turn_id=turn_id,
             cancel=cancel,
+            approvals=approvals,
         )
         # Seeded from the log so `explain_last_query` still answers "show me the SQL for
         # that" on turn three, and after a restart.
