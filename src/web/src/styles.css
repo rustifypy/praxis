@@ -1172,13 +1172,88 @@ textarea {
   overflow: hidden;
 }
 
-/* A result hugs the answer it supports. `.answer-tools` holds the hover copy button and
-   reserves its height while invisible — harmless when an answer was the last thing in the
-   transcript, but it opens a hole between a claim and the table proving it. Pulled back by
-   exactly the tokens that toolbar is built from, and only after an answer: a result that
-   no answer followed still sits on the normal rhythm. */
-.row:has(> .answer) + .row:has(> .res) {
-  margin-top: calc(-8px - var(--control));
+/* A script waiting on a click. Bordered in the accent rather than a warning colour: this is a
+   thing to read, not a thing to be alarmed by — the sandbox is what makes it safe. */
+.ask {
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--raised);
+  overflow: hidden;
+}
+
+.ask-done {
+  border-color: var(--line);
+  opacity: 0.72;
+}
+
+.ask-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ask-label {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.ask-script {
+  margin: 0;
+  padding: 12px;
+  max-height: 320px;
+  overflow: auto;
+  background: var(--code-bg);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ask-choices {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.ask-choice {
+  min-height: var(--control);
+  line-height: 1.2;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.ask-choice:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.ask-choice:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Outlined rather than filled: the accent is dark in one theme and light in the other, so a
+   solid fill would need a text colour that works on both and there is no token for one. */
+.ask-yes {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.ask-failed {
+  padding: 0 12px 10px;
+  font-size: 12.5px;
+  color: var(--bad);
 }
 
 .res-head {

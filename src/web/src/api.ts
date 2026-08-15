@@ -64,6 +64,9 @@ export const createChat = () => json<Chat>("/api/chats", { method: "POST", body:
 export const chatEvents = (id: string) => json<AgentEvent[]>(`/api/chats/${id}/events`);
 export const deleteChat = (id: string) => json(`/api/chats/${id}`, { method: "DELETE" });
 export const stopChat = (id: string) => json(`/api/chats/${id}/stop`, { method: "POST" });
+/** Answer the script this chat is waiting on. "always" stops it asking again until a restart. */
+export const approveScript = (id: string, decision: "yes" | "always" | "no") =>
+  json(`/api/chats/${id}/approve`, { method: "POST", body: JSON.stringify({ decision }) });
 export const renameChat = (id: string, title: string) =>
   json(`/api/chats/${id}`, { method: "PATCH", body: JSON.stringify({ title }) });
 

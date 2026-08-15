@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     web_host: str = "127.0.0.1"
     web_port: int = 8420
 
+    approve_scripts: bool = True
+    """Show a script and wait for a click before running it. Not a safety gate — the sandbox is
+    that — but the only moment you can read what the agent wrote before it runs."""
+
     @property
     def api_root(self) -> str:
         return f"{self.cube_url.rstrip('/')}{self.cube_base_path}"

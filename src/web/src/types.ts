@@ -4,6 +4,7 @@ type EventType =
   | "text"
   | "tool_start"
   | "output"
+  | "approval"
   | "tool_end"
   | "compacted"
   | "error"
@@ -128,6 +129,9 @@ export type Item =
    * authors its own events. `label` is the script that made them.
    */
   | { kind: "files"; label: string; paths: string[] }
+  /** A script waiting on a click. Live only — the event is never stored, so a reopened chat
+   *  shows the run that followed rather than the question that preceded it. */
+  | { kind: "approval"; label: string; script: string }
   | { kind: "compacted"; before: number; after: number }
   | { kind: "error"; message: string };
 

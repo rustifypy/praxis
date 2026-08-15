@@ -6,6 +6,7 @@ import io
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
@@ -36,6 +37,10 @@ class Rename(BaseModel):
     title: str
 
 
+class Decision(BaseModel):
+    decision: Literal["yes", "always", "no"] = "yes"
+
+
 class Message(BaseModel):
     question: str
     files: list[str] = []
@@ -59,6 +64,10 @@ async def lifespan(app: FastAPI):
         app.state.cube = cube
         # One cancel flag per in-flight turn, so the stop button has something to set.
         app.state.cancels = {}
+        # And one approval queue, for the chats still being asked. In memory on purpose: a
+        # restart is a fair moment to start asking again.
+        app.state.approvals = {}
+        app.state.always = set()
         yield
 
 
@@ -131,6 +140,19 @@ async def stop(chat_id: str, request: Request) -> dict:
     return {"stopped": bool(cancel)}
 
 
+@app.post("/api/chats/{chat_id}/approve")
+async def approve(chat_id: str, body: Decision, request: Request) -> dict:
+    """Answer the script this chat is waiting on. "always" also stops asking for the rest of the
+    turn — the tool reads that off the same answer, since it holds the queue and not this dict."""
+    queue = request.app.state.approvals.get(chat_id)
+    if queue is None:
+        raise HTTPException(404, "nothing in this chat is waiting to be approved")
+    if body.decision == "always":
+        request.app.state.always.add(chat_id)
+    queue.put_nowait(body.decision)
+    return {"decision": body.decision}
+
+
 @app.post("/api/chats/{chat_id}/messages")
 async def send(chat_id: str, body: Message, request: Request) -> StreamingResponse:
     store = request.app.state.store
@@ -147,6 +169,11 @@ async def send(chat_id: str, body: Message, request: Request) -> StreamingRespon
     # Only files actually in the workspace, so the transcript cannot name one that is not there.
     attached = [p for p in body.files if p in scratch.listing(chat_id, "**/*")]
 
+    approvals = None
+    if settings.approve_scripts and chat_id not in request.app.state.always:
+        approvals = asyncio.Queue()
+        request.app.state.approvals[chat_id] = approvals
+
     async def events():
         try:
             async for event in stream_turn(
@@ -157,13 +184,16 @@ async def send(chat_id: str, body: Message, request: Request) -> StreamingRespon
                 request.app.state.cube,
                 cancel,
                 attached,
+                approvals,
             ):
                 yield event
-                # A closed tab should not leave the agent burning model calls.
+                # A closed tab should not leave the agent burning model calls — nor a script
+                # waiting forever on an approval nobody is there to give.
                 if await request.is_disconnected():
                     cancel.set()
         finally:
             request.app.state.cancels.pop(chat_id, None)
+            request.app.state.approvals.pop(chat_id, None)
 
     return sse(events())
 

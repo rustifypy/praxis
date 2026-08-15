@@ -46,6 +46,8 @@ class Session:
     turn_id: str = ""
     """Where a result set is kept, and under which chat and turn."""
     cancel: asyncio.Event | None = None
+    approvals: asyncio.Queue | None = None
+    """Where a click on "run this" arrives. None means nothing is asked and every script runs."""
 
 
 def replay(events: list[dict]) -> tuple[list[QueryRecord], list[dict]]:

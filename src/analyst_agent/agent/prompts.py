@@ -82,6 +82,9 @@ installed. So it is never how you *get* data — it is what you do with data `ru
   totalling belong in `run_query`, where the gate checks them and pre-aggregations serve them.
 - Every `run_python` is a fresh interpreter: nothing carries over but files. Print what you need
   to see — a value you did not print is a value you do not have.
+- The user may be shown a script before it runs, so write it to be read: name the file it reads,
+  and make what it computes obvious. If one is declined, ask what to change rather than resending
+  it.
 - Long output is trimmed in the middle and written whole to a log file you can read back.
 - **Never invent data to compute on.** If you need numbers, query for them. A CSV you wrote out
   of your own knowledge is not evidence, and no figure derived from one may reach your answer.

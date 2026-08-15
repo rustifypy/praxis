@@ -77,32 +77,10 @@ export function applyEvent(items: Item[], event: AgentEvent): Item[] {
     case "text": {
       const extended = extend("answer");
       if (extended) return extended;
-      // A result block is appended when its query finishes, which is before the prose that
-      // explains it. The answer takes ownership of every result from the turn in progress,
-      // so the reading order is the claim and then its evidence.
-      //
-      // Scoped to the turn rather than to the tail: the agent reasons *after* reading a
-      // result and before writing the answer, so the items arrive as
-      // [… tool, result, thinking, text] and a rule that only lifted trailing results left
-      // the table above the answer whenever a thought came between them. The trace itself
-      // — thinking and tool steps — stays above; only data moves down. Results in a turn
-      // that never produced an answer are never reached by this and stay where they are,
-      // which is what keeps a run that hit the model-call limit from hiding what it
-      // fetched.
-      const settled = settle(items);
-      const start =
-        settled.findLastIndex((item) => item.kind === "user" || item.kind === "answer") + 1;
-      const turn = settled.slice(start);
-      const answer: Item = { kind: "answer", text: delta ?? whole ?? "", live: streaming };
-      // Files a script wrote move with the results, for the same reason: a chart the agent drew
-      // is evidence for the sentence about it, and the tool event carrying it arrived first.
-      const data = (item: Item) => item.kind === "result" || item.kind === "files";
-      return [
-        ...settled.slice(0, start),
-        ...turn.filter((item) => !data(item)),
-        answer,
-        ...turn.filter(data),
-      ];
+      // Everything stays in the order it happened, results included: with two queries in a
+      // turn, moving the data below the prose separates each table from the step that
+      // fetched it and leaves the reader matching them up by name.
+      return [...settle(items), { kind: "answer", text: delta ?? whole ?? "", live: streaming }];
     }
 
     case "tool_start":
@@ -115,6 +93,12 @@ export function applyEvent(items: Item[], event: AgentEvent): Item[] {
           query: event.data.query,
           startedAt: Date.now(),
         },
+      ];
+
+    case "approval":
+      return [
+        ...items,
+        { kind: "approval", label: event.data.label ?? "", script: event.data.script ?? "" },
       ];
 
     case "output": {

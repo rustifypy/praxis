@@ -21,13 +21,14 @@ from ...sandbox import container, scratch
 from ..session import Session
 
 EVENT_KEYS = frozenset(
-    {"tool", "label", "ok", "note", "errors", "exit_code", "output", "wrote", "delta"}
+    {"tool", "label", "ok", "note", "errors", "exit_code", "output", "wrote", "delta", "script"}
 )
-"""Every key one of these events may carry — asserted by a test. Absent on purpose: the script
-body, the exported rows, and the whole of a command's output. A transcript records that a script
-ran and how it ended; the workspace holds the script and the data, `.logs/` holds what it said.
-`wrote` is paths and not contents, for the same reason: the file is on disk in a bind mount, and
-the download route is how it is read."""
+"""Every key one of these events may carry — asserted by a test. Absent on purpose: the exported
+rows, and the whole of a command's output. A transcript records that a script ran and how it
+ended; the workspace holds the script and the data, `.logs/` holds what it said. `wrote` is paths
+and not contents, for the same reason: the file is on disk in a bind mount, and the download route
+is how it is read. `script` is the exception and is carried by the `approval` event alone — which
+is never stored, and is asking about a file already on disk."""
 
 OUTPUT_LIMIT = 4_000
 """What a script's output is trimmed to. One number for both the model and the event, unlike a
@@ -57,6 +58,7 @@ def build_code_tools(session: Session) -> list:
     # Per turn: a fresh agent, and so a fresh closure, is built for each one.
     spent_seconds = 0.0
     spent_chars = 0
+    approving = session.approvals is not None
 
     def _start(name: str, label: str) -> None:
         emit(Event(type="tool_start", data={"tool": name, "label": label}))
@@ -122,7 +124,7 @@ def build_code_tools(session: Session) -> list:
         included, so a chart you save is a chart they can see. Give it a name that says what it
         is.
         """
-        nonlocal spent_seconds, spent_chars
+        nonlocal spent_seconds, spent_chars, approving
         if session.cancel is not None and session.cancel.is_set():
             return "The user stopped this turn. Run nothing else."
         if spent_seconds >= TURN_SECONDS or spent_chars >= TURN_OUTPUT:
@@ -136,6 +138,30 @@ def build_code_tools(session: Session) -> list:
 
         saved = scratch.save_script(chat_id, script)
         _start("run_python", saved)
+
+        # Saved before it is offered, so what the page shows and what would run are one file.
+        if approving:
+            emit(
+                Event(
+                    type="approval",
+                    data={"tool": "run_python", "label": saved, "script": script},
+                )
+            )
+            waiting = asyncio.create_task(session.approvals.get())
+            stop = asyncio.create_task((session.cancel or asyncio.Event()).wait())
+            done, _ = await asyncio.wait({waiting, stop}, return_when=asyncio.FIRST_COMPLETED)
+            stop.cancel()
+            # Stopping the turn is the third answer to the question, and it means no.
+            choice = waiting.result() if waiting in done else "no"
+            waiting.cancel()
+            if choice == "always":
+                approving = False
+            if choice == "no":
+                _end("run_python", False, note="declined by the user")
+                return (
+                    "The user declined to run this script. Ask what they would like changed, or "
+                    "answer without it."
+                )
 
         up = await container.ensure_up()
         if not up.ok:

@@ -5,6 +5,7 @@ import { AddSource } from "./components/AddSource";
 import { Answer } from "./components/Answer";
 import { ChatHeader } from "./components/ChatHeader";
 import { ChatNav } from "./components/ChatNav";
+import { Approval } from "./components/Approval";
 import { Dashboard } from "./components/Dashboard";
 import { DashboardNav } from "./components/DashboardNav";
 import type { ComposerHandle } from "./components/Composer";
@@ -480,6 +481,12 @@ export default function App() {
                 return (
                   <div key={i} className="row">
                     <FileBlock chatId={activeId ?? ""} label={item.label} paths={item.paths} />
+                  </div>
+                );
+              case "approval":
+                return (
+                  <div key={i} className="row">
+                    <Approval chatId={activeId ?? ""} label={item.label} script={item.script} />
                   </div>
                 );
               case "compacted":
