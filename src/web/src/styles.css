@@ -1091,6 +1091,23 @@ textarea {
   color: var(--bad);
 }
 
+/* A running script's output, followed as it arrives. Capped and scrolling: a chatty script
+   would otherwise push the composer off the screen while it worked. */
+.tool-stream {
+  border-top: 1px solid var(--line);
+  margin: 0;
+  padding: 10px 13px;
+  max-height: 180px;
+  overflow: auto;
+  background: var(--code-bg);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
 .tool-body {
   border-top: 1px solid var(--line);
   padding: 11px 13px;

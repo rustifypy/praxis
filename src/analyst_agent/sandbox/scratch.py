@@ -133,6 +133,21 @@ def save_script(chat_id: str, script: str) -> str:
     return f"{SCRIPTS}/{path.name}"
 
 
+def pid_file(script: str) -> str:
+    """Where a run records its own pid, relative to the workspace. Under `LOGS`, so `listing`
+    keeps it out of what a script wrote."""
+    return f"{LOGS}/{Path(script).stem}.pid"
+
+
+def pid(chat_id: str, script: str) -> int:
+    """The pid a run recorded, or 0 before it has got that far. Read from the host because the
+    workspace is a bind mount — the image has no `ps` to find it with from inside."""
+    try:
+        return int((settings.dir_path / ROOT / chat_id / pid_file(script)).read_text().strip())
+    except (OSError, ValueError):
+        return 0
+
+
 def record(chat_id: str, name: str, text: str, limit: int) -> tuple[str, str]:
     """`(what the model reads, where the whole thing is)`, with the log path empty when nothing
     had to be cut.

@@ -3,6 +3,7 @@ type EventType =
   | "thinking"
   | "text"
   | "tool_start"
+  | "output"
   | "tool_end"
   | "compacted"
   | "error"
@@ -77,6 +78,8 @@ export interface ToolEnd {
   /** Workspace paths a script wrote or changed, from `run_python`. Paths only: the files are on
    *  disk in the bind mount, and the download route is how they are read. */
   wrote?: string[];
+  /** What a script printed, trimmed. The whole of it is in the workspace log. */
+  output?: string;
 }
 
 /**
@@ -98,6 +101,9 @@ export type Item =
       end?: ToolEnd;
       startedAt?: number;
       ms?: number;
+      /** What a running script has printed so far. Live only — `output` events are not stored,
+       *  so a replayed transcript reads the whole thing off `end` instead. */
+      live?: string;
     }
   /**
    * A query's data, as its own block rather than a fold inside the trace step.

@@ -453,6 +453,7 @@ export default function App() {
                       end={item.end}
                       startedAt={item.startedAt}
                       ms={item.ms}
+                      live={item.live}
                     />
                   </div>
                 );

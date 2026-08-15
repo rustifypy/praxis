@@ -9,7 +9,9 @@ it actually ran and leaves a computed figure's provenance on disk rather than on
 workspace is a bind mount — so an export works while the image is still building.
 """
 
+import asyncio
 import csv
+import time
 
 from langchain.tools import tool
 
@@ -18,7 +20,9 @@ from ...cube.shape import Column, export_value
 from ...sandbox import container, scratch
 from ..session import Session
 
-EVENT_KEYS = frozenset({"tool", "label", "ok", "note", "errors", "exit_code", "output", "wrote"})
+EVENT_KEYS = frozenset(
+    {"tool", "label", "ok", "note", "errors", "exit_code", "output", "wrote", "delta"}
+)
 """Every key one of these events may carry — asserted by a test. Absent on purpose: the script
 body, the exported rows, and the whole of a command's output. A transcript records that a script
 ran and how it ended; the workspace holds the script and the data, `.logs/` holds what it said.
@@ -34,12 +38,25 @@ WROTE_LIMIT = 10
 """How many of a run's files are named. A script that writes three hundred PNGs has said what it
 did by the tenth, and the event is the transcript's copy — the workspace holds them all."""
 
+STREAM_INTERVAL_S = 0.1
+STREAM_LIMIT = 20_000
+"""How often a running script's output is pushed, and how much of it is pushed at all. Past the
+limit the live view stops: `tool_end` and the log file carry the whole of it either way."""
+
+TURN_SECONDS = 300.0
+TURN_OUTPUT = 20_000
+"""What one turn may spend in the sandbox. `EXEC_TIMEOUT_S` and `OUTPUT_LIMIT` cap a single call,
+and forty of those is eighty minutes. Provisional: no long run has been measured yet."""
+
 
 def build_code_tools(session: Session) -> list:
     # A Session with no chat has no workspace of its own — only tests build one, and they get a
     # shared directory rather than the `workspaces` root itself.
     chat_id = session.chat_id or "scratch"
     scratch.ensure(chat_id)
+    # Per turn: a fresh agent, and so a fresh closure, is built for each one.
+    spent_seconds = 0.0
+    spent_chars = 0
 
     def _start(name: str, label: str) -> None:
         emit(Event(type="tool_start", data={"tool": name, "label": label}))
@@ -105,6 +122,18 @@ def build_code_tools(session: Session) -> list:
         included, so a chart you save is a chart they can see. Give it a name that says what it
         is.
         """
+        nonlocal spent_seconds, spent_chars
+        if session.cancel is not None and session.cancel.is_set():
+            return "The user stopped this turn. Run nothing else."
+        if spent_seconds >= TURN_SECONDS or spent_chars >= TURN_OUTPUT:
+            spent = f"{spent_seconds:.0f}s and {spent_chars} characters"
+            _start("run_python", "over budget")
+            _end("run_python", False, errors=[f"this turn has spent {spent} in the sandbox"])
+            return (
+                f"This turn's sandbox budget is spent ({spent}). Answer from what you have "
+                "already computed."
+            )
+
         saved = scratch.save_script(chat_id, script)
         _start("run_python", saved)
 
@@ -113,21 +142,58 @@ def build_code_tools(session: Session) -> list:
             _end("run_python", False, errors=[up.message])
             return f"The sandbox is not available: {up.message}"
 
+        pending = ""
+        streamed = 0
+        pushed = 0.0
+
+        def on_output(chunk: str) -> None:
+            nonlocal pending, streamed, pushed
+            if streamed >= STREAM_LIMIT:
+                return
+            pending += chunk
+            if (now := time.monotonic()) - pushed < STREAM_INTERVAL_S:
+                return
+            pushed, streamed = now, streamed + len(pending)
+            emit(Event(type="output", data={"tool": "run_python", "delta": pending}))
+            pending = ""
+
         # Either side of the run, so a chart the script drew is named rather than left for
         # someone to find with `ls`. The model has no reason to mention a file it did not print,
         # and until this the browser had no way to learn the file existed at all.
         before = scratch.snapshot(chat_id)
-        result = await container.execute(chat_id, f"python {saved}")
+        # `exec` so the pid the run records is python's rather than the shell's — there is no
+        # `ps` in the image to find it with afterwards.
+        command = f"echo $$ > {scratch.pid_file(saved)}; exec python {saved}"
+        started = time.monotonic()
+        runner = asyncio.create_task(container.execute(chat_id, command, on_output=on_output))
+        stop = asyncio.create_task((session.cancel or asyncio.Event()).wait())
+        done, _ = await asyncio.wait({runner, stop}, return_when=asyncio.FIRST_COMPLETED)
+        stop.cancel()
+
+        stopped = runner not in done
+        if stopped:
+            # The pid file may not be there yet: an exec takes ~65ms to start, and stop can be
+            # pressed inside that window.
+            for _ in range(40):
+                if pid := scratch.pid(chat_id, saved):
+                    await container.kill(pid)
+                    break
+                await asyncio.sleep(0.05)
+        result = await runner
+        spent_seconds += time.monotonic() - started
+
         wrote = [p for p, mark in scratch.snapshot(chat_id).items() if before.get(p) != mark]
 
         both = "\n".join(part for part in (result.out.rstrip(), result.err.rstrip()) if part)
         shown, log = scratch.record(chat_id, "run", both, OUTPUT_LIMIT)
+        spent_chars += len(shown)
         _end(
             "run_python",
             result.ok,
             exit_code=result.code,
             output=shown,
             wrote=wrote[:WROTE_LIMIT],
+            note="stopped by the user" if stopped else "",
         )
 
         head = f"{saved} exited {result.code}"
@@ -135,7 +201,9 @@ def build_code_tools(session: Session) -> list:
             named = ", ".join(wrote[:WROTE_LIMIT])
             more = len(wrote) - WROTE_LIMIT
             head += f"; wrote {named}" + (f" and {more} more" if more > 0 else "")
-        if result.code in (124, 137):
+        if stopped:
+            head += " — stopped by the user"
+        elif result.code in (124, 137):
             head += f" — killed at the {container.EXEC_TIMEOUT_S:.0f}s limit"
         # The memory and process limits belong to the container, not to this script, so a script
         # that exceeded one takes the container with it. Said plainly, because the alternative is

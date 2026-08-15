@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 from ..core import proc
@@ -47,14 +48,16 @@ FIXED_ENV = {
 """Set by `argv` itself and deliberately not a parameter — see the invariants in `__init__`."""
 
 
-async def _docker(*args: str, timeout: float = 60.0) -> Result:
+async def _docker(
+    *args: str, timeout: float = 60.0, on_output: Callable[[str], None] | None = None
+) -> Result:
     """One docker command. Never raises for a non-zero exit — callers read `ok`.
 
     `sources.docker.run` is the same two lines and stays separate: that package is tier 3 and
     this one is tier 1, so importing it would be an upward import. Neither is a rule that could
     drift; both are `proc.run` with the program filled in.
     """
-    return await proc.run("docker", *args, timeout=timeout)
+    return await proc.run("docker", *args, timeout=timeout, on_output=on_output)
 
 
 def image_tag() -> str:
@@ -145,6 +148,21 @@ def exec_argv(chat_id: str, command: str, timeout: float = EXEC_TIMEOUT_S) -> li
     ]
 
 
+def kill_argv(pid: int) -> list[str]:
+    """TERM one process inside the sandbox.
+
+    Through `bash -c` because the image has no `/bin/kill` — nor `ps`, `pkill` or `pgrep`, since
+    `python:3.12-slim` carries no procps. Getting that wrong is expensive rather than merely
+    broken: `docker exec` reports a missing executable as `EXEC_START_FAILED`, which `execute`
+    treats as a stale mount and rebuilds the container over, taking every other chat with it.
+    """
+    return ["exec", NAME, "bash", "-c", f"kill -TERM {pid}"]
+
+
+async def kill(pid: int) -> Result:
+    return await _docker(*kill_argv(pid), timeout=15)
+
+
 async def state() -> str:
     """docker's state word for the sandbox, or "" when there is no such container. Also how a
     command that killed it is told apart from one that merely failed."""
@@ -217,19 +235,26 @@ matches nothing and the recovery below never runs.
 """
 
 
-async def execute(chat_id: str, command: str, timeout: float = EXEC_TIMEOUT_S) -> Result:
+async def execute(
+    chat_id: str,
+    command: str,
+    timeout: float = EXEC_TIMEOUT_S,
+    on_output: Callable[[str], None] | None = None,
+) -> Result:
     """Run one command in a chat's directory. Exit 124 is the container's `timeout` giving up on
-    it; 137 means killed outright, by that timeout's second signal or by the memory limit."""
+    it; 137 means killed outright, by that timeout's second signal or by the memory limit; 143 is
+    a TERM from `kill`, which is the stop button."""
     # The host timeout is longer on purpose: it exists to stop us waiting on a docker client that
     # has itself wedged, not to stop the command.
-    result = await _docker(*exec_argv(chat_id, command, timeout), timeout=timeout + 10)
+    argv = exec_argv(chat_id, command, timeout)
+    result = await _docker(*argv, timeout=timeout + 10, on_output=on_output)
     if EXEC_START_FAILED not in result.out + result.err:
         return result
 
     # Rebuild against the mount as it is now, then try the command once more.
     if not (up := await rebuild()).ok:
         return up
-    return await _docker(*exec_argv(chat_id, command, timeout), timeout=timeout + 10)
+    return await _docker(*argv, timeout=timeout + 10, on_output=on_output)
 
 
 async def remove() -> Result:
