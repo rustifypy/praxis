@@ -102,9 +102,30 @@ export async function uploadFile(chatId: string, file: File): Promise<Upload> {
   return json<Upload>(`/api/chats/${chatId}/files`, { method: "POST", body });
 }
 
+const encodePath = (path: string) => path.split("/").map(encodeURIComponent).join("/");
+
 /** A workspace file as a plain link, like the result CSV — the cookie authenticates it. */
 export const chatFileUrl = (chatId: string, path: string) =>
-  `/api/chats/${chatId}/files/${path.split("/").map(encodeURIComponent).join("/")}`;
+  `/api/chats/${chatId}/files/${encodePath(path)}`;
+
+/**
+ * The head of a workspace file, parsed enough to render — `table` for a CSV, `text` for
+ * anything readable, `none` for bytes with no useful head.
+ *
+ * Columns are names only. These bytes never went through Cube, so there is no `ResultColumn`
+ * to say a column is money, and a guess dressed as metadata is worse than plain strings.
+ */
+export interface FilePreview {
+  kind: "table" | "text" | "none";
+  columns: string[];
+  rows: string[][];
+  text: string;
+  bytes: number;
+  truncated: boolean;
+}
+
+export const filePreview = (chatId: string, path: string) =>
+  json<FilePreview>(`/api/chats/${chatId}/preview/${encodePath(path)}`);
 
 /** Take a file back off the workspace. Only the composer calls it, and only before the question
  *  it was attached to has been sent — the prompt is built from the directory, so dropping the
