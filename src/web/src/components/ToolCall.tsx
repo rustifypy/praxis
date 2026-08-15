@@ -25,6 +25,7 @@ export function ToolCall({
   end,
   startedAt,
   ms,
+  live,
 }: {
   tool: string;
   label: string;
@@ -32,10 +33,12 @@ export function ToolCall({
   end?: ToolEnd;
   startedAt?: number;
   ms?: number;
+  live?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [settling, setSettling] = useState(false);
   const wasRunning = useRef(false);
+  const stream = useRef<HTMLPreElement>(null);
 
   const running = !end;
   const failed = !!end && !end.ok;
@@ -63,7 +66,15 @@ export function ToolCall({
   else if (end?.note) summary = end.note;
   else summary = duration(ms);
 
-  const hasDetail = Boolean(query || end?.sql || end?.errors?.length || end?.warnings?.length);
+  // Follow a running script's output, which is the only reason to show it live.
+  useEffect(() => {
+    const pane = stream.current;
+    if (pane) pane.scrollTop = pane.scrollHeight;
+  }, [live]);
+
+  const hasDetail = Boolean(
+    query || end?.sql || end?.output || end?.errors?.length || end?.warnings?.length,
+  );
 
   return (
     <div
@@ -83,6 +94,12 @@ export function ToolCall({
         <span className="tool-summary">{summary}</span>
         {hasDetail && <span className="caret">{open ? "▾" : "▸"}</span>}
       </button>
+
+      {running && live ? (
+        <pre className="tool-stream" ref={stream}>
+          {live}
+        </pre>
+      ) : null}
 
       <Collapse open={open}>
         <div className="tool-body">
@@ -106,6 +123,7 @@ export function ToolCall({
             <Detail title="Cube query" body={JSON.stringify(query, null, 2)} />
           ) : null}
           {end?.sql ? <Detail title="SQL" body={end.sql} mono="sql" /> : null}
+          {end?.output ? <Detail title="Output" body={end.output} /> : null}
         </div>
       </Collapse>
     </div>

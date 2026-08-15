@@ -71,31 +71,33 @@ async def run_turn(
             config={"configurable": {"thread_id": chat_id}},
             stream_mode=["custom", "messages"],
         ):
-            if cancel and cancel.is_set():
-                break
-
             if mode == "custom":
                 # Flush first: the thinking that led to a tool call belongs above it.
                 await flush()
                 event = Event(**payload)
-                await store.append(chat_id, turn_id, event)
+                # `output` is a running script's stdout and the one type that stays off the
+                # transcript: `tool_end` carries the whole of it, trimmed.
+                if event.type != "output":
+                    await store.append(chat_id, turn_id, event)
                 yield event
-                continue
+            else:
+                chunk, meta = payload
+                # Two things must not reach the transcript as the agent's answer: tool
+                # return values (ToolMessage chunks flow through this same stream, and
+                # run_query's is a JSON row dump) and the summarizing model's output.
+                tagged = COMPACTION_TAG in (meta.get("tags") or [])
+                if isinstance(chunk, AIMessageChunk) and not tagged:
+                    if thinking := reasoning_of(chunk.content):
+                        buffer["thinking"] += thinking
+                        yield Event(type="thinking", data={"delta": thinking})
+                    if text := text_of(chunk.content):
+                        buffer["text"] += text
+                        yield Event(type="text", data={"delta": text})
 
-            chunk, meta = payload
-            # Two things must not reach the transcript as the agent's answer: tool
-            # return values (ToolMessage chunks flow through this same stream, and
-            # run_query's is a JSON row dump) and the summarizing model's output.
-            if not isinstance(chunk, AIMessageChunk):
-                continue
-            if COMPACTION_TAG in (meta.get("tags") or []):
-                continue
-            if thinking := reasoning_of(chunk.content):
-                buffer["thinking"] += thinking
-                yield Event(type="thinking", data={"delta": thinking})
-            if text := text_of(chunk.content):
-                buffer["text"] += text
-                yield Event(type="text", data={"delta": text})
+            # After the event and not before it: a stopped script emits its own `tool_end`, and
+            # breaking first dropped it — the turn replayed as a step that never finished.
+            if cancel and cancel.is_set():
+                break
 
         await flush()
     except Exception as exc:  # noqa: BLE001 — a failed turn is a transcript entry, not a 500
@@ -130,6 +132,7 @@ async def stream_turn(
             store=store,
             chat_id=chat_id,
             turn_id=turn_id,
+            cancel=cancel,
         )
         # Seeded from the log so `explain_last_query` still answers "show me the SQL for
         # that" on turn three, and after a restart.

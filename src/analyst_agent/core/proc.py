@@ -9,6 +9,7 @@ How a subprocess is run is not a per-program decision, so it is decided once her
 """
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 
 DEFAULT_TIMEOUT_S = 60.0
@@ -30,14 +31,27 @@ class Result:
         return (self.err or self.out).strip()[:800]
 
 
+async def _drain(stream, sink: list[str], on_output: Callable[[str], None]) -> None:
+    """Read one pipe to EOF. Chunks and not lines: `readline` raises past its 64 KiB buffer."""
+    while chunk := await stream.read(4096):
+        text = chunk.decode(errors="replace")
+        sink.append(text)
+        on_output(text)
+
+
 async def run(
     program: str,
     *args: str,
     timeout: float = DEFAULT_TIMEOUT_S,
     env: dict[str, str] | None = None,
+    on_output: Callable[[str], None] | None = None,
 ) -> Result:
     """Run `program` with `args`. 127 is "not installed", 124 is "timed out" — the two
     failures that are about the machine rather than about what was asked.
+
+    `on_output` gets each chunk as it arrives, for a caller showing a long command's progress.
+    Both pipes are drained concurrently: a command that fills the stdout buffer blocks until
+    someone reads it.
     """
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -50,9 +64,23 @@ async def run(
     except FileNotFoundError:
         return Result(127, "", f"{program} not found on PATH")
     try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout)
+        if on_output is None:
+            out, err = await asyncio.wait_for(proc.communicate(), timeout)
+            return Result(
+                proc.returncode or 0, out.decode(errors="replace"), err.decode(errors="replace")
+            )
+        outs: list[str] = []
+        errs: list[str] = []
+        await asyncio.wait_for(
+            asyncio.gather(
+                _drain(proc.stdout, outs, on_output),
+                _drain(proc.stderr, errs, on_output),
+                proc.wait(),
+            ),
+            timeout,
+        )
+        return Result(proc.returncode or 0, "".join(outs), "".join(errs))
     except TimeoutError:
         proc.kill()
         await proc.wait()
         return Result(124, "", f"{program} did not finish within {timeout:.0f}s")
-    return Result(proc.returncode or 0, out.decode(errors="replace"), err.decode(errors="replace"))

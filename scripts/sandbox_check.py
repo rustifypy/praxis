@@ -19,6 +19,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 
 failures: list[str] = []
 
@@ -34,13 +35,13 @@ def tail(text: str) -> str:
     return lines[-1] if lines else ""
 
 
-def runner(chat: str):
+def runner(chat: str, cancel: asyncio.Event | None = None):
     """`run_python`, built on a Session with no store — everything here is about what a script can
     do once it runs, and `export_result` is covered by the unit tests."""
     from analyst_agent.agent.session import Session
     from analyst_agent.agent.tools.code import build_code_tools
 
-    session = Session(catalog=None, client=None, grounding=None, chat_id=chat)
+    session = Session(catalog=None, client=None, grounding=None, chat_id=chat, cancel=cancel)
     return {t.name: t for t in build_code_tools(session)}["run_python"]
 
 
@@ -173,6 +174,64 @@ async def files(chat: str) -> None:
     check("a file with no shape is a note, not a failure", bool(said.note), said.note)
 
 
+async def cancellation(chat: str) -> None:
+    """The stop button against a script that is still running. The kill has to reach the process
+    *inside* the container, and the image has no `ps` to find it with — so the run records its own
+    pid and the host reads it out of the bind mount."""
+    from analyst_agent.sandbox import container
+
+    print("\n— stopping a script that is still running —")
+    cancel = asyncio.Event()
+
+    async def press() -> None:
+        await asyncio.sleep(1.0)
+        cancel.set()
+
+    pressed = asyncio.create_task(press())
+    started = time.monotonic()
+    out = await runner(chat, cancel).ainvoke(
+        {"script": "import time\nfor _ in range(60):\n    time.sleep(1)\nprint('RAN TO THE END')"}
+    )
+    await pressed
+    elapsed = time.monotonic() - started
+
+    check("the script died on the signal, not at its timeout", elapsed < 5, f"{elapsed:.1f}s")
+    check("it says it was stopped", "stopped by the user" in out, tail(out))
+    check("the container survived the kill", await container.state() == "running")
+    out = await runner(chat).ainvoke({"script": "print('still here')"})
+    check("the next script runs as normal", "still here" in out, tail(out))
+
+
+async def streaming(chat: str) -> None:
+    """Output has to arrive while the script is running, or a two-minute run shows nothing."""
+    from analyst_agent.agent.tools import code
+    from analyst_agent.core import events
+
+    print("\n— output arrives before the script ends —")
+    seen: list[float] = []
+    started = time.monotonic()
+    real = events.emit
+
+    def watch(event) -> None:
+        if event.type == "output":
+            seen.append(time.monotonic() - started)
+        real(event)
+
+    script = "import time\nfor i in range(4):\n    print(i, flush=True)\n    time.sleep(0.5)"
+    code.emit = watch
+    try:
+        await runner(chat).ainvoke({"script": script})
+    finally:
+        code.emit = real
+
+    check("something was streamed", bool(seen), f"{len(seen)} pushes")
+    check(
+        "the first push beat the exit",
+        bool(seen) and seen[0] < 1.5,
+        f"at {seen[0]:.1f}s of a 2s script" if seen else "",
+    )
+
+
 async def stale_mount(chat: str) -> None:
     """The mount root replaced under a running container. Every exec then fails to `chdir` until
     the container is rebuilt, and docker says so on *stdout* — which is how the recovery came to be
@@ -269,6 +328,8 @@ async def main() -> int:
     try:
         await isolation(chat)
         await files(chat)
+        await cancellation(chat)
+        await streaming(chat)
         if args.stale:
             await stale_mount(chat)
         if args.ask:

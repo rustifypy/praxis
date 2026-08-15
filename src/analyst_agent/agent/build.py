@@ -1,5 +1,5 @@
 from langchain.agents import create_agent
-from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain.agents.middleware import ModelCallLimitMiddleware, ToolCallLimitMiddleware
 
 from ..core.llm import build_model
 from ..sandbox import profile
@@ -47,11 +47,8 @@ def build_agent(
         ),
         middleware=[
             AuditLog(),
-            # run_limit, not thread_limit: a thread is a whole conversation once chats
-            # persist, and a thread limit would silently end one mid-chat. Raised from 20 for
-            # the sandbox — a run-read-fix loop spends calls where a query turn spends one, and
-            # stopping mid-debug leaves a script and no answer.
             ModelCallLimitMiddleware(run_limit=40, exit_behavior="end"),
+            ToolCallLimitMiddleware(tool_name="run_python", run_limit=15, exit_behavior="continue"),
             CompactionNotice(model=model.with_config(tags=[COMPACTION_TAG])),
         ],
         checkpointer=checkpointer,

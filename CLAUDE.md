@@ -298,6 +298,22 @@ already answers. Three rules hold it together:
    of the run and reports what changed, on the event as `wrote` and in what the model reads —
    otherwise a chart it drew is a file nobody knows exists.
 
+**A running script can be watched and stopped, and neither goes through the container.** Output is
+streamed as `output` events — **the one event type that is never stored**, because `tool_end`
+already carries the whole of it trimmed to `OUTPUT_LIMIT` and storing deltas as well would put an
+untrimmed second copy in the event log; `agent/turn.py` holds that exemption. Stopping is the same
+shape: the flag `run_turn` watches is only tested between stream chunks, and an exec is one `await`
+that no chunk interrupts, so `run_python` races the run against `session.cancel` itself. The kill
+reaches *inside* — `echo $$` records the pid, the host reads it out of the bind mount, and
+`container.kill` sends the TERM — because killing the `docker exec` client leaves the command
+running. Measured live: dead 0.1s after the button, container still up, next script normal.
+
+**Three caps, and the one that was missing.** `EXEC_TIMEOUT_S` bounds a call and `OUTPUT_LIMIT`
+bounds what it says, but forty model calls of each is eighty minutes and 160,000 characters — so
+`TURN_SECONDS`/`TURN_OUTPUT` bound the turn, and `ToolCallLimitMiddleware` bounds the count with
+`exit_behavior="continue"` so the agent answers from what it has rather than stopping dead. The
+turn's numbers are provisional: no long write-run-fix loop has been measured yet.
+
 **The profile is what makes an upload usable rather than merely present.** Without it the first
 move after every upload is a `run_python` to discover the columns: it works, costs a round trip,
 and comes out differently each time — and a 200 MB CSV cannot go into a context at all, so a
@@ -308,9 +324,10 @@ a failed upload.
 
 **`make sandbox-check` is the other half of `make test`.** The suite covers the argv, the path
 resolution, the CSV export, the trimming and both file routes; what a container actually *does* —
-no egress, no capabilities, a read-only root, a kill at the timeout, and what the profiler makes
-of a real CSV — is asserted against a live one by `scripts/sandbox_check.py`, with `--stale` for
-the mount recovery, `--ask` for a real turn and `--file` to attach something to it.
+no egress, no capabilities, a read-only root, a kill at the timeout, a script that dies on the stop
+button, output that arrives before the exit, and what the profiler makes of a real CSV — is
+asserted against a live one by `scripts/sandbox_check.py`, with `--stale` for the mount recovery,
+`--ask` for a real turn and `--file` to attach something to it.
 
 **The web portal** (`web/`, `src/web/`, and the transcript beneath it) — `analyst` opens a
 browser the way Jupyter does. One flat event stream is the contract between agent and browser:
@@ -339,6 +356,11 @@ events, and `Session` provenance is rebuilt from it (`agent.session.replay`), so
 only in memory. And **tools author their own events** through LangGraph's stream writer
 rather than the service inferring them from chunks, so a gate rejection reaches the
 browser with its reasons attached.
+
+`output` is the single exception to the first, and deliberately narrow: a running script's stdout,
+live only, because the whole of it lands on `tool_end` trimmed and a replayed transcript reads it
+from there. Any *other* wire-only type would be state that exists nowhere — check that the whole
+thing is already stored somewhere before adding one.
 
 `parent_id`/`depth` are on every event and always `None`/`0`. They are reserved for the
 orchestrator's subagents so that adding nesting never changes the protocol.
@@ -518,6 +540,16 @@ branch, at a time).
   missed it because the ones that assert on events **monkeypatch `emit`**, so the real
   no-op path had no coverage until a script drove `add_tile` directly. When a fixture
   replaces the thing under test, add one case without the fixture.
+- **The sandbox image has no `ps`, `pkill`, `pgrep` or `/bin/kill`** — `python:3.12-slim` carries
+  no procps, and `kill` exists only as a bash builtin. So `docker exec <name> kill …` fails, and
+  fails *expensively*: docker reports a missing executable as `OCI runtime exec failed`, which is
+  the string `EXEC_START_FAILED` matches, so `execute` would read it as a stale mount and rebuild
+  the shared container — taking every other chat's running script with it. `kill_argv` goes through
+  `bash -c`, and the pid comes from a file the run writes rather than from a process search.
+  Adding procps instead would change the Dockerfile's digest, and `image_tag()` is that digest, so
+  every install rebuilds the image on next start.
+- **`StreamReader.readline` raises past 64 KiB**, so a streaming reader has to take chunks: one
+  `print` of a wide dataframe has no newline in it and would fail rather than stream.
 - **`docker exec` reports "OCI runtime exec failed" on *stdout*, with exit 127.** Not stderr.
   A recovery branch keyed on `result.err` matches nothing and silently never runs — which is
   how `container.execute`'s stale-mount retry passed review and did nothing until it was driven

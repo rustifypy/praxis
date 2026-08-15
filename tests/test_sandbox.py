@@ -128,6 +128,30 @@ def test_the_timeout_is_inside_the_container_not_on_the_host():
     assert args[-3:] == ["bash", "-c", "sleep 999"]
 
 
+def test_a_kill_goes_through_bash_because_the_image_has_no_kill_binary():
+    """`python:3.12-slim` carries no procps and no `/bin/kill`, and `docker exec` reports a
+    missing executable as `EXEC_START_FAILED` — which `execute` treats as a stale mount and
+    rebuilds the container over, taking every other chat's script with it."""
+    args = container.kill_argv(4242)
+    assert args == ["exec", container.NAME, "bash", "-c", "kill -TERM 4242"]
+
+
+def test_a_runs_pid_file_is_named_after_its_script_and_hidden_from_the_listing(data_dir):
+    """Hidden, or the bookkeeping would be reported as a file the script wrote."""
+    scratch.ensure(CHAT)
+    assert scratch.pid_file("scripts/run-007.py") == ".logs/run-007.pid"
+
+    (data_dir / "workspaces" / CHAT / ".logs" / "run-007.pid").write_text("31337\n")
+    assert scratch.pid(CHAT, "scripts/run-007.py") == 31337
+    assert scratch.listing(CHAT, "**/*") == []
+
+
+def test_a_pid_that_was_never_recorded_reads_as_zero_rather_than_raising():
+    """Read before the run gets that far, which is what a stop pressed immediately does."""
+    scratch.ensure(CHAT)
+    assert scratch.pid(CHAT, "scripts/run-999.py") == 0
+
+
 # --- a path from the model ---------------------------------------------------
 
 

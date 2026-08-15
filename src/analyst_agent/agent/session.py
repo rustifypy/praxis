@@ -5,6 +5,7 @@ Provenance is agent vocabulary and storage is not, which is why `replay` lives h
 the events the store hands over. `transcript` names neither of these types.
 """
 
+import asyncio
 from dataclasses import dataclass, field
 
 from ..cube.catalog import Catalog
@@ -44,6 +45,7 @@ class Session:
     chat_id: str = ""
     turn_id: str = ""
     """Where a result set is kept, and under which chat and turn."""
+    cancel: asyncio.Event | None = None
 
 
 def replay(events: list[dict]) -> tuple[list[QueryRecord], list[dict]]:

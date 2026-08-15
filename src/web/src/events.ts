@@ -117,6 +117,15 @@ export function applyEvent(items: Item[], event: AgentEvent): Item[] {
         },
       ];
 
+    case "output": {
+      const i = items.findLastIndex((item) => item.kind === "tool" && !item.end);
+      if (i === -1) return items;
+      const tool = items[i] as Extract<Item, { kind: "tool" }>;
+      const next = [...items];
+      next[i] = { ...tool, live: (tool.live ?? "") + (delta ?? "") };
+      return next;
+    }
+
     case "tool_end": {
       // Attach to the most recent tool still waiting for its result.
       const i = items.findLastIndex((item) => item.kind === "tool" && !item.end);
