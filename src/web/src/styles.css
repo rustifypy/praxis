@@ -1244,38 +1244,45 @@ textarea {
 
 /* A script waiting on a click. Bordered in the accent rather than a warning colour: this is a
    thing to read, not a thing to be alarmed by — the sandbox is what makes it safe. */
-.ask {
-  border: 1px solid var(--accent);
-  border-radius: var(--radius);
-  background: var(--raised);
+/* ---------- the script a run ran, and the click that let it ----------
+   Both inside the step, because the script is what the step did — as its own card it sat
+   below the run and put a script's output above the script that printed it. */
+
+.script {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--code-bg);
   overflow: hidden;
 }
 
-.ask-done {
-  border-color: var(--line);
-  opacity: 0.72;
-}
-
-.ask-head {
+.script-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
-  padding: 9px 12px;
+  padding: 4px 6px 4px 12px;
   border-bottom: 1px solid var(--line);
 }
 
-.ask-label {
-  font-size: 12.5px;
-  color: var(--muted);
+.script-name {
+  margin-right: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11px;
 }
 
-.ask-script {
+/* `.copy` is painted `--code-bg`, which is this head's own background. */
+.script-head .copy {
+  background: var(--raised);
+}
+
+.script-body {
   margin: 0;
   padding: 12px;
-  max-height: 320px;
+  max-height: 420px;
   overflow: auto;
-  background: var(--code-bg);
   font-family: var(--mono);
   font-size: 12.5px;
   line-height: 1.55;
@@ -1283,11 +1290,61 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+/* The peek fades into the button rather than stopping on a hard edge, which is what says
+   there is more of it without a row of dots pretending to be code. */
+.script-body.peek {
+  padding-bottom: 4px;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent);
+}
+
+.script-more {
+  width: 100%;
+  min-height: var(--control);
+  line-height: 1.2;
+  padding: 0 12px;
+  border: none;
+  border-top: 1px solid var(--line);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.12s;
+}
+
+.script-more:hover {
+  color: var(--accent);
+}
+
+.ask {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent-soft);
+}
+
+/* Answered: a line of text, because the buttons are gone and the step above already says
+   what happened. */
+.ask-done {
+  padding: 2px 2px 4px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.ask-label {
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
 .ask-choices {
   display: flex;
   gap: 8px;
-  padding: 10px 12px;
-  border-top: 1px solid var(--line);
+  margin-left: auto;
 }
 
 .ask-choice {
@@ -1320,8 +1377,9 @@ textarea {
   font-weight: 500;
 }
 
+/* Onto its own line of the wrapped row, so a long message does not squeeze the buttons. */
 .ask-failed {
-  padding: 0 12px 10px;
+  flex-basis: 100%;
   font-size: 12.5px;
   color: var(--bad);
 }

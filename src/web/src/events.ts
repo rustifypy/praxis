@@ -95,11 +95,17 @@ export function applyEvent(items: Item[], event: AgentEvent): Item[] {
         },
       ];
 
-    case "approval":
-      return [
-        ...items,
-        { kind: "approval", label: event.data.label ?? "", script: event.data.script ?? "" },
-      ];
+    // Onto the step that is asking, not a block of its own. A separate card sat *below* the
+    // run, which put a script's output above the script that printed it, and once answered it
+    // was a dead card carrying a copy of a file the step already shows.
+    case "approval": {
+      const i = items.findLastIndex((item) => item.kind === "tool" && !item.end);
+      if (i === -1) return items;
+      const tool = items[i] as Extract<Item, { kind: "tool" }>;
+      const next = [...items];
+      next[i] = { ...tool, script: event.data.script ?? "", awaiting: true };
+      return next;
+    }
 
     case "output": {
       const i = items.findLastIndex((item) => item.kind === "tool" && !item.end);
