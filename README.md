@@ -242,7 +242,8 @@ make web-build                                          # the frontend artifact 
 make test lint
 ```
 
-`analyst` only starts the portal — three flags, and nothing else. Querying goes through the
+`analyst` only starts the portal, and takes no arguments — host, port and data directory
+come from the environment or `.env`. Querying goes through the
 portal because the portal is what selects a source: the single global `CUBE_URL` does not
 survive more than one Cube container.
 

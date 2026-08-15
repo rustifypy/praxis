@@ -19,11 +19,11 @@ uv run pytest -q -k dashboard                                # by name
 make web-build                # build the frontend into the package (needs npm)
 make web                      # web-build, then serve
 make serve                    # analyst — opens the portal in a browser
-
-uv run analyst --no-browser --port 8481                # portal without opening a tab
 ```
 
-**`__main__.py` is a launcher** — argparse, three flags, `uvicorn.run` — and `analyst`
+**`__main__.py` is a launcher** — a printed URL and `uvicorn.run`, and **it takes no
+arguments**: host, port and data directory come from settings, so `WEB_PORT=8481 uv run
+analyst` is how you move it and `.env` is where it lives. `analyst`
 starts the portal and nothing else. **The portal is the only surface**: add capability to
 `web/sources.py` and the panel, never a second entry point beside it. Two of them means the
 connection form and the four steps' confirmations get written twice, and anything resolving
