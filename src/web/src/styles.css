@@ -557,6 +557,40 @@ textarea {
   min-height: 0;
 }
 
+/* The positioning context for the jump pill, on the chat's `.main` only — the sources page
+   has an absolutely positioned drawer that resolves against something else. */
+.chat-main {
+  position: relative;
+}
+
+.jump {
+  position: absolute;
+  z-index: 20;
+  left: 50%;
+  /* Above the composer, which is the last thing in the column and sizes itself. */
+  bottom: 96px;
+  transform: translateX(-50%);
+  min-height: var(--control);
+  line-height: 1.2;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
+  animation: rise 0.16s var(--ease);
+  transition: color 0.12s, border-color 0.12s;
+}
+
+.jump:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 /* ---- the chat header: which source this conversation queries ---- */
 
 .chat-head {
@@ -858,6 +892,42 @@ textarea {
 .answer pre code {
   padding: 0;
   background: none;
+}
+
+/* A fenced block is a unit someone copies, so it gets its own head and its own button — the
+   answer's Copy takes all three paragraphs and the SQL in the middle of them. */
+.answer .fence {
+  margin: 12px 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--code-bg);
+  overflow: hidden;
+}
+
+.answer .fence-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.answer .fence-lang {
+  margin-right: auto;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+
+/* `.copy` is painted `--code-bg`, which is the head's own background here. */
+.answer .fence-head .copy {
+  background: var(--raised);
+}
+
+.answer .fence pre {
+  margin: 0;
+  border-radius: 0;
 }
 
 .answer-tools {
@@ -1459,18 +1529,112 @@ textarea {
   font-size: 11.5px;
 }
 
-.wrote-list {
-  margin: 0;
-  padding: 8px 12px 10px 28px;
+/* One non-image file: a head that is always there and a body that is open by default. Same
+   frame as `.res` one level in, because it holds the same thing — a table you read rather
+   than a link you follow. */
+.wrote-file + .wrote-file,
+.wrote-figure + .wrote-file {
+  border-top: 1px solid var(--line);
+}
+
+.wrote-file-head {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.wrote-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  transition: color 0.12s;
+}
+
+.wrote-toggle:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.wrote-toggle:disabled {
+  cursor: default;
+}
+
+.wrote-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--mono);
+  font-size: 12px;
+}
+
+.wrote-meta {
+  margin-left: auto;
+  flex: none;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.wrote-get {
+  flex: none;
+  min-height: var(--control);
+  line-height: 1.2;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 12px;
+  text-decoration: none;
+  transition: color 0.12s, border-color 0.12s;
+}
+
+.wrote-get:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.wrote-body {
+  border-top: 1px solid var(--line);
+}
+
+.wrote-note {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--faint);
   font-size: 12.5px;
 }
 
-.wrote-list a {
-  color: var(--accent);
+/* A preview header has no sort button to carry the padding `.res-table th` gives away. */
+.wrote-table th {
+  padding: 6px 12px;
+  color: var(--muted);
+}
+
+.wrote-table th.res-num {
+  text-align: right;
+}
+
+.wrote-text {
+  margin: 0;
+  max-height: 340px;
+  overflow: auto;
+  padding: 10px 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* ---------- the categorical palette ----------

@@ -78,14 +78,25 @@ export default function App() {
   const abort = useRef<AbortController | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const composer = useRef<ComposerHandle>(null);
-  // Stop following the stream once the reader scrolls up to re-read something.
+  // Stop following the stream once the reader scrolls up to re-read something. A ref, because
+  // the scroll effect reads it on every token and state there would re-render the transcript
+  // on every scroll event; `tailing` mirrors it for the one thing that has to be drawn.
   const pinned = useRef(true);
+  const [tailing, setTailing] = useState(true);
+
+  const follow = useCallback(() => {
+    pinned.current = true;
+    setTailing(true);
+    const el = scroller.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, []);
 
   const open = useCallback(async (id: string) => {
     abort.current?.abort();
     setActiveId(id);
     setBusy(false);
     pinned.current = true;
+    setTailing(true);
     setItems(buildTranscript(await api.chatEvents(id)));
   }, []);
 
@@ -214,7 +225,7 @@ export default function App() {
     abort.current = controller;
     setBusy(true);
     setTurnStart(Date.now());
-    pinned.current = true;
+    follow();
 
     try {
       for await (const event of api.sendMessage(activeId, question, files, controller.signal)) {
@@ -389,7 +400,7 @@ export default function App() {
           )}
         </main>
       ) : (
-      <main className="main">
+      <main className="main chat-main">
         <ChatHeader sources={sources} cubeUrl={cubeUrl} onShowSources={showSources} />
 
         <div
@@ -397,7 +408,11 @@ export default function App() {
           ref={scroller}
           onScroll={(e) => {
             const el = e.currentTarget;
-            pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+            const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+            if (near !== pinned.current) {
+              pinned.current = near;
+              setTailing(near);
+            }
           }}
         >
           {items.length === 0 && (
@@ -507,6 +522,14 @@ export default function App() {
             }
           })}
         </div>
+
+        {/* Scrolling up to re-read something stops the transcript following the stream, and
+            without this nothing says so — an answer arriving off-screen looks like no answer. */}
+        {!tailing && items.length > 0 && (
+          <button className="jump" onClick={follow}>
+            ↓ {busy ? "Jump to what it is writing" : "Jump to the end"}
+          </button>
+        )}
 
         <Composer
           ref={composer}
