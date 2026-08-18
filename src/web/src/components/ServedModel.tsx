@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type { ServedEntity, ServedMember, ServedModel as Model, SourceGrounding } from "../sources";
+import type { Grounding, ServedEntity, ServedMember, ServedModel as Model } from "../sources";
 import { ArtefactDetail, GroundingSections, matchesArtefact } from "./Grounding";
 import { Section } from "./Section";
 
 /**
- * Everything the agent brings to a question: what Cube compiled, and what this source
+ * Everything the agent brings to a question: what Cube compiled, and what grounding has
  * already told it. Not a YAML viewer — the files on disk are what was authored, this is
  * what survived compilation.
  *
@@ -46,7 +46,7 @@ export function ServedModel({
   onEdit,
 }: {
   model: Model | null;
-  grounding: SourceGrounding | null;
+  grounding: Grounding | null;
   loading: boolean;
   onRefresh: () => void;
   /** Why the model side cannot be read at all — a stopped container. Distinct from a

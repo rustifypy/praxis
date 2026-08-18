@@ -24,6 +24,20 @@ MAX_POINTS = 100
 a chart would plot the first hundred of four hundred months as if it were the series.
 """
 
+MAX_SLICES = 8
+
+MAX_HBARS = 30
+
+NO_X = ("kpi", "gauge")
+
+TIME_X = ("stat", "sparkline", "area", "stacked_area")
+
+MEASURE_X = ("scatter",)
+
+WITH_SERIES = ("line", "area", "stacked_area", "stacked_bar", "grouped_bar", "heatmap")
+
+NEEDS_SERIES = ("heatmap",)
+
 
 class ChartSpec(BaseModel):
     """What to draw. Column ids only — the renderer already has the header for labels and
@@ -36,11 +50,28 @@ class ChartSpec(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["line", "bar", "kpi"]
+    type: Literal[
+        "line",
+        "area",
+        "stacked_area",
+        "bar",
+        "stacked_bar",
+        "grouped_bar",
+        "hbar",
+        "donut",
+        "scatter",
+        "heatmap",
+        "gauge",
+        "sparkline",
+        "kpi",
+        "stat",
+    ]
     y: list[str] = Field(min_length=1)
     x: str = ""
     series: str = ""
     """Column whose values split `y` into one line each. Empty for a single series."""
+    target: float | None = None
+    """The figure a gauge is measured against. Meaningless on every other type."""
 
 
 def chart_for(query: dict, catalog: Catalog, rows: list[dict]) -> ChartSpec | None:
@@ -109,23 +140,38 @@ def validate_spec(spec: dict, columns: list[Column]) -> tuple[ChartSpec | None, 
         elif column.kind != "measure":
             errors.append(f"y column {member_id!r} is a {column.kind}, not a measure")
 
-    if kind == "kpi":
+    if kind in NO_X:
         if x:
-            errors.append("kpi takes no x column")
+            errors.append(f"{kind} takes no x column")
     elif not x:
         errors.append(f"{kind} needs an x column")
     elif x not in by_id:
         errors.append(f"x column {x!r} is not in this result")
+    elif kind in MEASURE_X:
+        if by_id[x].kind != "measure":
+            errors.append(
+                f"scatter plots one measure against another — x {x!r} is a {by_id[x].kind}"
+            )
     elif by_id[x].kind == "measure":
         errors.append(f"x column {x!r} is a measure — use a dimension or a time grain")
+    elif kind in TIME_X and by_id[x].kind != "time":
+        errors.append(
+            f"{kind} needs a time grain on x — {x!r} is a {by_id[x].kind}. "
+            "Use bar or hbar for a breakdown by category."
+        )
 
     if series:
-        if kind != "line":
-            errors.append("series is only meaningful on a line chart")
+        if kind not in WITH_SERIES:
+            errors.append(f"series is not meaningful on {kind}")
         elif series not in by_id:
             errors.append(f"series column {series!r} is not in this result")
         elif by_id[series].kind == "measure":
             errors.append(f"series column {series!r} is a measure, not a dimension")
+    elif kind in NEEDS_SERIES:
+        errors.append(f"{kind} needs a series column — it is the second axis")
+
+    if parsed.target is not None and kind != "gauge":
+        errors.append("target is only meaningful on a gauge")
 
     if errors:
         return None, errors

@@ -3,7 +3,6 @@ from dataclasses import MISSING, fields
 
 import pytest
 
-from analyst_agent.sources import registry
 from analyst_agent.sources.modelgen.decide import (
     CubeDecision,
     Enrichment,
@@ -34,13 +33,7 @@ CREDENTIALS = {
     "CUBEJS_DB_PASS": "secret",
 }
 
-SHOP = Source(
-    name="shop",
-    description="Orders.",
-    driver="postgres",
-    port=4001,
-    credentials=CREDENTIALS,
-)
+SHOP = Source(description="Orders.", driver="postgres", credentials=CREDENTIALS)
 
 
 @pytest.fixture
@@ -51,21 +44,18 @@ async def store(tmp_path) -> SourceStore:
 
 
 async def test_round_trip_keeps_credentials_and_mounts(store):
-    await store.add(
+    await store.save(
         Source(
-            name="ads",
             description="Ad spend.",
             driver="bigquery",
-            port=4003,
             mounts={"/cube/conf/bq-key.json": "/home/me/key.json"},
             credentials={"CUBEJS_DB_BQ_PROJECT_ID": "acme"},
         )
     )
-    loaded = await store.get("ads")
+    loaded = await store.get()
     assert loaded.mounts == {"/cube/conf/bq-key.json": "/home/me/key.json"}
     assert loaded.credentials == {"CUBEJS_DB_BQ_PROJECT_ID": "acme"}
-    assert loaded.port == 4003
-    assert loaded.service == "cube-ads"
+    assert loaded.driver == "bigquery"
 
 
 async def test_the_database_is_owner_only(store):
@@ -74,25 +64,30 @@ async def test_the_database_is_owner_only(store):
     assert store.path.stat().st_mode & 0o777 == 0o600
 
 
-async def test_two_sources_cannot_share_a_port(store):
-    await store.add(SHOP)
-    with pytest.raises(Exception, match="UNIQUE"):
-        await store.add(Source(name="other", description="", driver="mysql", port=4001))
+async def test_connecting_again_replaces_the_one_row(store):
+    """One Cube deployment, so a second connection is a replacement rather than an addition —
+    and its steps start empty, because they describe the database that just went."""
+    await store.save(SHOP)
+    await store.save_step("connect", {"status": "done"})
+    await store.save(Source(driver="mysql", credentials={"CUBEJS_DB_NAME": "other"}))
+    loaded = await store.get()
+    assert loaded.driver == "mysql"
+    assert await store.steps() == {}
 
 
 async def test_update_leaves_omitted_columns_alone(store):
-    await store.add(SHOP)
-    await store.update("shop", description="Orders and returns.")
-    loaded = await store.get("shop")
+    await store.save(SHOP)
+    await store.update(description="Orders and returns.")
+    loaded = await store.get()
     assert loaded.description == "Orders and returns."
     assert loaded.credentials == CREDENTIALS
 
 
 async def test_saving_a_step_does_not_touch_the_others(store):
-    await store.add(SHOP)
-    await store.save_step("shop", "connect", {"status": "done"})
-    await store.save_step("shop", "cubes", {"status": "running"})
-    assert await store.steps("shop") == {
+    await store.save(SHOP)
+    await store.save_step("connect", {"status": "done"})
+    await store.save_step("cubes", {"status": "running"})
+    assert await store.steps() == {
         "connect": {"status": "done"},
         "cubes": {"status": "running"},
     }
@@ -100,61 +95,58 @@ async def test_saving_a_step_does_not_touch_the_others(store):
 
 async def test_saving_a_step_does_not_touch_credentials(store):
     """A job finishing must not rewrite what the user typed, and vice versa."""
-    await store.add(SHOP)
-    await store.save_step("shop", "connect", {"status": "done"})
-    await store.save_state("shop", {"selection": {"tables": ["invoice"]}})
-    assert (await store.get("shop")).credentials == CREDENTIALS
+    await store.save(SHOP)
+    await store.save_step("connect", {"status": "done"})
+    await store.save_state({"selection": {"tables": ["invoice"]}})
+    assert (await store.get()).credentials == CREDENTIALS
 
 
 async def test_unknown_step_is_refused(store):
     """By the `Step` annotation, not by a membership test in the body. `ValidationError` is a
     `ValueError`, so what a caller may catch is unchanged."""
-    await store.add(SHOP)
+    await store.save(SHOP)
     with pytest.raises(ValueError, match="'connect', 'cubes', 'describe' or 'views'"):
-        await store.save_step("shop", "enrich", {})
+        await store.save_step("enrich", {})
 
 
 async def test_rerunning_a_step_forgets_the_ones_after_it(store):
     """`publish.write` unlinks every YAML, so the later output is gone on disk too."""
-    await store.add(SHOP)
+    await store.save(SHOP)
     for step in ("connect", "cubes", "describe", "views"):
-        await store.save_step("shop", step, {"status": "done"})
+        await store.save_step(step, {"status": "done"})
 
-    dropped = await store.clear_steps_after("shop", "cubes")
+    dropped = await store.clear_steps_after("cubes")
     assert dropped == ["describe", "views"]
-    assert sorted(await store.steps("shop")) == ["connect", "cubes"]
+    assert sorted(await store.steps()) == ["connect", "cubes"]
 
 
 async def test_clearing_after_the_last_step_drops_nothing(store):
-    await store.add(SHOP)
-    await store.save_step("shop", "views", {"status": "done"})
-    assert await store.clear_steps_after("shop", "views") == []
+    await store.save(SHOP)
+    await store.save_step("views", {"status": "done"})
+    assert await store.clear_steps_after("views") == []
 
 
-async def test_catalog_read_is_the_cached_catalog_one_source_or_all(store):
-    """`read` records no step, so this is the only evidence it ran — and the per-source and
-    batch answers have to agree, since one feeds the detail page and the other the list."""
-    await store.add(SHOP)
-    assert await store.catalog_read("shop") is False
-    await store.save_state("shop", {"catalog": {"public": {"tables": []}}})
-    assert await store.catalog_read("shop") is True
-    assert await store.all_catalog_read() == {"shop": True}
+async def test_catalog_read_is_the_cached_catalog(store):
+    """`read` records no step, so this is the only evidence it ran."""
+    await store.save(SHOP)
+    assert await store.catalog_read() is False
+    await store.save_state({"catalog": {"public": {"tables": []}}})
+    assert await store.catalog_read() is True
 
 
 async def test_state_merges_at_the_top_level(store):
-    await store.add(SHOP)
-    await store.save_state("shop", {"catalog": {"public": ["invoice"]}})
-    await store.save_state("shop", {"selection": {"tables": ["invoice"]}})
-    state = await store.state("shop")
+    await store.save(SHOP)
+    await store.save_state({"catalog": {"public": ["invoice"]}})
+    await store.save_state({"selection": {"tables": ["invoice"]}})
+    state = await store.state()
     assert state["catalog"] == {"public": ["invoice"]}
     assert state["selection"] == {"tables": ["invoice"]}
 
 
 async def test_remove_takes_the_row(store):
-    await store.add(SHOP)
-    await store.remove("shop")
-    assert await store.get("shop") is None
-    assert await store.all() == []
+    await store.save(SHOP)
+    await store.remove()
+    assert await store.get() is None
 
 
 # --- what leaves the process -------------------------------------------------
@@ -164,8 +156,14 @@ def test_public_never_carries_a_credential_value():
     body = public(SHOP, steps={}, running=True, health={"healthy": True, "status": "HEALTH"})
     assert "secret" not in json.dumps(body)
     assert body["credential_keys"] == sorted(CREDENTIALS)
-    assert body["container"] == "cube-shop"
-    assert body["url"] == "http://localhost:4001"
+    assert body["container"] == "cube-analyst"
+    assert body["url"] == "http://localhost:4000"
+
+
+def test_the_label_is_the_database_the_credentials_open():
+    """There is nothing to name, so the connection is called after what it opens."""
+    assert public(SHOP, steps={}, running=True, health={})["label"] == "chinook"
+    assert Source(driver="postgres").label == "PostgreSQL"
 
 
 def test_public_ships_what_each_step_would_discard():
@@ -187,46 +185,6 @@ def test_blank_supplied_credential_keeps_the_stored_one():
     merged = merge_credentials(CREDENTIALS, {"CUBEJS_DB_PASS": "", "CUBEJS_DB_USER": "analyst"})
     assert merged["CUBEJS_DB_PASS"] == "secret"
     assert merged["CUBEJS_DB_USER"] == "analyst"
-
-
-# --- names and ports ---------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "name,expected",
-    [
-        ("", "required"),
-        ("Shop", "lowercase"),
-        ("9shop", "lowercase letters"),
-        ("my_shop", "lowercase letters"),
-        ("my-shop", None),
-    ],
-)
-def test_validate_name(name, expected):
-    error = registry.validate_name(name, taken=["other"])
-    assert error is None if expected is None else expected in error
-
-
-def test_a_name_is_ascii_only():
-    """It becomes a container name and a directory name, and `str.isalpha`/`isalnum` accept
-    Greek, accented Latin and Arabic-Indic digits — which the form's own rule rejects."""
-    for name in ("\u03c9mega", "caf\u00e9", "shop\u0663", "\u01c4shop"):
-        assert registry.validate_name(name, taken=[]) is not None, name
-
-
-def test_validate_name_rejects_duplicates():
-    assert "already exists" in registry.validate_name("shop", taken=["shop"])
-
-
-def test_next_port_skips_assigned_ports(monkeypatch):
-    monkeypatch.setattr(registry, "port_in_use", lambda port: False)
-    assert registry.next_port([4001, 4002, 4003]) == 4004
-    assert registry.next_port([]) == registry.FIRST_PORT
-
-
-def test_next_port_skips_a_port_something_else_is_listening_on(monkeypatch):
-    monkeypatch.setattr(registry, "port_in_use", lambda port: port == 4001)
-    assert registry.next_port([]) == 4002
 
 
 # --- the state a step leaves behind ------------------------------------------
@@ -334,11 +292,9 @@ def test_enrichment_survives_the_round_trip():
 
 async def test_state_survives_sqlite(store):
     """The whole point: views can read what cubes decided, days later."""
-    await store.add(SHOP)
-    await store.save_state(
-        "shop", {"schema": dump_schema(SCHEMA), "enrichment": ENRICHMENT.model_dump()}
-    )
-    state = await store.state("shop")
+    await store.save(SHOP)
+    await store.save_state({"schema": dump_schema(SCHEMA), "enrichment": ENRICHMENT.model_dump()})
+    state = await store.state()
     assert load_schema(state["schema"]) == SCHEMA
     assert Enrichment.model_validate(state["enrichment"]) == ENRICHMENT
 
@@ -355,7 +311,7 @@ def test_cubes_is_blocked_by_connect_not_by_read():
 
 
 def test_read_is_gated_by_nothing():
-    """It records no step, and `run.action` does not gate it — it is reachable on its own so
+    """It records no step, and `steps.action` does not gate it — it is reachable on its own so
     the picker has something to show."""
     assert blocked_by({}, "read") == ""
 

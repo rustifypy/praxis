@@ -1,8 +1,8 @@
 install:
 	uv sync --all-groups
 
-# Only the shared Cube Store lives in compose. Source containers are started from
-# their rows in sources.db, by the portal — `make serve`, then Data in the rail.
+# Only the shared Cube Store lives in compose. The Cube container is started from the
+# source row in analyst.db, by the portal — `make serve`, then Data in the rail.
 COMPOSE = docker compose -f docker-compose.yml
 
 up:
@@ -11,12 +11,9 @@ up:
 down:
 	$(COMPOSE) down
 
-# Source containers are `cube-<name>`; the portal shows the same output under Output.
-# make logs SOURCE=commerce
-SOURCE ?= commerce
-
+# The portal shows the same output under "Container output".
 logs:
-	docker logs --tail 200 -f cube-$(SOURCE)
+	docker logs --tail 200 -f cube-analyst
 
 test:
 	uv run pytest -q

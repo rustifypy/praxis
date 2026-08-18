@@ -14,14 +14,12 @@ import type { CatalogInfo, Closure, SchemaInfo } from "../sources";
  * a picker that disagreed with the pipeline would be worse than none.
  */
 export function TablePicker({
-  name,
   catalog,
   busy,
   discards,
   onRun,
   onReread,
 }: {
-  name: string;
   catalog: CatalogInfo;
   busy: boolean;
   /** Later stages this run would throw away — their output is rewritten from scratch. */
@@ -63,7 +61,7 @@ export function TablePicker({
     let live = true;
     const timer = window.setTimeout(() => {
       void api
-        .closure(name, schema, [...picked])
+        .closure(schema, [...picked])
         .then((result) => live && setClosure(result))
         .catch(() => live && setClosure(null));
     }, 200);
@@ -71,7 +69,7 @@ export function TablePicker({
       live = false;
       window.clearTimeout(timer);
     };
-  }, [name, schema, picked]);
+  }, [schema, picked]);
 
   const shown = useMemo(() => {
     const needle = filter.trim().toLowerCase();

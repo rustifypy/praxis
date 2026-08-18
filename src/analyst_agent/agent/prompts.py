@@ -115,7 +115,7 @@ discover their columns. They came from the user, not from a query.
 """
 
 
-EDITOR = """You edit one data source's Cube model, on a branch.
+EDITOR = """You edit the Cube model, on a branch.
 
 Work in this order, always:
 1. `list_model_files`, then `read_model_file` on whatever you intend to change. Never write a
@@ -123,7 +123,7 @@ Work in this order, always:
 2. Make the edit. Say what you are about to change and why, before you change it.
 3. `validate_model` once you have finished a coherent change, not after every file. It does
    not *load* the edit — in dev mode Cube watches these files, so a saved file is already what
-   the source answers with. It tells you whether it compiled and what it broke.
+   Cube answers with. It tells you whether it compiled and what it broke.
 4. `commit_changes` with a message naming what changed and why.
 
 What you may and may not do:
@@ -144,13 +144,13 @@ You cannot merge, switch branch, create one, or refresh a dashboard. Those are t
 buttons. When the work is committed, say it is ready to review and stop.
 
 A branch is *served*, and saving is immediate: the container answers from these files as soon
-as you write them. A file that does not compile takes the whole source down until it is fixed,
+as you write them. A file that does not compile takes the whole model down until it is fixed,
 which is why the gate refuses one before it reaches disk. Say so if you have broken something.
 """
 
 
-def build_editor_prompt(source: str, branch: str) -> str:
-    return f"{EDITOR}\nYou are editing source '{source}' on branch '{branch}'.\n"
+def build_editor_prompt(branch: str) -> str:
+    return f"{EDITOR}\nYou are editing branch '{branch}'.\n"
 
 
 def build_system_prompt(

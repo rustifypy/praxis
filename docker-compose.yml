@@ -1,13 +1,13 @@
-# The infrastructure every source container shares. Hand-written and committed —
-# unlike the docker-compose.sources.yml this replaced, nothing generates it.
+# The infrastructure the Cube container depends on. Hand-written and committed —
+# nothing generates it.
 #
-# Sources are NOT here. Each one is a plain container started from its row in
-# sources.db by `analyst source up <name>` — see src/analyst_agent/sources/docker.py.
-# That is why credentials no longer live in a file: the container is created from the
-# database, so there is nothing on disk to keep in sync.
+# Cube itself is NOT here. It is a plain container started from the source row in
+# analyst.db by the portal — see src/analyst_agent/sources/docker.py. That is why
+# credentials do not live in a file: the container is created from the database, so
+# there is nothing on disk to keep in sync.
 #
 #   make up     start Cube Store and create the network
-#   make down   stop it (source containers keep running; they restart with Docker)
+#   make down   stop it (the Cube container keeps running; it restarts with Docker)
 name: analyst
 
 networks:

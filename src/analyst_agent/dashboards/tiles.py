@@ -8,9 +8,32 @@ from ..cube import gate
 from ..cube.catalog import Catalog
 from ..cube.schema import CubeQuery
 from ..cube.shape import Column, columns_of
-from ..cube.visualize import MAX_BARS, MAX_POINTS, MAX_SERIES, validate_spec
+from ..cube.visualize import (
+    MAX_BARS,
+    MAX_HBARS,
+    MAX_POINTS,
+    MAX_SERIES,
+    MAX_SLICES,
+    validate_spec,
+)
 
-CHART_TYPES = ("line", "bar", "kpi", "table")
+CHART_TYPES = (
+    "line",
+    "area",
+    "stacked_area",
+    "bar",
+    "stacked_bar",
+    "grouped_bar",
+    "hbar",
+    "donut",
+    "scatter",
+    "heatmap",
+    "gauge",
+    "sparkline",
+    "kpi",
+    "stat",
+    "table",
+)
 """Exactly what `ResultChart` draws. `area`/`stacked_bar`/`hbar` are absent until the renderer
 has a branch: renderer first, this tuple second, or a tile misrepresents itself.
 """
@@ -101,11 +124,11 @@ def outgrown(chart: dict, columns: list[Column], rows: list[dict]) -> str:
     if not rows:
         return "the query returned no rows"
 
-    if kind == "kpi":
+    if kind in ("kpi", "gauge"):
         # No grouping means Cube returns one row; a tile showing row one of many would be a
         # quiet lie about which row it picked.
         if len(rows) != 1:
-            return f"a KPI needs a single row and this returned {len(rows)}"
+            return f"a {kind} needs a single row and this returned {len(rows)}"
         return ""
 
     if len(rows) > MAX_POINTS:
@@ -114,8 +137,30 @@ def outgrown(chart: dict, columns: list[Column], rows: list[dict]) -> str:
             "so the picture would show a prefix of the data"
         )
 
-    if kind == "bar" and len(rows) > MAX_BARS:
-        return f"{len(rows)} bars is past the {MAX_BARS} that stay legible"
+    if kind in ("bar", "stacked_bar", "grouped_bar", "hbar"):
+        # Bars drawn, not rows read: a stacked or grouped bar carries one row per series per
+        # bar, so a row count would degrade a chart that is twenty legible columns wide.
+        axis = str(chart.get("x", ""))
+        drawn = len({str(row.get(axis)) for row in rows}) if axis else len(rows)
+        split = str(chart.get("series", ""))
+        if kind == "grouped_bar" and split:
+            drawn *= len({str(row.get(split)) for row in rows})
+        if kind == "hbar":
+            if drawn > MAX_HBARS:
+                return f"{drawn} bars is past the {MAX_HBARS} a horizontal chart stays readable at"
+        elif drawn > MAX_BARS:
+            return f"{drawn} bars is past the {MAX_BARS} that stay legible"
+
+    if kind == "donut":
+        if len(rows) > MAX_SLICES:
+            return f"{len(rows)} slices is past the {MAX_SLICES} a donut can label"
+        measure = (chart.get("y") or [""])[0]
+        for row in rows:
+            try:
+                if float(row.get(measure) or 0) < 0:
+                    return "a donut cannot show a negative value as a share of a whole"
+            except (TypeError, ValueError):
+                continue
 
     series = str(chart.get("series", ""))
     if series:

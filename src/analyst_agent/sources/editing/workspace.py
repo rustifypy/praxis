@@ -1,4 +1,4 @@
-"""One source's model directory as an editable working tree.
+"""The model directory as an editable working tree.
 
 The gate runs before the write because the write is live: Cube watches the mount in dev mode
 and reloads in under a second, so a file that will not compile has to be kept off disk rather
@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import vcs
-from ..registry import Source
+from ..registry import model_dir
 from . import edits
 
 
@@ -31,29 +31,29 @@ class Outcome:
     """The path actually written, relative to the model directory."""
 
 
-def files(source: Source) -> dict[str, str]:
+def files() -> dict[str, str]:
     """Every `*.yml` in the working tree, relative path -> text. `.git` holds none."""
-    root = source.model_dir()
+    root = model_dir()
     return {str(p.relative_to(root)): p.read_text() for p in sorted(root.rglob("*.yml"))}
 
 
-def resolve(source: Source, path: str) -> tuple[Path | None, str]:
+def resolve(path: str) -> tuple[Path | None, str]:
     """A caller's path inside the model directory, or why not."""
-    root = source.model_dir().resolve()
+    root = model_dir().resolve()
     # `..` and an absolute path both resolve out of the tree, so the check is on the result.
     target = (root / path).resolve()
     if not target.is_relative_to(root) or ".git" in target.parts:
-        return None, "a model file lives inside the source's model directory"
+        return None, "a model file lives inside the model directory"
     if target.suffix != ".yml":
         return None, "a model file is a *.yml — Cube ignores the rest of the mount"
     return target, ""
 
 
-async def editable(source: Source) -> Outcome | None:
-    """Why this model must not be changed right now, or None. Versioning it first is part of
+async def editable() -> Outcome | None:
+    """Why the model must not be changed right now, or None. Versioning it first is part of
     the guard: without a repo there is no main, so `edits.check` would have nothing to diff a
     proposed cube against and every append-only rule would pass vacuously."""
-    repo = source.model_dir()
+    repo = model_dir()
     ensured = await vcs.ensure(repo)
     if not ensured.ok:
         return Outcome(False, "repo", f"could not version {repo}: {ensured.message}")
@@ -66,26 +66,26 @@ async def editable(source: Source) -> Outcome | None:
     return None
 
 
-async def _editable(source: Source, path: str) -> tuple[Path, str, Outcome | None]:
+async def _editable(path: str) -> tuple[Path, str, Outcome | None]:
     """The target, its relative path, and the refusal to return instead. Shared by `write` and
     `delete` so a guard cannot apply to one and not the other."""
-    if refusal := await editable(source):
+    if refusal := await editable():
         return Path(), "", refusal
-    target, refused = resolve(source, path)
+    target, refused = resolve(path)
     if target is None:
         return Path(), "", Outcome(False, "path", refused)
-    return target, str(target.relative_to(source.model_dir().resolve())), None
+    return target, str(target.relative_to(model_dir().resolve())), None
 
 
-async def write(source: Source, path: str, text: str) -> Outcome:
+async def write(path: str, text: str) -> Outcome:
     """Tiers 1-2, then the write."""
-    target, relative, refusal = await _editable(source, path)
+    target, relative, refusal = await _editable(path)
     if refusal is not None:
         return refusal
 
-    repo = source.model_dir()
+    repo = model_dir()
     result = edits.check(
-        await vcs.files_at(repo, vcs.MAIN, suffix=".yml"), {**files(source), relative: text}
+        await vcs.files_at(repo, vcs.MAIN, suffix=".yml"), {**files(), relative: text}
     )
     if not result.ok:
         return Outcome(False, "rejected", result.as_message(), errors=result.errors)
@@ -95,16 +95,16 @@ async def write(source: Source, path: str, text: str) -> Outcome:
     return Outcome(True, path=relative, warnings=result.warnings)
 
 
-async def delete(source: Source, path: str) -> Outcome:
+async def delete(path: str) -> Outcome:
     """The model minus this file, gated against main before anything leaves disk."""
-    target, relative, refusal = await _editable(source, path)
+    target, relative, refusal = await _editable(path)
     if refusal is not None:
         return refusal
     if not target.is_file():
         return Outcome(False, "missing", f"no model file at {path!r}")
 
-    repo = source.model_dir()
-    remaining = {p: body for p, body in files(source).items() if p != relative}
+    repo = model_dir()
+    remaining = {p: body for p, body in files().items() if p != relative}
     result = edits.check(await vcs.files_at(repo, vcs.MAIN, suffix=".yml"), remaining)
     if not result.ok:
         return Outcome(False, "rejected", result.as_message(), errors=result.errors)

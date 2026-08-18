@@ -145,9 +145,10 @@ def build_tools(session: Session, preview_rows: int = 30, event_rows: int = MAX_
     @tool
     def set_chart(spec: dict) -> str:
         """Replace the chart drawn for the most recent result. Rarely needed — one is
-        already chosen from the query's shape. Keys: type (line, bar or kpi), x (a
-        dimension or time column id), y (a list of measure column ids), series (optional,
-        line only). Use the column ids exactly as run_query reported them."""
+        already chosen from the query's shape. Keys: type (line, area, stacked_area, bar,
+        stacked_bar, grouped_bar, hbar, donut, scatter, heatmap, gauge, sparkline, kpi,
+        stat), x, y (measure column ids), series, target (gauge only). Use the ids
+        run_query reported."""
         emit(
             Event(
                 type="tool_start",

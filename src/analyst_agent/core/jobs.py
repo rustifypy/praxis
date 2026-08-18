@@ -62,7 +62,6 @@ class JobLine:
 @dataclass
 class Job:
     id: str
-    source: str
     steps: list[str]
     """Which steps this job will run, in order, so the UI can draw the whole path."""
     started_at: float
@@ -77,7 +76,6 @@ class Job:
     def snapshot(self) -> dict:
         return {
             "id": self.id,
-            "source": self.source,
             "steps": self.steps,
             "current": self.current,
             "started_at": self.started_at,
@@ -149,24 +147,23 @@ class Runner:
 
     async def start(
         self,
-        source: str,
         steps: list[str],
         work: Callable[[Job], Awaitable[None]],
     ) -> Job:
         """Take the lock, publish a Job, and run `work` in the background."""
         if self.busy:
-            raise Busy(f"{self.job.source}: {self.job.current or 'starting'}")
+            raise Busy(self.job.current or "starting")
 
-        description = f"{source}: {', '.join(steps)}"
+        description = ", ".join(steps)
         # Taken here, before returning, so a second request is refused rather than
         # queued behind a lock it would block the event loop waiting for.
         guard = hold(description)
         guard.__enter__()
 
-        job = Job(id=uuid.uuid4().hex, source=source, steps=list(steps), started_at=time.time())
+        job = Job(id=uuid.uuid4().hex, steps=list(steps), started_at=time.time())
         self.job = job
         self._seq = 0
-        self.emit("job_start", source=source, steps=job.steps)
+        self.emit("job_start", steps=job.steps)
 
         async def run() -> None:
             try:

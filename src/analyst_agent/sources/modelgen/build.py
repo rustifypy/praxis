@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 
 from ...cube.client import CubeClient, CubeError
 from ...cube.schema import CubeQuery
-from ..registry import Source
 from .warehouse import Schema, Table
 
 SYNTHETIC_KEY = "id"
@@ -218,7 +217,7 @@ def view_roots(schema: Schema) -> list[ViewRoot]:
     return out
 
 
-async def build_menu(source: Source, schema: Schema) -> Menu:
+async def build_menu(schema: Schema) -> Menu:
     """The candidates, plus real values for the low-cardinality text columns."""
     menu = Menu(measures=measure_candidates(schema), roots=view_roots(schema))
 
@@ -235,7 +234,7 @@ async def build_menu(source: Source, schema: Schema) -> Menu:
             wanted.append(f"{table.name}.{column.name}")
             picked += 1
 
-    async with CubeClient.for_source(source) as cube:
+    async with CubeClient.local() as cube:
         for member in wanted:
             query = CubeQuery.model_validate({"dimensions": [member], "limit": SAMPLE_LIMIT})
             try:

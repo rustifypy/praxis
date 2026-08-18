@@ -1,14 +1,14 @@
 /**
  * The mode switch, and the only thing on screen in every mode.
  *
- * Chat and sources are two products with opposite shapes — one is an unbounded list of
- * ephemeral conversations, the other a handful of heavily stateful objects with
- * destructive controls. They shared a sidebar, which meant the chat list stayed live and
- * clickable while you were administering a database. Splitting the mode out here lets the
- * column beside it belong entirely to whichever one you are in.
+ * Chat and data are two products with opposite shapes — one is an unbounded list of
+ * ephemeral conversations, the other one heavily stateful object with destructive controls.
+ * They shared a sidebar, which meant the chat list stayed live and clickable while you were
+ * administering a database. Splitting the mode out here lets the column beside it belong
+ * entirely to whichever one you are in.
  *
- * Dashboards sit between them: made in chat, bound to a source, so the rail is in the order
- * the work happens.
+ * Dashboards sit between them: made in chat, read against the model, so the rail is in the
+ * order the work happens.
  */
 
 const CHAT = (
@@ -39,10 +39,10 @@ export function Rail({
   jobRunning,
   onSelect,
 }: {
-  view: "chat" | "dashboards" | "sources";
+  view: "chat" | "dashboards" | "data";
   /** Dotted onto the data icon, so a three-minute describe is visible from a chat. */
   jobRunning: boolean;
-  onSelect: (view: "chat" | "dashboards" | "sources") => void;
+  onSelect: (view: "chat" | "dashboards" | "data") => void;
 }) {
   return (
     <nav className="rail">
@@ -73,11 +73,11 @@ export function Rail({
       </button>
 
       <button
-        className={`rail-tab ${view === "sources" ? "active" : ""}`}
-        onClick={() => onSelect("sources")}
+        className={`rail-tab ${view === "data" ? "active" : ""}`}
+        onClick={() => onSelect("data")}
         title="Data"
         aria-label="Data"
-        aria-current={view === "sources"}
+        aria-current={view === "data"}
       >
         {DATA}
         {jobRunning && <span className="rail-badge" aria-label="a job is running" />}

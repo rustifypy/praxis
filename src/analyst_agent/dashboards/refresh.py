@@ -15,7 +15,7 @@ from .delta import Delta
 from .store import Dashboard, DashboardStore, Tile
 
 CONCURRENCY = 4
-"""Tiles at once. A cap on the Cube container, which shares a Cube Store with every source."""
+"""Tiles at once. A cap on the Cube container, which shares a Cube Store with the workers."""
 
 
 @dataclass
@@ -37,47 +37,50 @@ class RunOutcome:
     run_id: str = ""
     tiles: list[TileOutcome] = field(default_factory=list)
     error: str = ""
-    """Set when the refresh never reached the tiles — a wrong active source, or no tiles."""
+    """Set when the refresh never reached the tiles — no dashboard, or no tiles."""
     insight: str = ""
 
 
-def source_mismatch(source_name: str, active_name: str) -> str | None:
-    """Why this dashboard's queries must not run right now, or None. The only thing between a
-    saved query and a number from the wrong warehouse.
+def windowed(tile: Tile, date_range: str | list[str] | None) -> dict:
+    """The tile's stored query with the board's window written into its primary time dimension.
 
-    `active_name` is passed in rather than looked up, so this package never reaches into the
-    registry — `sources` depends on this one, not the other way round.
+    A tile with no `time_member` has nothing to write into and runs unchanged — which is why
+    the browser is told how many tiles the window reaches rather than left to assume all of
+    them. The window overrides a fixed dateRange too: predictability beats preserving a pin
+    nothing in the UI can express, and `resolved_ranges` labels every tile with what it read.
     """
-    if not active_name:
-        return (
-            "No registered source is active, so there is nothing to run these queries "
-            "against. Set CUBE_URL to a source in the registry and restart."
-        )
-    if active_name != source_name:
-        return (
-            f"This dashboard was built on '{source_name}' and the portal is querying "
-            f"'{active_name}'. Refreshing would answer its questions from the wrong database. "
-            f"Set CUBE_URL to '{source_name}' and restart to refresh it."
-        )
-    return None
+    if not date_range or not tile.time_member:
+        return tile.query
+    return {
+        **tile.query,
+        "timeDimensions": [
+            {**td, "dateRange": date_range} if td.get("dimension") == tile.time_member else td
+            for td in tile.query.get("timeDimensions", [])
+        ],
+    }
 
 
 async def _open(
-    dashboard_id: str, store: DashboardStore, active_name: str
-) -> tuple[Dashboard | None, list[Tile], RunOutcome | None]:
-    """The board, its live tiles, and the outcome to return instead if it cannot run. Shared so
-    the source check cannot apply to one entry point and not the other."""
+    dashboard_id: str, store: DashboardStore
+) -> tuple[Dashboard | None, list[Tile], str | list[str] | None, RunOutcome | None]:
+    """The board, its live tiles, its window, and the outcome to return instead if it cannot
+    run. Shared so the window cannot apply to one entry point and not the other — a page-open
+    check compiling a different query than the refresh runs is a board that passes its checks
+    and then fails."""
     board = await store.get(dashboard_id)
     if board is None:
         return (
             None,
             [],
+            None,
             RunOutcome(ok=False, status="failed", error=f"no dashboard {dashboard_id!r}"),
         )
-    mismatch = source_mismatch(board.source_name, active_name)
-    if mismatch:
-        return board, [], RunOutcome(ok=False, status="refused", error=mismatch)
-    return board, await store.tiles(dashboard_id), None
+    return (
+        board,
+        await store.tiles(dashboard_id),
+        await store.window(dashboard_id),
+        None,
+    )
 
 
 async def validate(
@@ -86,17 +89,15 @@ async def validate(
     catalog: Catalog,
     client: CubeClient,
     max_rows: int,
-    *,
-    active_name: str,
 ) -> RunOutcome:
     """Tiers 1-3 for every tile. Executes nothing and records no run."""
-    _, live, stop = await _open(dashboard_id, store, active_name)
+    _, live, window, stop = await _open(dashboard_id, store)
     if stop is not None:
         return stop
     if not live:
         return RunOutcome(ok=True, status="ok")
 
-    checks = await _compile_all(live, catalog, client, max_rows)
+    checks = await _compile_all([windowed(t, window) for t in live], catalog, client, max_rows)
     outcomes = [_outcome(tile, checked) for tile, checked in zip(live, checks, strict=True)]
     ok = all(o.ok for o in outcomes)
     return RunOutcome(ok=ok, status="ok" if ok else "refused", tiles=outcomes)
@@ -108,18 +109,18 @@ async def refresh(
     catalog: Catalog,
     client: CubeClient,
     max_rows: int,
-    *,
-    active_name: str,
 ) -> RunOutcome:
-    """Re-execute every tile's stored query verbatim and append the results as one run."""
-    board, live, stop = await _open(dashboard_id, store, active_name)
+    """Re-execute every tile's stored query under the board's window and append the results as
+    one run."""
+    board, live, window, stop = await _open(dashboard_id, store)
     if stop is not None:
         return stop
     if not live:
         return RunOutcome(ok=False, status="refused", error="this dashboard has no tiles")
 
+    payloads = [windowed(tile, window) for tile in live]
     run = await store.start_run(dashboard_id)
-    checks = await _compile_all(live, catalog, client, max_rows)
+    checks = await _compile_all(payloads, catalog, client, max_rows)
     outcomes = [_outcome(tile, checked) for tile, checked in zip(live, checks, strict=True)]
 
     # The atomic part. Every tile compiles or none executes.
@@ -143,14 +144,16 @@ async def refresh(
 
     failures: list[dict] = []
     briefing: list[tuple] = []
-    for tile, outcome, result in zip(live, outcomes, loaded, strict=True):
+    for tile, payload, outcome, result in zip(live, payloads, outcomes, loaded, strict=True):
         if not result.ok:
             outcome.ok = False
             outcome.errors = result.errors
             failures.append({"tile_id": tile.id, "title": tile.title, "errors": result.errors})
             continue
         rows = result.rows or []
-        columns = columns_of(tile.query, catalog)
+        # The payload that ran, not the stored query — a header taken from a query that was
+        # not executed is the kind of drift that stays invisible until it is wrong.
+        columns = columns_of(payload, catalog)
         # Re-checked against the rows that just arrived, not the ones it was authored on.
         outcome.degraded = tilecheck.outgrown(tile.chart, columns, rows)
         outcome.row_count = len(rows)
@@ -167,14 +170,17 @@ async def refresh(
         )
         changes, since = delta.deltas(rows, earlier[0] if earlier else None, columns)
         outcome.deltas = changes
-        briefing.append((tile.title, columns, rows, changes, since))
+        briefing.append((tile.id, tile.title, columns, rows, changes, since))
 
     if failures:
         await store.finish_run(run.id, "failed", errors=failures)
         return RunOutcome(ok=False, status="failed", run_id=run.id, tiles=outcomes)
 
     # After the rows are stored, so a model call that hangs cannot cost the refresh its data.
-    note = await insights.summarise(board.title, briefing)
+    # One call for the paragraph and every caption — the rows are already in that prompt.
+    note, captions = await insights.summarise(board.title, briefing)
+    if captions:
+        await store.set_tile_insights(run.id, captions)
     # Only on success: pruning a refused run would drop the rows a tile is still showing.
     await store.prune(dashboard_id)
     await store.finish_run(run.id, "ok", insight=note)
@@ -182,15 +188,15 @@ async def refresh(
 
 
 async def _compile_all(
-    live: list[Tile], catalog: Catalog, client: CubeClient, max_rows: int
+    payloads: list[dict], catalog: Catalog, client: CubeClient, max_rows: int
 ) -> list[gate.GateResult]:
     limit = asyncio.Semaphore(CONCURRENCY)
 
-    async def one(tile: Tile) -> gate.GateResult:
+    async def one(payload: dict) -> gate.GateResult:
         async with limit:
-            return await gate.check(tile.query, catalog, client, max_rows)
+            return await gate.check(payload, catalog, client, max_rows)
 
-    return list(await asyncio.gather(*(one(tile) for tile in live)))
+    return list(await asyncio.gather(*(one(payload) for payload in payloads)))
 
 
 def _outcome(tile: Tile, checked: gate.GateResult) -> TileOutcome:

@@ -1,6 +1,6 @@
 from analyst_agent.cube.schema import CubeQuery
 from analyst_agent.cube.shape import Column
-from analyst_agent.cube.visualize import MAX_SERIES
+from analyst_agent.cube.visualize import MAX_HBARS, MAX_SERIES, MAX_SLICES
 from analyst_agent.dashboards import tiles
 
 BAR = {"type": "bar", "x": "orders.status", "y": ["orders.net_revenue"]}
@@ -53,10 +53,10 @@ def test_a_table_tile_needs_no_axes(catalog):
 
 
 def test_a_chart_the_renderer_cannot_draw_is_refused_rather_than_downgraded(catalog):
-    # area / stacked_bar / hbar have no branch in ResultChart. Accepting one would store a
-    # tile that renders as a different chart than it claims, which is worse than a refusal.
-    # When the renderer grows a branch, that comes first and CHART_TYPES second.
-    for kind in ("area", "stacked_bar", "hbar"):
+    # These have no branch in ResultChart. Accepting one would store a tile that renders as a
+    # different chart than it claims, which is worse than a refusal. When the renderer grows a
+    # branch, that comes first and CHART_TYPES second.
+    for kind in ("treemap", "waterfall", "funnel"):
         result = check(
             {
                 "measures": ["orders.net_revenue"],
@@ -71,7 +71,23 @@ def test_a_chart_the_renderer_cannot_draw_is_refused_rather_than_downgraded(cata
 
 def test_the_types_a_tile_accepts_are_the_types_the_renderer_draws(catalog):
     # One list, checked here so widening it without widening the renderer trips a test.
-    assert tiles.CHART_TYPES == ("line", "bar", "kpi", "table")
+    assert tiles.CHART_TYPES == (
+        "line",
+        "area",
+        "stacked_area",
+        "bar",
+        "stacked_bar",
+        "grouped_bar",
+        "hbar",
+        "donut",
+        "scatter",
+        "heatmap",
+        "gauge",
+        "sparkline",
+        "kpi",
+        "stat",
+        "table",
+    )
 
 
 def test_an_axis_that_is_a_measure_is_refused(catalog):
@@ -215,6 +231,70 @@ def test_a_kpi_is_degraded_when_its_query_stops_returning_one_row():
     spec = {"type": "kpi", "y": ["orders.net_revenue"]}
     assert tiles.outgrown(spec, [REVENUE], [{"orders.net_revenue": 1}]) == ""
     assert "single row" in tiles.outgrown(spec, [REVENUE], rows(3))
+
+
+def test_a_stacked_bar_counts_bars_rather_than_rows():
+    """It carries one row per series per bar, so a row count degrades a chart that is twenty
+    legible columns wide. Caught against real data, where 20 quarters arrived as 47 rows."""
+    spec = {
+        "type": "stacked_bar",
+        "x": "orders.created_at.month",
+        "y": ["orders.net_revenue"],
+        "series": "orders.status",
+    }
+    data = [
+        {"orders.created_at.month": f"2026-{m:02d}-01", "orders.status": s, "orders.net_revenue": m}
+        for m in range(1, 21)
+        for s in ("paid", "refunded")
+    ]
+    assert len(data) == 40
+    assert tiles.outgrown(spec, [MONTH, STATUS, REVENUE], data) == ""
+
+
+def test_a_grouped_bar_counts_every_bar_it_draws():
+    """Groups times series, because that is how many bars end up side by side."""
+    spec = {
+        "type": "grouped_bar",
+        "x": "orders.created_at.month",
+        "y": ["orders.net_revenue"],
+        "series": "orders.status",
+    }
+    data = [
+        {"orders.created_at.month": f"2026-{m:02d}-01", "orders.status": s, "orders.net_revenue": m}
+        for m in range(1, 11)
+        for s in ("paid", "refunded", "pending")
+    ]
+    assert "30 bars" in tiles.outgrown(spec, [MONTH, STATUS, REVENUE], data)
+
+
+def test_a_gauge_is_degraded_when_its_query_stops_returning_one_row():
+    spec = {"type": "gauge", "y": ["orders.net_revenue"], "target": 100}
+    assert tiles.outgrown(spec, [REVENUE], [{"orders.net_revenue": 1}]) == ""
+    assert "single row" in tiles.outgrown(spec, [REVENUE], rows(3))
+
+
+def test_a_donut_is_degraded_past_the_slices_it_can_label():
+    spec = {"type": "donut", "x": "orders.status", "y": ["orders.net_revenue"]}
+    assert tiles.outgrown(spec, [STATUS, REVENUE], rows(MAX_SLICES)) == ""
+    assert "slices" in tiles.outgrown(spec, [STATUS, REVENUE], rows(MAX_SLICES + 1))
+
+
+def test_a_donut_refuses_a_negative_share_of_a_whole():
+    """A negative slice has no arc: it would either vanish or eat one of its neighbours."""
+    spec = {"type": "donut", "x": "orders.status", "y": ["orders.net_revenue"]}
+    data = [
+        {"orders.status": "a", "orders.net_revenue": 5},
+        {"orders.status": "b", "orders.net_revenue": -2},
+    ]
+    assert "negative" in tiles.outgrown(spec, [STATUS, REVENUE], data)
+
+
+def test_a_horizontal_bar_fits_more_rows_than_an_upright_one():
+    """Labels run along the axis rather than under it, so they read at any length."""
+    spec = {"type": "hbar", "x": "orders.status", "y": ["orders.net_revenue"]}
+    assert "bars" in tiles.outgrown(BAR, [STATUS, REVENUE], rows(MAX_HBARS))
+    assert tiles.outgrown(spec, [STATUS, REVENUE], rows(MAX_HBARS)) == ""
+    assert "bars" in tiles.outgrown(spec, [STATUS, REVENUE], rows(MAX_HBARS + 1))
 
 
 def test_a_table_never_outgrows_its_shape():

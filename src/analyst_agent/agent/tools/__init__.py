@@ -1,5 +1,5 @@
 """The four toolsets: `query` answers questions, `dashboards` authors boards, `code` computes
-over a query's rows in the sandbox, `editor` changes a source's model. No module here imports
+over a query's rows in the sandbox, `editor` changes the Cube model. No module here imports
 another; `build.py` composes them.
 
 `query`, `dashboards` and `code` are composed into one agent, so `run_query` and a Python

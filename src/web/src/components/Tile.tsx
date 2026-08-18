@@ -36,11 +36,26 @@ export function Tile({
   result,
   broken,
   degraded,
+  span,
+  columns,
+  onGrab,
+  onRelease,
+  onNudge,
+  onSpan,
+  captions,
 }: {
   tile: TileRow;
   result?: TileResultRow;
   broken?: string[];
   degraded?: string;
+  /** Grid columns this tile covers — not the date span below, which is `range`. */
+  span: number;
+  columns: number;
+  onGrab: () => void;
+  onRelease: () => void;
+  onNudge: (delta: number) => void;
+  onSpan: () => void;
+  captions: boolean;
 }) {
   const chart: TileChart = tile.chart;
   const rows = result?.rows ?? [];
@@ -52,17 +67,50 @@ export function Tile({
       y: chart.y ?? [],
       x: chart.x ?? "",
       series: chart.series ?? "",
+      target: chart.target ?? null,
     };
   }, [chart, degraded, rows.length]);
 
-  const span = Object.values(result?.resolved_ranges ?? {})[0];
-  const window = span ? `${span[0].split("T")[0]} → ${span[1].split("T")[0]}` : "";
+  const range = Object.values(result?.resolved_ranges ?? {})[0];
+  const window = range ? `${range[0].split("T")[0]} → ${range[1].split("T")[0]}` : "";
 
   return (
     <section className="dash-tile">
       <header className="dash-tile-head">
+        {/* The grip, not the tile, is what arms a drag — dragging the whole tile would take
+            the chart's hover targets and text selection with it. */}
+        <button
+          className="dash-grip"
+          aria-label={`Move ${tile.title}`}
+          title="Drag to move, or focus and use the arrow keys"
+          onMouseDown={onGrab}
+          onMouseUp={onRelease}
+          onKeyDown={(e) => {
+            const delta =
+              e.key === "ArrowLeft" || e.key === "ArrowUp"
+                ? -1
+                : e.key === "ArrowRight" || e.key === "ArrowDown"
+                  ? 1
+                  : 0;
+            if (!delta) return;
+            e.preventDefault();
+            onNudge(delta);
+          }}
+        >
+          <span aria-hidden="true">⠿</span>
+        </button>
         <h3>{tile.title}</h3>
         {window && <span className="dash-tile-window">{window}</span>}
+        {columns > 1 && (
+          <button
+            className="dash-span"
+            onClick={onSpan}
+            aria-label={`${tile.title} covers ${span} of ${columns} columns — change`}
+            title="Width — click to change"
+          >
+            {span}/{columns}
+          </button>
+        )}
       </header>
 
       {broken?.length ? (
@@ -73,7 +121,16 @@ export function Tile({
           ))}
         </div>
       ) : !result ? (
-        <p className="dash-tile-empty">Not refreshed yet — press Refresh to load it.</p>
+        <div className="dash-waiting">
+          <div className="dash-skeleton" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+            <span />
+            <span />
+          </div>
+          <p className="dash-tile-empty">Not refreshed yet — press Refresh to load it.</p>
+        </div>
       ) : result.pruned ? (
         <p className="dash-tile-empty">
           {result.row_count.toLocaleString()} rows, since pruned. Refresh to load them again.
@@ -131,6 +188,8 @@ export function Tile({
           )}
         </div>
       )}
+
+      {captions && result?.insight && <p className="dash-caption">{result.insight}</p>}
 
       {degraded && <p className="dash-tile-note">Drawn as a table: {degraded}.</p>}
     </section>

@@ -1,8 +1,7 @@
 """The `docker run` argument list, asserted without a daemon.
 
-These containers are the only thing standing between a row in sources.db and a
-working source, and the argv is the whole contract — so it is a pure function and
-this is where it gets checked.
+The container is the only thing standing between the source row and a working Cube, and
+the argv is the whole contract — so it is a pure function and this is where it gets checked.
 """
 
 import pathlib
@@ -22,10 +21,8 @@ from analyst_agent.sources.drivers import (
 from analyst_agent.sources.registry import Source
 
 SHOP = Source(
-    name="shop",
     description="Orders.",
     driver="postgres",
-    port=4001,
     credentials={
         "CUBEJS_DB_TYPE": "postgres",
         "CUBEJS_DB_HOST": "host.docker.internal",
@@ -37,18 +34,14 @@ SHOP = Source(
 )
 
 DBX = Source(
-    name="events",
     description="Clickstream.",
     driver="databricks-jdbc",
-    port=4002,
     credentials={"CUBEJS_DB_DATABRICKS_URL": "jdbc://x", "CUBEJS_DB_DATABRICKS_TOKEN": "t"},
 )
 
 BQ = Source(
-    name="ads",
     description="Ad spend.",
     driver="bigquery",
-    port=4003,
     mounts={"/cube/conf/bq-key.json": "/home/me/key.json"},
     credentials={"CUBEJS_DB_BQ_PROJECT_ID": "acme"},
 )
@@ -60,25 +53,25 @@ def env_of(args: list[str]) -> dict[str, str]:
 
 
 def test_argv_publishes_the_port_and_mounts_the_model():
-    args = docker.argv(SHOP, "/repo/cube/sources/shop", api_secret="x" * 32)
-    assert args[:4] == ["run", "-d", "--name", "cube-shop"]
-    assert "/repo/cube/sources/shop:/cube/conf/model" in args
+    args = docker.argv(SHOP, "/repo/cube/model", port=4000, api_secret="x" * 32)
+    assert args[:4] == ["run", "-d", "--name", "cube-analyst"]
+    assert "/repo/cube/model:/cube/conf/model" in args
     assert args[-1].startswith("cubejs/cube:")
 
 
 def test_the_port_is_bound_to_loopback_only():
     """Dev mode skips JWT verification, so a 0.0.0.0 bind would answer the network."""
-    args = docker.argv(SHOP, "/m", api_secret="x" * 32)
+    args = docker.argv(SHOP, "/m", port=4001, api_secret="x" * 32)
     assert args[args.index("-p") + 1] == "127.0.0.1:4001:4000"
 
 
-def test_argv_restarts_with_docker_because_nothing_else_starts_a_source():
-    args = docker.argv(SHOP, "/m", api_secret="x" * 32)
+def test_argv_restarts_with_docker_because_nothing_else_starts_cube():
+    args = docker.argv(SHOP, "/m", port=4000, api_secret="x" * 32)
     assert args[args.index("--restart") + 1] == "unless-stopped"
 
 
 def test_argv_joins_the_shared_network_so_cubestore_resolves():
-    args = docker.argv(SHOP, "/m", api_secret="x" * 32)
+    args = docker.argv(SHOP, "/m", port=4000, api_secret="x" * 32)
     assert args[args.index("--network") + 1] == "analyst-net"
     env = env_of(args)
     assert env["CUBEJS_CUBESTORE_HOST"] == "ds-cubestore-router"
@@ -86,7 +79,7 @@ def test_argv_joins_the_shared_network_so_cubestore_resolves():
 
 
 def test_argv_carries_the_credentials_and_the_api_secret():
-    env = env_of(docker.argv(SHOP, "/m", api_secret="s" * 32))
+    env = env_of(docker.argv(SHOP, "/m", port=4000, api_secret="s" * 32))
     assert env["CUBEJS_DB_PASS"] == "secret"
     assert env["CUBEJS_DB_TYPE"] == "postgres"
     assert env["CUBEJS_API_SECRET"] == "s" * 32
@@ -94,13 +87,14 @@ def test_argv_carries_the_credentials_and_the_api_secret():
 
 def test_dev_mode_is_off_unless_asked_for():
     """It skips JWT verification, so it must never be on by accident."""
-    assert env_of(docker.argv(SHOP, "/m", api_secret="x" * 32))["CUBEJS_DEV_MODE"] == "false"
-    args = docker.argv(SHOP, "/m", api_secret="x" * 32, dev_mode=True)
+    off = env_of(docker.argv(SHOP, "/m", port=4000, api_secret="x" * 32))
+    assert off["CUBEJS_DEV_MODE"] == "false"
+    args = docker.argv(SHOP, "/m", port=4000, api_secret="x" * 32, dev_mode=True)
     assert env_of(args)["CUBEJS_DEV_MODE"] == "true"
 
 
 def test_databricks_gets_the_jdk_image_and_the_amd64_platform():
-    args = docker.argv(DBX, "/m", api_secret="x" * 32)
+    args = docker.argv(DBX, "/m", port=4000, api_secret="x" * 32)
     assert args[-1] == "cubejs/cube:jdk"
     assert args[args.index("--platform") + 1] == "linux/amd64"
     # Not optional — the JDBC driver refuses to load without it.
@@ -108,15 +102,15 @@ def test_databricks_gets_the_jdk_image_and_the_amd64_platform():
 
 
 def test_a_key_file_is_mounted_read_only():
-    args = docker.argv(BQ, "/m", api_secret="x" * 32)
+    args = docker.argv(BQ, "/m", port=4000, api_secret="x" * 32)
     assert "/home/me/key.json:/cube/conf/bq-key.json:ro" in args
 
 
 def test_the_image_tag_follows_cube_tag(monkeypatch):
     monkeypatch.setenv("CUBE_TAG", "v1.2.3")
-    assert docker.argv(SHOP, "/m", api_secret="x" * 32)[-1] == "cubejs/cube:v1.2.3"
+    assert docker.argv(SHOP, "/m", port=4000, api_secret="x" * 32)[-1] == "cubejs/cube:v1.2.3"
     # A driver with a pinned tag ignores it — it needs that specific build.
-    assert docker.argv(DBX, "/m", api_secret="x" * 32)[-1] == "cubejs/cube:jdk"
+    assert docker.argv(DBX, "/m", port=4000, api_secret="x" * 32)[-1] == "cubejs/cube:jdk"
 
 
 # --- credentials from a driver spec -----------------------------------------
@@ -216,16 +210,12 @@ def test_a_driver_with_no_key_file_is_left_alone():
     assert values == {"CUBEJS_DB_HOST": "h"}
 
 
-# --- orphans and the shared compose file ------------------------------------
-
-
-def test_orphans_are_cube_containers_with_no_row():
-    containers = {"cube-shop": "running", "cube-gone": "exited", "unrelated": "running"}
-    assert docker.orphans(containers, known=["shop"]) == ["cube-gone"]
+# --- the shared compose file -------------------------------------------------
 
 
 def test_compose_holds_only_cubestore_and_names_the_network():
-    """Sources are not in compose any more. If one appears here, something regressed."""
+    """Cube itself is not in compose — it is created from the source row. If it appears
+    here, something regressed."""
     doc = yaml.safe_load(pathlib.Path("docker-compose.yml").read_text())
     assert set(doc["services"]) == {"ds-cubestore-router", "ds-cubestore-worker"}
     assert doc["networks"]["analyst-net"]["name"] == docker.NETWORK

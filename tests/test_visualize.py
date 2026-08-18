@@ -183,7 +183,36 @@ def test_an_unknown_chart_type_is_rejected(catalog):
     query = {"measures": ["orders.count"]}
     spec, errors = validate_spec({"type": "sankey", "y": ["orders.count"]}, columns(query, catalog))
     assert spec is None
-    assert "'line', 'bar' or 'kpi'" in errors[0]
+    assert errors[0].startswith("type: input should be 'line', 'area'")
+    assert "'stat'" in errors[0]
+
+
+def test_a_stat_over_a_time_grain_passes(catalog):
+    query = {"measures": ["orders.net_revenue"], "timeDimensions": [MONTH]}
+    spec, errors = validate_spec(
+        {"type": "stat", "x": "orders.created_at.month", "y": ["orders.net_revenue"]},
+        columns(query, catalog),
+    )
+    assert errors == []
+    assert spec.type == "stat"
+
+
+def test_a_stat_over_a_category_is_rejected(catalog):
+    """ "Latest" over a dimension is whichever row sorted last, headlined as the current
+    figure."""
+    query = {"measures": ["orders.count"], "dimensions": ["orders.status"]}
+    spec, errors = validate_spec(
+        {"type": "stat", "x": "orders.status", "y": ["orders.count"]}, columns(query, catalog)
+    )
+    assert spec is None
+    assert "stat needs a time grain on x" in errors[0]
+
+
+def test_a_series_over_time_is_still_a_line_not_a_stat(catalog):
+    """`stat` is opt-in from `set_chart` or a tile — a chat result reading the shape of a
+    series wants the line it has always had."""
+    query = {"measures": ["orders.net_revenue"], "timeDimensions": [MONTH]}
+    assert chart_for(query, catalog, months(12)).type == "line"
 
 
 def test_y_as_a_bare_string_is_a_type_error_not_twelve_bad_columns(catalog):
@@ -220,6 +249,7 @@ def test_a_spec_serialises_the_way_the_event_carries_it(catalog):
         "y": ["orders.count"],
         "x": "orders.status",
         "series": "",
+        "target": None,
     }
 
 
@@ -239,7 +269,9 @@ def test_a_bar_without_an_axis_is_rejected(catalog):
     assert "needs an x column" in errors[0]
 
 
-def test_series_is_line_only(catalog):
+def test_a_plain_bar_takes_no_series(catalog):
+    """A plain bar draws one series and would silently ignore the split; stacked_bar and
+    grouped_bar are the types that mean it."""
     query = {
         "measures": ["orders.count"],
         "dimensions": ["orders.status"],
@@ -255,7 +287,61 @@ def test_series_is_line_only(catalog):
         columns(query, catalog),
     )
     assert spec is None
-    assert "only meaningful on a line chart" in errors[0]
+    assert "series is not meaningful on bar" in errors[0]
+
+
+def test_a_stacked_bar_takes_the_series_a_plain_bar_refuses(catalog):
+    query = {
+        "measures": ["orders.count"],
+        "dimensions": ["orders.status"],
+        "timeDimensions": [MONTH],
+    }
+    spec, errors = validate_spec(
+        {
+            "type": "stacked_bar",
+            "x": "orders.created_at.month",
+            "y": ["orders.count"],
+            "series": "orders.status",
+        },
+        columns(query, catalog),
+    )
+    assert errors == []
+    assert spec.series == "orders.status"
+
+
+def test_a_heatmap_without_a_series_has_no_second_axis(catalog):
+    query = {"measures": ["orders.count"], "dimensions": ["orders.status"]}
+    spec, errors = validate_spec(
+        {"type": "heatmap", "x": "orders.status", "y": ["orders.count"]}, columns(query, catalog)
+    )
+    assert spec is None
+    assert "heatmap needs a series column" in errors[0]
+
+
+def test_a_scatter_needs_a_measure_on_x(catalog):
+    query = {"measures": ["orders.count", "orders.net_revenue"], "dimensions": ["orders.status"]}
+    ok, errors = validate_spec(
+        {"type": "scatter", "x": "orders.count", "y": ["orders.net_revenue"]},
+        columns(query, catalog),
+    )
+    assert errors == [] and ok.type == "scatter"
+
+    bad, errors = validate_spec(
+        {"type": "scatter", "x": "orders.status", "y": ["orders.net_revenue"]},
+        columns(query, catalog),
+    )
+    assert bad is None
+    assert "scatter plots one measure against another" in errors[0]
+
+
+def test_a_target_belongs_to_a_gauge_and_nowhere_else(catalog):
+    query = {"measures": ["orders.count"], "dimensions": ["orders.status"]}
+    spec, errors = validate_spec(
+        {"type": "bar", "x": "orders.status", "y": ["orders.count"], "target": 100},
+        columns(query, catalog),
+    )
+    assert spec is None
+    assert "target is only meaningful on a gauge" in errors
 
 
 def test_an_empty_y_is_rejected(catalog):

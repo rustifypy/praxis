@@ -4,12 +4,12 @@ import type { DriverSpec, SourceRow } from "../sources";
 
 /**
  * The connection form, built from the driver specs themselves — so a field Cube
- * documents appears here without any frontend change. This is the only way a source is
- * created; there is no CLI equivalent to drift from.
+ * documents appears here without any frontend change. This is the only way a database is
+ * connected; there is no CLI equivalent to drift from.
  *
- * Also the edit form. Passing `editing` switches it to patching one source: the name,
- * driver and port are fixed, and a blank field keeps the stored value — which is the
- * only way a password can be changed without the browser ever being sent it.
+ * Also the edit form. Passing `editing` switches it to patching the stored connection: the
+ * driver is fixed, and a blank field keeps the stored value — which is the only way a
+ * password can be changed without the browser ever being sent it.
  *
  * It offers to swap a `localhost` host for `host.docker.internal`, because from inside
  * the container the first cannot work and the mistake costs a whole failed connect
@@ -19,37 +19,27 @@ import type { DriverSpec, SourceRow } from "../sources";
 export function AddSource({
   drivers,
   localHosts,
-  namePattern,
   localhostNote,
-  nextPort,
-  taken,
   editing,
   onCancel,
-  onCreate,
+  onConnect,
   onSave,
 }: {
   drivers: DriverSpec[];
   localHosts: string[];
-  namePattern: string;
   localhostNote: string;
-  nextPort: number;
-  taken: string[];
-  /** The source being edited, or undefined when adding. */
+  /** The stored connection when editing, or undefined when connecting for the first time. */
   editing?: SourceRow;
   onCancel: () => void;
-  onCreate: (body: {
-    name: string;
+  onConnect: (body: {
     description: string;
     driver: string;
-    port: number;
     values: Record<string, string>;
   }) => Promise<void>;
-  onSave: (name: string, body: { description: string; values: Record<string, string> }) => Promise<void>;
+  onSave: (body: { description: string; values: Record<string, string> }) => Promise<void>;
 }) {
   const [driver, setDriver] = useState(editing?.driver ?? "");
-  const [name, setName] = useState(editing?.name ?? "");
   const [description, setDescription] = useState(editing?.description ?? "");
-  const [port, setPort] = useState(editing?.port ?? nextPort);
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -69,16 +59,6 @@ export function AddSource({
       Object.fromEntries((spec?.fields ?? []).map((f) => [f.env, editing ? "" : f.default])),
     );
   }, [spec, editing]);
-
-  // Live feedback while typing. The server validates the same rules and its answer is
-  // the one that counts — this only saves a round trip on an obvious mistake.
-  const nameError = editing
-    ? ""
-    : name && namePattern && !new RegExp(namePattern).test(name)
-      ? "lowercase letters, digits and hyphens, starting with a letter"
-      : taken.includes(name)
-        ? `${name} already exists`
-        : "";
 
   // Which fields are needed is the server's answer (`required_envs`); whether a box is empty
   // is the only part that has to be local. When editing, an empty field means "keep it".
@@ -100,9 +80,9 @@ export function AddSource({
       if (editing) {
         // Only what was typed: an untouched field must not be sent as empty.
         const changed = Object.fromEntries(Object.entries(values).filter(([, v]) => v !== ""));
-        await onSave(editing.name, { description, values: changed });
+        await onSave({ description, values: changed });
       } else {
-        await onCreate({ name, description, driver, port, values });
+        await onConnect({ description, driver, values });
       }
     } catch (err) {
       setError(String(err instanceof Error ? err.message : err));
@@ -115,7 +95,7 @@ export function AddSource({
     <div className="drawer-scrim" onClick={onCancel}>
       <aside className="drawer" onClick={(e) => e.stopPropagation()}>
         <header>
-          <h2>{editing ? `Edit ${editing.name}` : "Add a data source"}</h2>
+          <h2>{editing ? "Edit the connection" : "Connect a database"}</h2>
           <button className="icon" onClick={onCancel} title="Close">
             ×
           </button>
@@ -124,21 +104,8 @@ export function AddSource({
         <p className="drawer-blurb">
           {editing
             ? "Leave a field blank to keep what is stored. A container's environment is fixed when it is created, so this takes effect the next time Connect runs."
-            : "One Cube container per source, started from what you type here. Nothing is written to disk — credentials live in the sources database."}
+            : "One Cube container, started from what you type here. Nothing is written to disk — credentials live in analyst.db, which is owner-readable only."}
         </p>
-
-        {!editing && (
-          <label>
-            Name
-            <input
-              value={name}
-              autoFocus
-              placeholder="warehouse"
-              onChange={(e) => setName(e.target.value.toLowerCase())}
-            />
-            <small>{nameError || "Becomes the container and directory name."}</small>
-          </label>
-        )}
 
         <label>
           Description
@@ -147,7 +114,7 @@ export function AddSource({
             placeholder="What lives in here"
             onChange={(e) => setDescription(e.target.value)}
           />
-          <small>The agent reads this when routing questions.</small>
+          <small>Shown on this page. Not read by the agent.</small>
         </label>
 
         <label>
@@ -221,16 +188,12 @@ export function AddSource({
           </div>
         )}
 
-        <label>
-          Port on this machine
-          <input
-            type="number"
-            value={port}
-            disabled={Boolean(editing)}
-            onChange={(e) => setPort(Number(e.target.value))}
-          />
-          <small>Where Cube answers. Bound to localhost only.</small>
-        </label>
+        {!editing && (
+          <p className="drawer-blurb">
+            Cube answers on the address in <code>CUBE_URL</code>, and the container publishes
+            that port on localhost only.
+          </p>
+        )}
 
         {error && <p className="drawer-error">{error}</p>}
 
@@ -238,11 +201,11 @@ export function AddSource({
           <button onClick={onCancel}>Cancel</button>
           <button
             className="primary"
-            disabled={saving || !name || Boolean(nameError) || missing.length > 0}
+            disabled={saving || missing.length > 0}
             onClick={() => void submit()}
             title={missing.length ? `Still needed: ${missing.join(", ")}` : undefined}
           >
-            {saving ? "Saving…" : editing ? "Save and reconnect" : "Add and connect"}
+            {saving ? "Saving…" : editing ? "Save and reconnect" : "Connect"}
           </button>
         </footer>
       </aside>

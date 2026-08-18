@@ -9,7 +9,7 @@ Writes to a scratch DATA_DIR of its own and removes it afterwards, so it never t
 
     make sandbox-check                       the isolation battery, no model calls
     make sandbox-check ARGS="--stale"        also prove recovery from a replaced mount
-    make sandbox-check ARGS='--ask "..."'    one real turn against a live source and model
+    make sandbox-check ARGS='--ask "..."'    one real turn against a live Cube and model
     make sandbox-check ARGS='--ask "..." --file orders.csv'   with a file attached to it
 """
 
@@ -250,9 +250,9 @@ async def stale_mount(chat: str) -> None:
 
 
 async def one_turn(question: str, attach: list[str]) -> None:
-    """A real model driving the whole surface: query the active source, export, compute, and read
-    whatever was attached. The only path here that spends money, and the only one that needs a
-    source to be up."""
+    """A real model driving the whole surface: query Cube, export, compute, and read
+    whatever was attached. The only path here that spends money, and the only one that needs
+    Cube to be up."""
     from pathlib import Path
 
     from analyst_agent.agent.turn import stream_turn

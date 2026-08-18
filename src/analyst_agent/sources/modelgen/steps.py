@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 from ...core.config import settings
 from .. import docker, health, vcs
-from ..registry import Source, scaffold_source_dirs
+from ..registry import Source, model_dir, scaffold_dirs
 from ..store import STAGES, STEPS, SourceStore, blocked_by
 from . import build, decide, publish, read, selection
 from .state import dump_schema, load_schema
@@ -45,30 +45,31 @@ def _say(report: Report | None, stage: str, payload: dict) -> None:
 # --- step 1: connect ---------------------------------------------------------
 
 
-async def connect(source: Source, store: SourceStore, report: Report | None = None) -> StepResult:
-    """Create the container from this source's row and wait for Cube to say it is up."""
-    model_dir = scaffold_source_dirs(source)
-    await vcs.ensure(model_dir)
-    _say(report, "connect", {"message": f"starting {source.service}"})
+async def connect(store: SourceStore, report: Report | None = None) -> StepResult:
+    """Create the container from the stored connection and wait for Cube to say it is up."""
+    source = await _connection(store)
+    directory = scaffold_dirs()
+    await vcs.ensure(directory)
+    _say(report, "connect", {"message": f"starting {docker.CONTAINER}"})
 
     created = await docker.create(
         source,
-        model_dir,
+        directory,
+        port=settings.cube_port,
         api_secret=settings.cube_api_secret,
         dev_mode=settings.cubejs_dev_mode,
     )
     if not created.ok:
-        raise StepFailed(f"could not start {source.service}: {created.message}")
+        raise StepFailed(f"could not start {docker.CONTAINER}: {created.message}")
 
-    _say(report, "connect", {"message": f"testing the connection via {source.cube_url}/readyz"})
-    result, attempts = await health.wait_until_ready(source)
+    _say(report, "connect", {"message": f"testing the connection via {settings.cube_url}/readyz"})
+    result, attempts = await health.wait_until_ready()
     if not result.ok:
         # The container is left running on purpose. The logs are the diagnosis, and
         # throwing away what the user just typed to save them an `rm` is a bad trade.
-        raise StepFailed(f"{source.name} is not ready: {result}")
+        raise StepFailed(f"Cube is not ready: {result}")
 
     await store.save_step(
-        source.name,
         "connect",
         _record({"status": result.status, "attempts": attempts, "driver": source.driver}),
     )
@@ -78,15 +79,14 @@ async def connect(source: Source, store: SourceStore, report: Report | None = No
 # --- the catalog, read once and cached ---------------------------------------
 
 
-async def read_catalog(source: Source, store: SourceStore, report: Report | None = None) -> dict:
-    """Read every schema through a throwaway container and cache it on the source."""
+async def read_catalog(store: SourceStore, report: Report | None = None) -> dict:
+    """Read every schema through a throwaway container and cache it on the source row."""
     _say(report, "cubes", {"message": "introspecting — one throwaway Cube container"})
-    catalog = await read.read_catalog(source)
+    catalog = await read.read_catalog(await _connection(store))
     if not catalog.schemas:
         raise StepFailed("the connection exposes no schemas")
 
     await store.save_state(
-        source.name,
         {
             "catalog": {name: dump_schema(s) for name, s in catalog.schemas.items()},
             "catalog_notes": catalog.notes,
@@ -96,8 +96,8 @@ async def read_catalog(source: Source, store: SourceStore, report: Report | None
     return {"schemas": catalog.summary(), "notes": catalog.notes, "truncated": catalog.truncated}
 
 
-async def cached_catalog(store: SourceStore, name: str) -> dict[str, Schema]:
-    state = await store.state(name)
+async def cached_catalog(store: SourceStore) -> dict[str, Schema]:
+    state = await store.state()
     return {schema: load_schema(raw) for schema, raw in (state.get("catalog") or {}).items()}
 
 
@@ -105,7 +105,6 @@ async def cached_catalog(store: SourceStore, name: str) -> dict[str, Schema]:
 
 
 async def cubes(
-    source: Source,
     store: SourceStore,
     schema_name: str,
     tables: list[str] | None = None,
@@ -115,10 +114,10 @@ async def cubes(
     # Reading is its own action so the picker has something to show before this runs,
     # but a first run with nothing cached should not fail with "read it first". One
     # place decides that, rather than each caller.
-    if not await cached_catalog(store, source.name):
-        await read_catalog(source, store, report)
+    if not await cached_catalog(store):
+        await read_catalog(store, report)
 
-    catalog = await cached_catalog(store, source.name)
+    catalog = await cached_catalog(store)
     if schema_name not in catalog:
         available = ", ".join(sorted(catalog)) or "none"
         raise StepFailed(f"schema {schema_name!r} was not read — available: {available}")
@@ -134,7 +133,7 @@ async def cubes(
         raise StepFailed(f"no tables selected from {schema_name!r}")
 
     schema = selection.filter_schema(full, chosen)
-    notes = list((await store.state(source.name)).get("catalog_notes") or [])
+    notes = list((await store.state()).get("catalog_notes") or [])
     cut = selection.cut_joins(full, chosen)
     if cut:
         notes.append(f"joins dropped by the table selection: {', '.join(cut)}")
@@ -150,7 +149,7 @@ async def cubes(
     _say(report, "cubes", {"message": f"installing {len(emitted.bodies)} cubes"})
     # Descriptions rewrite and revalidate this model, so the per-member sweep waits
     # until then rather than running twice.
-    validation = await publish.install(source, publish.build_files(emitted.bodies), members=False)
+    validation = await publish.install(publish.build_files(emitted.bodies), members=False)
     if not validation.compiled:
         # The rejected model is left on disk rather than rolled back: the model directory
         # is version-controlled by whoever owns it, so `git checkout` is the way back and
@@ -159,7 +158,6 @@ async def cubes(
         raise StepFailed(f"Cube rejected the model:\n{validation.compile_error}")
 
     await store.save_state(
-        source.name,
         {
             "selection": {"schema": schema_name, "tables": chosen},
             "schema": dump_schema(schema),
@@ -174,8 +172,8 @@ async def cubes(
         "entities": len(validation.entities),
         "schema": schema_name,
     }
-    await store.save_step(source.name, "cubes", _record(summary, notes))
-    dropped = await store.clear_steps_after(source.name, "cubes")
+    await store.save_step("cubes", _record(summary, notes))
+    dropped = await store.clear_steps_after("cubes")
     if dropped:
         notes.append(
             f"discarded {' and '.join(dropped)} — every model file was rewritten, so "
@@ -187,12 +185,12 @@ async def cubes(
 # --- step 3: describe --------------------------------------------------------
 
 
-async def describe(source: Source, store: SourceStore, report: Report | None = None) -> StepResult:
+async def describe(store: SourceStore, report: Report | None = None) -> StepResult:
     """Descriptions, measures and ai_context, then install and repair what Cube refuses."""
-    schema, bodies = await _built(store, source.name)
+    schema, bodies = await _built(store)
 
     _say(report, "describe", {"message": "reading sample values"})
-    menu = await build.build_menu(source, schema)
+    menu = await build.build_menu(schema)
 
     total = len(schema.tables)
     enrichment = decide.Enrichment()
@@ -203,7 +201,6 @@ async def describe(source: Source, store: SourceStore, report: Report | None = N
 
     _say(report, "describe", {"message": "installing, validating every measure"})
     validation = await publish.install(
-        source,
         publish.build_files(bodies, enrichment),
         every_measure=True,
         enrichment=enrichment,
@@ -219,24 +216,22 @@ async def describe(source: Source, store: SourceStore, report: Report | None = N
         )
         await decide.repair(enrichment, schema, validation.member_errors)
         validation = await publish.install(
-            source,
             publish.build_files(bodies, enrichment),
             every_measure=True,
             enrichment=enrichment,
         )
 
-    await store.save_state(source.name, {"enrichment": enrichment.model_dump()})
+    await store.save_state({"enrichment": enrichment.model_dump()})
     summary = {
         **enrichment.counts,
         "repaired": len(enrichment.repaired),
         "dropped": len(enrichment.dropped),
     }
     await store.save_step(
-        source.name,
         "describe",
         _record(summary, enrichment.rejected, validation.member_errors),
     )
-    dropped = await store.clear_steps_after(source.name, "describe")
+    dropped = await store.clear_steps_after("describe")
     return StepResult(
         summary={**summary, "invalidated": dropped},
         notes=enrichment.rejected,
@@ -247,10 +242,10 @@ async def describe(source: Source, store: SourceStore, report: Report | None = N
 # --- step 4: views -----------------------------------------------------------
 
 
-async def views(source: Source, store: SourceStore, report: Report | None = None) -> StepResult:
+async def views(store: SourceStore, report: Report | None = None) -> StepResult:
     """Propose views over the join paths, install them, and probe across the joins."""
-    schema, bodies = await _built(store, source.name)
-    state = await store.state(source.name)
+    schema, bodies = await _built(store)
+    state = await store.state()
     if "enrichment" not in state:
         raise StepFailed("run the describe step first — views are built from its decisions")
     enrichment = decide.Enrichment.model_validate(state["enrichment"])
@@ -265,7 +260,6 @@ async def views(source: Source, store: SourceStore, report: Report | None = None
         {"message": f"installing {len(enrichment.views)} views, probing across joins"},
     )
     validation = await publish.install(
-        source,
         publish.build_files(bodies, enrichment),
         every_measure=True,
         enrichment=enrichment,
@@ -273,24 +267,30 @@ async def views(source: Source, store: SourceStore, report: Report | None = None
     if not validation.compiled:
         raise StepFailed(f"Cube rejected the views:\n{validation.compile_error}")
 
-    await store.save_state(source.name, {"enrichment": enrichment.model_dump()})
+    await store.save_state({"enrichment": enrichment.model_dump()})
     summary = {
         "views": len(enrichment.views),
         "names": [v.name for v in enrichment.views],
         "entities": len(validation.entities),
     }
-    await store.save_step(
-        source.name, "views", _record(summary, enrichment.rejected, validation.member_errors)
-    )
+    await store.save_step("views", _record(summary, enrichment.rejected, validation.member_errors))
     return StepResult(summary=summary, notes=enrichment.rejected, errors=validation.member_errors)
 
 
 # --- shared -------------------------------------------------------------------
 
 
-async def _built(store: SourceStore, name: str) -> tuple[Schema, dict[str, dict]]:
+async def _connection(store: SourceStore) -> Source:
+    """The stored connection, or the message that says to make one."""
+    source = await store.get()
+    if source is None:
+        raise StepFailed("no database is connected yet")
+    return source
+
+
+async def _built(store: SourceStore) -> tuple[Schema, dict[str, dict]]:
     """The schema and cube bodies step 2 stored, or a message saying to run it."""
-    state = await store.state(name)
+    state = await store.state()
     if "schema" not in state or "bodies" not in state:
         raise StepFailed("run the cubes step first — nothing has been read from the database yet")
     return load_schema(state["schema"]), state["bodies"]
@@ -322,55 +322,54 @@ WRITES_MODEL = ("cubes", "describe", "views")
 
 async def action(
     name: str,
-    source: Source,
     store: SourceStore,
     *,
     schema: str = "public",
     tables: list[str] | None = None,
     report: Report | None = None,
 ) -> StepResult:
-    """Run one action by name, recording success or failure on the source."""
+    """Run one action by name, recording success or failure on the source row."""
     if name not in STAGES:
         raise StepFailed(f"unknown action {name!r} — one of {', '.join(STAGES)}")
 
     # A step may only run once the one before it has succeeded. Enforced here rather than in
     # the browser, which is advice — and shipped to it, so the advice cannot say otherwise.
-    if blocker := blocked_by(await store.steps(source.name), name):
+    if blocker := blocked_by(await store.steps(), name):
         raise StepFailed(f"run {blocker} first")
 
-    model_dir = source.model_dir()
+    repo = model_dir()
     if name in WRITES_MODEL:
         # Before the write, not after: the model on disk becomes a commit first, so the
         # rewrite about to happen is recoverable. `publish.write` unlinks every *.yml.
-        await vcs.ensure(model_dir)
+        await vcs.ensure(repo)
 
     try:
         if name == "connect":
-            result = await connect(source, store, report)
+            result = await connect(store, report)
         elif name == "read":
-            result = StepResult(summary=await read_catalog(source, store, report))
+            result = StepResult(summary=await read_catalog(store, report))
         elif name == "cubes":
-            result = await cubes(source, store, schema, tables, report)
+            result = await cubes(store, schema, tables, report)
         elif name == "describe":
-            result = await describe(source, store, report)
+            result = await describe(store, report)
         elif name == "views":
-            result = await views(source, store, report)
+            result = await views(store, report)
         else:
             # The membership check above accepts anything in STAGES, so a name added there
             # without a branch here has to be refused rather than fall through to `views`.
             raise StepFailed(f"{name!r} is a stage with no branch in `action`")
     except StepFailed as exc:
         if name in STEPS:
-            await store.save_step(source.name, name, _record({}, failure=str(exc)))
+            await store.save_step(name, _record({}, failure=str(exc)))
         if name in WRITES_MODEL:
-            await vcs.commit(model_dir, f"{name} — failed: {exc}"[:200])
+            await vcs.commit(repo, f"{name} — failed: {exc}"[:200])
         raise
 
     # Both paths test `WRITES_MODEL` explicitly rather than relying on the dispatch above:
     # committing after a catalog read would put a commit in the model repo for nothing.
     if name in WRITES_MODEL:
         detail = ", ".join(f"{k}={v}" for k, v in result.summary.items() if not isinstance(v, list))
-        committed = await vcs.commit(model_dir, f"{name} — {detail}"[:200])
+        committed = await vcs.commit(repo, f"{name} — {detail}"[:200])
         # A failed commit must not fail a build that worked, but it must not be silent either:
         # someone who thinks they have history and does not is worse off than before.
         if not committed.ok:
@@ -379,7 +378,6 @@ async def action(
 
 
 async def generate(
-    source: Source,
     store: SourceStore,
     schema: str = "public",
     tables: list[str] | None = None,
@@ -389,6 +387,6 @@ async def generate(
     """Every action in order. Stops at the first failure."""
     planned = ["connect", "read", "cubes", *(["describe", "views"] if enrich else [])]
     return {
-        name: await action(name, source, store, schema=schema, tables=tables, report=report)
+        name: await action(name, store, schema=schema, tables=tables, report=report)
         for name in planned
     }

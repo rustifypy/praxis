@@ -102,7 +102,7 @@ export function ResultBlock({
           numbers again. Dropping it is lossless because the tiles carry exact values — see
           `Kpi` in ResultChart. Every other chart keeps its table: that is where the
           untruncated labels and the values a chart only positions are read. */}
-      {chart?.type !== "kpi" && (
+      {chart?.type !== "kpi" && chart?.type !== "gauge" && (
         <div className="res-scroll">
           <table className="res-table">
             <thead>
