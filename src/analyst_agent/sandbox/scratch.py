@@ -13,17 +13,9 @@ from ..core.config import settings
 
 ROOT = "workspaces"
 LOGS = ".logs"
-"""Where a trimmed command's whole output goes. Dotted, so `listing` keeps it out of the way:
-the log is somewhere to look when something was cut, not part of the work."""
 SCRIPTS = "scripts"
 UPLOADS = "uploads"
-"""Where a file the user handed over lands, and the whole of what makes an upload
-distinguishable from something a script wrote. Nothing records which files arrived from the
-browser — `uploads/*` *is* that record, so a listing is enough to tell the agent what it was
-given without a table saying so."""
 PROFILES = ".profiles"
-"""One JSON per upload, plus the profiler that produced it. Dotted for the same reason as
-`.logs` — and so the profiler's own script is not read as an artifact a run wrote."""
 
 
 def ensure(chat_id: str) -> Path:
@@ -96,10 +88,6 @@ def save_upload(chat_id: str, filename: str, data: bytes) -> str:
     """
     uploads = ensure(chat_id) / UPLOADS
     uploads.mkdir(parents=True, exist_ok=True)
-    # Leading dots go, and not as a second escape check: `listing` skips dotted paths, so
-    # `.secret.csv` would land on disk invisible to the agent, to `snapshot` and to the profiler
-    # — an upload that appears to have worked and cannot be used. The tail slice is the
-    # filesystem's own 255-byte component limit, which would otherwise be an unexplained 500.
     stem = Path(filename).name.lstrip(".")[-120:] or "upload"
     target, refused = resolve(chat_id, f"{UPLOADS}/{stem}")
     if target is None:

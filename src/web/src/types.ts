@@ -124,6 +124,12 @@ export type Item =
       /** What a running script has printed so far. Live only — `output` events are not stored,
        *  so a replayed transcript reads the whole thing off `end` instead. */
       live?: string;
+      /** The script this step is about to run, from the `approval` event. Live only, and the
+       *  step falls back to reading `label` off disk — so a replayed run still shows it. */
+      script?: string;
+      /** This step is the one waiting on a click. Not derived from `script`, because after
+       *  "always" a run is approved with no approval event at all. */
+      awaiting?: boolean;
     }
   /**
    * A query's data, as its own block rather than a fold inside the trace step.
@@ -148,9 +154,6 @@ export type Item =
    * authors its own events. `label` is the script that made them.
    */
   | { kind: "files"; label: string; paths: string[] }
-  /** A script waiting on a click. Live only — the event is never stored, so a reopened chat
-   *  shows the run that followed rather than the question that preceded it. */
-  | { kind: "approval"; label: string; script: string }
   | { kind: "compacted"; before: number; after: number }
   | { kind: "error"; message: string };
 

@@ -183,12 +183,7 @@ def build_code_tools(session: Session) -> list:
             emit(Event(type="output", data={"tool": "run_python", "delta": pending}))
             pending = ""
 
-        # Either side of the run, so a chart the script drew is named rather than left for
-        # someone to find with `ls`. The model has no reason to mention a file it did not print,
-        # and until this the browser had no way to learn the file existed at all.
         before = scratch.snapshot(chat_id)
-        # `exec` so the pid the run records is python's rather than the shell's — there is no
-        # `ps` in the image to find it with afterwards.
         command = f"echo $$ > {scratch.pid_file(saved)}; exec python {saved}"
         started = time.monotonic()
         runner = asyncio.create_task(container.execute(chat_id, command, on_output=on_output))
@@ -231,9 +226,7 @@ def build_code_tools(session: Session) -> list:
             head += " — stopped by the user"
         elif result.code in (124, 137):
             head += f" — killed at the {container.EXEC_TIMEOUT_S:.0f}s limit"
-        # The memory and process limits belong to the container, not to this script, so a script
-        # that exceeded one takes the container with it. Said plainly, because the alternative is
-        # the agent reading a dead-container error as a bug in its own code.
+
         if result.code and await container.state() != "running":
             head += (
                 ". The sandbox itself was killed — most likely this script exceeded the memory "

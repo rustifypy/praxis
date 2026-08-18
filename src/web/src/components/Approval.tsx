@@ -1,17 +1,17 @@
 import { useState } from "react";
 
 import * as api from "../api";
-import { Copy } from "./Copy";
 
 /**
- * The script the agent wants to run, and the click that lets it.
+ * The click that lets a script run, inside the step that is about to run it.
  *
  * Not a safety gate — the sandbox has no network, no credential and one writable directory, so
  * nothing here is what stops a bad script. It is the one moment the script is readable before it
- * runs, which is a different thing and the reason this exists.
+ * runs, which is a different thing and the reason this exists. The script itself is above this,
+ * rendered by the step, so a decision and the thing decided about are never two blocks apart.
  *
- * The decision is local state: the event is never stored, nothing further updates this block, and
- * threading a setter up to the transcript would buy nothing.
+ * The decision is local state: the event is never stored, and `tool_end` arriving is what takes
+ * this away for good.
  */
 
 const CHOICES = [
@@ -20,17 +20,13 @@ const CHOICES = [
   { decision: "no", label: "Decline", hint: "do not run it" },
 ] as const;
 
-const DECIDED = { yes: "Ran", always: "Ran — not asking again in this chat", no: "Declined" };
+const DECIDED = {
+  yes: "Running…",
+  always: "Running — not asking again in this chat",
+  no: "Declined",
+};
 
-export function Approval({
-  chatId,
-  label,
-  script,
-}: {
-  chatId: string;
-  label: string;
-  script: string;
-}) {
+export function Approval({ chatId }: { chatId: string }) {
   const [decided, setDecided] = useState<keyof typeof DECIDED | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState("");
@@ -47,33 +43,24 @@ export function Approval({
     }
   };
 
+  if (decided) return <div className="ask-done">{DECIDED[decided]}</div>;
+
   return (
-    <div className={`ask ${decided ? "ask-done" : ""}`}>
-      <div className="ask-head">
-        <span className="ask-label">
-          {decided ? DECIDED[decided] : "Run this script?"} · {label}
-        </span>
-        <Copy value={script} />
+    <div className="ask">
+      <span className="ask-label">Run this script?</span>
+      <div className="ask-choices">
+        {CHOICES.map((choice) => (
+          <button
+            key={choice.decision}
+            className={`ask-choice ask-${choice.decision}`}
+            title={choice.hint}
+            disabled={busy}
+            onClick={() => void decide(choice.decision)}
+          >
+            {choice.label}
+          </button>
+        ))}
       </div>
-
-      <pre className="ask-script">{script}</pre>
-
-      {decided ? null : (
-        <div className="ask-choices">
-          {CHOICES.map((choice) => (
-            <button
-              key={choice.decision}
-              className={`ask-choice ask-${choice.decision}`}
-              title={choice.hint}
-              disabled={busy}
-              onClick={() => void decide(choice.decision)}
-            >
-              {choice.label}
-            </button>
-          ))}
-        </div>
-      )}
-
       {failed && <div className="ask-failed">{failed}</div>}
     </div>
   );
