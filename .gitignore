@@ -27,10 +27,10 @@ wheels/
 # A rotation leaves a copy of .env behind. Plaintext, so never committable.
 .env.*-backup
 
-# Frontend. Only node_modules and the tsc cache are ignored — the build output at
-# src/analyst_agent/web/static/ IS committed, and `analyst` serves a 503 without it.
+# Frontend
 src/web/node_modules/
 src/web/tsconfig.tsbuildinfo
+src/analyst_agent/web/static/
 
 /cube/
 .cube-probe/
