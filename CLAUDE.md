@@ -776,10 +776,14 @@ branch, at a time).
 - **`db.connect` is how both SQLite files are opened.** They are separate files on
   purpose; how they are opened is not a per-store decision, and the copy in each store
   had already drifted on `PRAGMA foreign_keys`.
-- **The frontend build output is committed** at `src/analyst_agent/web/static/`. It lives
-  inside the package because `uv_build` only ships `src/analyst_agent`; anything left in
-  `src/web` would be missing from a wheel and `analyst` would serve a 503. Run
-  `make web-build` after changing `src/web`.
+- **The frontend build output is not committed.** Vite names every chunk by its hash, so two
+  branches touching `src/web` always collide on `index.html` and on the asset names it
+  points at — and the only correct resolution is whatever `make web-build` produces from the
+  merged source, never either side. So `src/analyst_agent/web/static/` is ignored, and a
+  clean clone has no frontend until it is built: `analyst` answers a 503 saying so, and
+  `make web` builds and serves in one step. It still builds *into* the package, because
+  `uv_build` ships only `src/analyst_agent` and a wheel needs it there — which means a wheel
+  built without running `make web-build` first serves that same 503.
 
 ## Conventions
 

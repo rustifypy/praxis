@@ -249,7 +249,9 @@ the access token is minted at import and nothing else prints it.
 
 `src/web/` is the frontend source and sits outside the Python package deliberately. Its
 build output does not: `uv_build` ships only `src/analyst_agent`, so Vite writes to
-`src/analyst_agent/web/static/` and that directory is committed.
+`src/analyst_agent/web/static/`. That directory is **not** committed — hashed chunk names
+make it conflict on every branch — so a fresh clone has no frontend until you run
+`make web-build`, and `analyst` answers a 503 until you do. `make web` does both.
 
 ## Next
 
