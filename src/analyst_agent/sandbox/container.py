@@ -15,8 +15,8 @@ from .scratch import ROOT
 log = logging.getLogger("analyst.sandbox")
 
 NAME = "analyst-sandbox"
-"""One container, so `docker ps` shows one row however many chats are open. Not `cube-`
-prefixed: that prefix means "a source" to `sources.docker.ours`, and this is not one."""
+"""One container, so `docker ps` shows one row however many chats are open. Distinct from
+`sources.docker.CONTAINER`: this one holds no warehouse credentials and reaches no network."""
 IMAGE_DIR = Path(__file__).parent / "image"
 IMAGE_ENV = "ANALYST_SANDBOX_IMAGE"
 MOUNT = "/workspace"

@@ -55,7 +55,7 @@ def build_agent(
     )
 
 
-def build_editor_agent(ctx: EditContext, source: str, branch: str, checkpointer=None):
+def build_editor_agent(ctx: EditContext, branch: str, checkpointer=None):
     """The model editor. Its own agent and not a mode of the query one: they share no tools,
     and the only thing the editor may do to the warehouse is restart the container in front of
     it."""
@@ -63,7 +63,7 @@ def build_editor_agent(ctx: EditContext, source: str, branch: str, checkpointer=
     return create_agent(
         model=model,
         tools=build_editor_tools(ctx),
-        system_prompt=build_editor_prompt(source, branch),
+        system_prompt=build_editor_prompt(branch),
         middleware=[
             AuditLog(user="local"),
             ModelCallLimitMiddleware(run_limit=20, exit_behavior="end"),

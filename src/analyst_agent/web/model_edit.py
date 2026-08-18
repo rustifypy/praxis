@@ -1,8 +1,8 @@
 """Editing the model on a branch.
 
 Tiers 1-2 run on save, and that is the load-bearing moment: in dev mode Cube watches the model
-mount, so a file reaches the *live* source the instant it is written and one that will not
-compile takes the whole thing down. Tier 3 is its own button because it reports rather than
+mount, so a file reaches the *live* container the instant it is written and one that will not
+compile takes the whole model down. Tier 3 is its own button because it reports rather than
 loads. Saving to main is refused — main is what the pipeline generates.
 """
 
@@ -15,16 +15,14 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..agent.turn import stream_edit_turn
-from ..cube.client import CubeError, catalog_of
-from ..sources import docker, vcs
+from ..cube.client import CubeError, served_catalog
+from ..sources import docker, grounding, vcs
 from ..sources.editing import impact, workspace
-from ..sources.grounding import for_source
 from ..sources.modelgen import publish
-from ..sources.registry import Source
-from .state import find
+from ..sources.registry import model_dir
 from .stream import sse
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/api/model")
 
 
 class NewBranch(BaseModel):
@@ -52,9 +50,9 @@ def _idle(request: Request) -> None:
         raise HTTPException(409, "a job is running — wait for it to finish")
 
 
-async def _repo(source: Source) -> Path:
+async def _repo() -> Path:
     """The model directory as a repo. `ensure` is idempotent, which is the whole backfill."""
-    path = source.model_dir()
+    path = model_dir()
     result = await vcs.ensure(path)
     if not result.ok:
         raise HTTPException(400, f"could not version {path}: {result.message}")
@@ -65,12 +63,12 @@ STATUS = {"branch": 409, "repo": 400, "path": 400, "missing": 404, "rejected": 4
 """Which status a refusal is. The kinds are the workspace's; the codes are HTTP's."""
 
 
-async def _on_a_branch(source: Source) -> str:
+async def _on_a_branch() -> str:
     """The branch to edit on, or the refusal as a status. One rule, in `workspace`, so the
     routes and the editor's tools cannot come to disagree about what is editable."""
-    if refusal := await workspace.editable(source):
+    if refusal := await workspace.editable():
         raise HTTPException(STATUS[refusal.kind], refusal.reason)
-    return await vcs.current(source.model_dir())
+    return await vcs.current(model_dir())
 
 
 def _dirty(dirty: list[str]) -> None:
@@ -78,25 +76,22 @@ def _dirty(dirty: list[str]) -> None:
         raise HTTPException(409, f"uncommitted changes to {', '.join(dirty)} — commit or discard")
 
 
-async def _restart(request: Request, source: Source) -> None:
+async def _restart(request: Request) -> None:
     """Load what is now checked out — deterministically, rather than trusting the file watcher
     to have seen a whole branch change."""
-    result = await docker.restart(source.service)
-    request.app.state.health.pop(source.name, None)
+    result = await docker.restart()
+    request.app.state.health = None
     if not result.ok:
-        raise HTTPException(400, result.message or f"could not restart {source.service}")
+        raise HTTPException(400, result.message or f"could not restart {docker.CONTAINER}")
 
 
-async def _impact(request: Request, source: Source) -> impact.Impact:
-    """What the checked-out model would break. Read from this source's own `/v1/meta`, not the
-    agent's cached catalog — that one follows CUBE_URL and this source may not be it."""
+async def _impact(request: Request) -> impact.Impact:
+    """What the checked-out model would break, against what Cube is serving right now."""
     try:
-        catalog = await catalog_of(source)
+        catalog = await served_catalog()
     except CubeError as exc:
         raise HTTPException(409, f"cannot read the served model to check impact: {exc}") from None
-    return await impact.check(
-        source.name, catalog, request.app.state.dashboards, for_source(source)
-    )
+    return await impact.check(catalog, request.app.state.dashboards, grounding.load())
 
 
 def _validation(validation: publish.Validation) -> dict:
@@ -111,10 +106,9 @@ def _validation(validation: publish.Validation) -> dict:
 # --- branches -----------------------------------------------------------------
 
 
-@router.get("/sources/{name}/branches")
-async def list_branches(name: str, request: Request) -> dict:
-    source = await find(request, name)
-    path = await _repo(source)
+@router.get("/branches")
+async def list_branches() -> dict:
+    path = await _repo()
     current = await vcs.current(path)
     out = []
     for branch in await vcs.branches(path):
@@ -129,11 +123,10 @@ async def list_branches(name: str, request: Request) -> dict:
     }
 
 
-@router.post("/sources/{name}/branches")
-async def create_branch(name: str, body: NewBranch, request: Request) -> dict:
-    source = await find(request, name)
+@router.post("/branches")
+async def create_branch(body: NewBranch, request: Request) -> dict:
     _idle(request)
-    path = await _repo(source)
+    path = await _repo()
     if error := vcs.validate_branch(body.name, await vcs.branches(path)):
         raise HTTPException(400, error)
     _dirty(await vcs.status(path))
@@ -142,45 +135,42 @@ async def create_branch(name: str, body: NewBranch, request: Request) -> dict:
     if not result.ok:
         raise HTTPException(400, result.message)
     # No restart: a fresh branch is the commit already loaded.
-    return await list_branches(name, request)
+    return await list_branches()
 
 
-@router.post("/sources/{name}/branches/{branch}/checkout")
-async def checkout(name: str, branch: str, request: Request) -> dict:
-    source = await find(request, name)
+@router.post("/branches/{branch}/checkout")
+async def checkout(branch: str, request: Request) -> dict:
     _idle(request)
-    path = await _repo(source)
+    path = await _repo()
     _dirty(await vcs.status(path))
 
     result = await vcs.checkout(path, branch)
     if not result.ok:
         raise HTTPException(400, result.message)
-    await _restart(request, source)
-    return await list_branches(name, request)
+    await _restart(request)
+    return await list_branches()
 
 
-@router.delete("/sources/{name}/branches/{branch}")
-async def delete_branch(name: str, branch: str, request: Request, force: bool = False) -> dict:
-    source = await find(request, name)
+@router.delete("/branches/{branch}")
+async def delete_branch(branch: str, request: Request, force: bool = False) -> dict:
     _idle(request)
-    path = await _repo(source)
+    path = await _repo()
     if branch == await vcs.current(path):
         raise HTTPException(409, f"{branch!r} is checked out — switch away from it first")
     result = await vcs.delete(path, branch, force=force)
     if not result.ok:
         raise HTTPException(400, result.message)
-    return await list_branches(name, request)
+    return await list_branches()
 
 
-@router.get("/sources/{name}/branches/{branch}/diff")
-async def branch_diff(name: str, branch: str, request: Request) -> dict:
+@router.get("/branches/{branch}/diff")
+async def branch_diff(branch: str, request: Request) -> dict:
     """What merging this branch would apply to main, and what it would break."""
-    source = await find(request, name)
-    path = await _repo(source)
+    path = await _repo()
     # Impact is measured against the *served* model, so it means nothing for a branch that is
     # not the one checked out. Reporting a number from the wrong model would be worse than
     # reporting none.
-    report = await _impact(request, source) if branch == await vcs.current(path) else None
+    report = await _impact(request) if branch == await vcs.current(path) else None
     return {
         "branch": branch,
         "changed": [{"status": s, "path": p} for s, p in await vcs.changed(path, vcs.MAIN, branch)],
@@ -190,12 +180,11 @@ async def branch_diff(name: str, branch: str, request: Request) -> dict:
     }
 
 
-@router.post("/sources/{name}/branches/{branch}/merge")
-async def merge(name: str, branch: str, request: Request, force: bool = False) -> dict:
+@router.post("/branches/{branch}/merge")
+async def merge(branch: str, request: Request, force: bool = False) -> dict:
     """Install this branch and make it main. No deploy — main is served once checked out."""
-    source = await find(request, name)
     _idle(request)
-    path = await _repo(source)
+    path = await _repo()
     if branch == vcs.MAIN:
         raise HTTPException(400, "that is main")
     _dirty(await vcs.status(path))
@@ -208,7 +197,7 @@ async def merge(name: str, branch: str, request: Request, force: bool = False) -
             "actually being served, and nothing else can measure it",
         )
     # While the branch is still the served model. Afterwards there is nothing to refuse.
-    report = await _impact(request, source)
+    report = await _impact(request)
     if not report.ok and not force:
         raise HTTPException(409, report.as_message())
 
@@ -219,39 +208,37 @@ async def merge(name: str, branch: str, request: Request, force: bool = False) -
     merged = await vcs.merge(path, branch)
     if not merged.ok:
         # `vcs.merge` aborted, so going back is safe. Leaving someone on main after a failed
-        # merge would silently change what the source serves.
+        # merge would silently change what Cube serves.
         await vcs.checkout(path, was)
         raise HTTPException(409, f"could not merge {branch}: {merged.message}")
 
-    await _restart(request, source)
+    await _restart(request)
     return {
         "merged": branch,
         "current": await vcs.current(path),
         "impact": asdict(report),
-        **_validation(await publish.check(source)),
+        **_validation(await publish.check()),
     }
 
 
 # --- files --------------------------------------------------------------------
 
 
-@router.get("/sources/{name}/files")
-async def list_files(name: str, request: Request) -> dict:
-    source = await find(request, name)
-    path = await _repo(source)
+@router.get("/files")
+async def list_files() -> dict:
+    path = await _repo()
     branch = await vcs.current(path)
     return {
         "branch": branch,
         "editable": branch != vcs.MAIN,
         "dirty": await vcs.status(path),
-        "files": sorted(workspace.files(source)),
+        "files": sorted(workspace.files()),
     }
 
 
-@router.get("/sources/{name}/files/{path:path}")
-async def read_file(name: str, path: str, request: Request) -> dict:
-    source = await find(request, name)
-    target, refused = workspace.resolve(source, path)
+@router.get("/files/{path:path}")
+async def read_file(path: str) -> dict:
+    target, refused = workspace.resolve(path)
     if target is None:
         raise HTTPException(400, refused)
     if not target.is_file():
@@ -259,84 +246,87 @@ async def read_file(name: str, path: str, request: Request) -> dict:
     return {"path": path, "text": target.read_text()}
 
 
-@router.put("/sources/{name}/files/{path:path}")
-async def write_file(name: str, path: str, body: FileBody, request: Request) -> dict:
+@router.put("/files/{path:path}")
+async def write_file(path: str, body: FileBody) -> dict:
     """Tiers 1-2, then the write. What the gate refuses never reaches disk."""
-    source = await find(request, name)
-    outcome = await workspace.write(source, path, body.text)
+    outcome = await workspace.write(path, body.text)
     if not outcome.ok:
         raise HTTPException(STATUS[outcome.kind], outcome.reason)
     return {
         "path": outcome.path,
         "warnings": outcome.warnings,
-        "dirty": await vcs.status(source.model_dir()),
+        "dirty": await vcs.status(model_dir()),
     }
 
 
-@router.delete("/sources/{name}/files/{path:path}")
-async def delete_file(name: str, path: str, request: Request) -> dict:
-    source = await find(request, name)
-    outcome = await workspace.delete(source, path)
+@router.delete("/files/{path:path}")
+async def delete_file(path: str) -> dict:
+    outcome = await workspace.delete(path)
     if not outcome.ok:
         raise HTTPException(STATUS[outcome.kind], outcome.reason)
-    return {"deleted": outcome.path, "dirty": await vcs.status(source.model_dir())}
+    return {"deleted": outcome.path, "dirty": await vcs.status(model_dir())}
 
 
 # --- the working tree ----------------------------------------------------------
 
 
-@router.post("/sources/{name}/validate")
-async def validate(name: str, request: Request) -> dict:
+@router.post("/validate")
+async def validate(request: Request) -> dict:
     """Tier 3: restart and ask Cube. This is what makes an edit visible as well as checked."""
-    source = await find(request, name)
     _idle(request)
-    await _restart(request, source)
-    validation = await publish.check(source)
+    await _restart(request)
+    validation = await publish.check()
     # Reported here as well as at merge, so a broken tile surfaces while the edit is still
     # under the cursor rather than at the moment someone wanted to land it.
-    impacted = await _impact(request, source) if validation.compiled else None
+    impacted = await _impact(request) if validation.compiled else None
     return {**_validation(validation), "impact": impacted and asdict(impacted)}
 
 
-@router.post("/sources/{name}/commit")
-async def commit(name: str, body: CommitBody, request: Request) -> dict:
-    source = await find(request, name)
-    repo = await _repo(source)
-    branch = await _on_a_branch(source)
+@router.post("/commit")
+async def commit(body: CommitBody) -> dict:
+    repo = await _repo()
+    branch = await _on_a_branch()
     result = await vcs.commit(repo, body.message or f"edit {branch}")
     if not result.ok:
         raise HTTPException(400, result.message)
     return {"branch": branch, "dirty": await vcs.status(repo)}
 
 
+@router.post("/discard")
+async def discard(request: Request) -> dict:
+    _idle(request)
+    repo = await _repo()
+    await _on_a_branch()
+    result = await vcs.discard(repo)
+    if not result.ok:
+        raise HTTPException(400, result.message)
+    await _restart(request)
+    return {"dirty": await vcs.status(repo)}
+
+
 # --- the editor chat -----------------------------------------------------------
 
 
-@router.get("/sources/{name}/chats")
-async def list_edit_chats(name: str, request: Request) -> list[dict]:
-    await find(request, name)
-    chats = await request.app.state.store.list_chats("model", name)
+@router.get("/chats")
+async def list_edit_chats(request: Request) -> list[dict]:
+    chats = await request.app.state.store.list_chats("model")
     return [c.__dict__ for c in chats]
 
 
-@router.post("/sources/{name}/chats")
-async def create_edit_chat(name: str, request: Request) -> dict:
-    """A chat bound to this source. Editing needs a branch, so refuse on main."""
-    source = await find(request, name)
-    branch = await _on_a_branch(source)
-    chat = await request.app.state.store.create(f"Editing {branch}", name, "model", branch)
+@router.post("/chats")
+async def create_edit_chat(request: Request) -> dict:
+    """A chat on the checked-out branch. Editing needs a branch, so refuse on main."""
+    branch = await _on_a_branch()
+    chat = await request.app.state.store.create(f"Editing {branch}", "model", branch)
     return {"id": chat.id, "title": chat.title, "branch": branch}
 
 
-@router.post("/sources/{name}/chats/{chat_id}/messages")
-async def send_edit_message(
-    name: str, chat_id: str, body: Message, request: Request
-) -> StreamingResponse:
-    source = await find(request, name)
+@router.post("/chats/{chat_id}/messages")
+async def send_edit_message(chat_id: str, body: Message, request: Request) -> StreamingResponse:
     store = request.app.state.store
     chat = await store.get(chat_id)
-    if chat is None or chat.kind != "model" or chat.source_name != name:
-        raise HTTPException(404, f"no model chat {chat_id!r} on {name!r}")
+    if chat is None or chat.kind != "model":
+        raise HTTPException(404, f"no model chat {chat_id!r}")
 
     cancel = asyncio.Event()
     request.app.state.cancels[chat_id] = cancel
@@ -344,7 +334,7 @@ async def send_edit_message(
     async def events():
         try:
             async for event in stream_edit_turn(
-                chat_id, body.question, source, store, request.app.state.saver, cancel
+                chat_id, body.question, store, request.app.state.saver, cancel
             ):
                 yield event
                 # A closed tab should not leave the agent burning model calls.
@@ -354,16 +344,3 @@ async def send_edit_message(
             request.app.state.cancels.pop(chat_id, None)
 
     return sse(events())
-
-
-@router.post("/sources/{name}/discard")
-async def discard(name: str, request: Request) -> dict:
-    source = await find(request, name)
-    _idle(request)
-    repo = await _repo(source)
-    await _on_a_branch(source)
-    result = await vcs.discard(repo)
-    if not result.ok:
-        raise HTTPException(400, result.message)
-    await _restart(request, source)
-    return {"dirty": await vcs.status(repo)}

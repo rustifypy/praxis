@@ -5,8 +5,8 @@ from dataclasses import dataclass
 
 import httpx
 
-from ..cube.client import ADMIN_TIMEOUT_S, CubeError, catalog_of
-from .registry import Source
+from ..core.config import settings
+from ..cube.client import ADMIN_TIMEOUT_S, CubeError, served_catalog
 
 
 @dataclass
@@ -24,17 +24,18 @@ class Health:
         return {"healthy": self.ok, "status": self.status, "detail": self.detail}
 
 
-async def check(source: Source, timeout: float = 20.0) -> Health:
+async def check(timeout: float = 20.0) -> Health:
+    where = settings.cube_url.rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.get(f"{source.cube_url}/readyz")
+            r = await client.get(f"{where}/readyz")
     except httpx.TimeoutException:
         return Health(False, "timeout", f"no response in {timeout:.0f}s")
     except httpx.ConnectError:
-        return Health(False, "unreachable", f"nothing listening on port {source.port}")
+        return Health(False, "unreachable", f"nothing listening on {where}")
     except httpx.RequestError as exc:
         # A booting container accepts the connection then resets it — ReadError, not ConnectError.
-        return Health(False, "unreachable", f"{type(exc).__name__} on port {source.port}")
+        return Health(False, "unreachable", f"{type(exc).__name__} on {where}")
 
     try:
         body = r.json()
@@ -53,7 +54,7 @@ async def check(source: Source, timeout: float = 20.0) -> Health:
 
 @dataclass
 class Serving:
-    """What a source is exposing right now, from Cube's own `/v1/meta`."""
+    """What Cube is exposing right now, from its own `/v1/meta`."""
 
     cubes: int
     views: list[str]
@@ -77,11 +78,11 @@ def serving_state(running: bool, healthy: bool, served: "Serving | None") -> str
     return "ok" if served.cubes else "empty"
 
 
-async def serving(source: Source, timeout: float = ADMIN_TIMEOUT_S) -> Serving | None:
+async def serving(timeout: float = ADMIN_TIMEOUT_S) -> Serving | None:
     """The compiled entities, or None when Cube cannot say. Counted over cubes only — a view's
     members are the same members re-exported, so counting every entity counts the model twice."""
     try:
-        catalog = await catalog_of(source, timeout=timeout)
+        catalog = await served_catalog(timeout=timeout)
     except CubeError:
         return None
     return Serving(
@@ -92,13 +93,13 @@ async def serving(source: Source, timeout: float = ADMIN_TIMEOUT_S) -> Serving |
 
 
 async def wait_until_ready(
-    source: Source, attempts: int = 12, every: float = 5.0, down_tolerance: int = 2
+    attempts: int = 12, every: float = 5.0, down_tolerance: int = 2
 ) -> tuple[Health, int]:
     """Poll while the container boots. Returns the last health and attempts used."""
     health = Health(False, "unreachable")
     downs = 0
     for attempt in range(1, attempts + 1):
-        health = await check(source)
+        health = await check()
         if health.ok:
             return health, attempt
         if health.status == "DOWN":

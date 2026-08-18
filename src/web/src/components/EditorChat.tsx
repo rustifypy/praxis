@@ -31,7 +31,7 @@ const EXAMPLES = [
  * rendered as literal backticks was the worst of it. `.edchat-*` rather than the chat page's
  * `.answer`, which carries a streaming caret on its last child.
  */
-export function EditorChat({ name, onChanged }: { name: string; onChanged: () => void }) {
+export function EditorChat({ onChanged }: { onChanged: () => void }) {
   const [chat, setChat] = useState<string | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [question, setQuestion] = useState("");
@@ -75,7 +75,7 @@ export function EditorChat({ name, onChanged }: { name: string; onChanged: () =>
     setError("");
     setQuestion("");
     try {
-      const id = chat ?? (await api.createEditChat(name)).id;
+      const id = chat ?? (await api.createEditChat()).id;
       setChat(id);
       setTurns((prev) => [
         ...prev,
@@ -83,7 +83,7 @@ export function EditorChat({ name, onChanged }: { name: string; onChanged: () =>
         { role: "agent", text: "", tools: [] },
       ]);
       abort.current = new AbortController();
-      for await (const event of api.sendEditMessage(name, id, text, abort.current.signal)) {
+      for await (const event of api.sendEditMessage(id, text, abort.current.signal)) {
         if (event.type !== "user") apply(event);
       }
       // Files, branch state and the dirty list all move underneath the panel above.

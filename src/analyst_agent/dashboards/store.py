@@ -15,13 +15,7 @@ from ..core.config import settings
 from ..core.db import SCHEMA, connect
 
 ROWS_KEPT = 2
-"""Runs deep a tile keeps its rows — what a delta against the previous refresh needs."""
-
 Status = Literal["validating", "running", "ok", "refused", "failed"]
-"""`refused` is tiles that did not compile, and nothing ran; `failed` is tiles that compiled
-and then broke. Separate because only the first is fixable by editing a tile. Annotating with
-this refuses an unknown one, so no writer has to test the tuple itself.
-"""
 STATUSES: tuple[Status, ...] = get_args(Status)
 
 
@@ -29,7 +23,6 @@ STATUSES: tuple[Status, ...] = get_args(Status)
 class Dashboard:
     id: str
     title: str
-    source_name: str
     created_at: float
     updated_at: float
 
@@ -87,20 +80,18 @@ class DashboardStore:
 
     # --- dashboards ---------------------------------------------------------------
 
-    async def create(self, title: str, source_name: str) -> Dashboard:
+    async def create(self, title: str) -> Dashboard:
         now = time.time()
         board = Dashboard(
             id=uuid.uuid4().hex,
             title=title,
-            source_name=source_name,
             created_at=now,
             updated_at=now,
         )
         async with self._db() as db:
             await db.execute(
-                "INSERT INTO dashboards (id, title, source_name, created_at, "
-                "updated_at) VALUES (?, ?, ?, ?, ?)",
-                (board.id, title, source_name, now, now),
+                "INSERT INTO dashboards (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                (board.id, title, now, now),
             )
             await db.commit()
         return board
@@ -130,6 +121,40 @@ class DashboardStore:
         """The one hard delete here. Everything below it cascades."""
         async with self._db() as db:
             await db.execute("DELETE FROM dashboards WHERE id = ?", (dashboard_id,))
+            await db.commit()
+
+    # Written after the rows, because the captions come from a model call that runs once the
+    # refresh has already succeeded — one that hangs must cost captions and nothing else.
+    async def set_tile_insights(self, run_id: str, captions: dict[str, str]) -> None:
+        async with self._db() as db:
+            await db.executemany(
+                "UPDATE tile_results SET insight = ? WHERE run_id = ? AND tile_id = ?",
+                [(caption, run_id, tile_id) for tile_id, caption in captions.items()],
+            )
+            await db.commit()
+
+    # --- the board's window -------------------------------------------------------
+
+    async def window(self, dashboard_id: str) -> str | list[str] | None:
+        async with self._db() as db:
+            rows = await db.execute_fetchall(
+                "SELECT date_range FROM windows WHERE dashboard_id = ?", (dashboard_id,)
+            )
+        return json.loads(rows[0]["date_range"]) if rows else None
+
+    async def set_window(self, dashboard_id: str, date_range: str | list[str] | None) -> None:
+        """`None` removes the override, which is not the same as an empty one — every tile
+        goes back to the range its own stored query carries."""
+        async with self._db() as db:
+            if date_range is None:
+                await db.execute("DELETE FROM windows WHERE dashboard_id = ?", (dashboard_id,))
+            else:
+                await db.execute(
+                    "INSERT INTO windows (dashboard_id, date_range, updated_at) "
+                    "VALUES (?, ?, ?) ON CONFLICT(dashboard_id) DO UPDATE SET "
+                    "date_range = excluded.date_range, updated_at = excluded.updated_at",
+                    (dashboard_id, json.dumps(date_range), time.time()),
+                )
             await db.commit()
 
     # --- tiles --------------------------------------------------------------------

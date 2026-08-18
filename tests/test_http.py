@@ -6,7 +6,7 @@ derived fields the browser is forbidden from recomputing.
 
 No containers and no model calls, per the repo's rule. `app.state` is populated directly
 rather than by running the lifespan, because the real one opens `~/.analyst` — the databases
-here are all under tmp_path. `docker.ours` is stubbed: asking this machine what is running
+here are all under tmp_path. `docker.state` is stubbed: asking this machine what is running
 would make the same test answer differently on a laptop and in CI.
 """
 
@@ -19,13 +19,7 @@ from analyst_agent.sources import docker
 from analyst_agent.sources.registry import Source
 from analyst_agent.web import server
 
-SHOP = Source(
-    name="shop",
-    description="Orders.",
-    driver="postgres",
-    port=4001,
-    credentials={"CUBEJS_DB_NAME": "shop"},
-)
+SHOP = Source(description="Orders.", driver="postgres", credentials={"CUBEJS_DB_NAME": "shop"})
 
 
 @pytest.fixture
@@ -36,9 +30,8 @@ async def api(tmp_path, monkeypatch, cube):
     from analyst_agent.transcript import ChatStore
 
     # Every store defaults to `settings.db_path`, so pointing the setting is what keeps these
-    # routes off the real ~/.analyst. `cube_url` matches no source, so nothing is active.
+    # routes off the real ~/.analyst.
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    monkeypatch.setattr(settings, "cube_url", "http://localhost:4999")
 
     chats = ChatStore(tmp_path / "analyst.db")
     await chats.init()
@@ -51,16 +44,16 @@ async def api(tmp_path, monkeypatch, cube):
     server.app.state.dashboards = boards
     server.app.state.sources = sources
     server.app.state.jobs = jobs.Runner()
-    server.app.state.health = {}
+    server.app.state.health = None
     server.app.state.cube = cube
     server.app.state.cancels = {}
     server.app.state.approvals = {}
     server.app.state.always = set()
     server.app.state.saver = None
 
-    # Nothing is running, so every source reads as stopped — deterministic, and the state the
+    # Nothing is running, so the source reads as stopped — deterministic, and the state the
     # `serving_state` assertions below care about.
-    monkeypatch.setattr(docker, "ours", _no_containers)
+    monkeypatch.setattr(docker, "state", _no_container)
 
     transport = httpx.ASGITransport(app=server.app)
     async with httpx.AsyncClient(
@@ -72,8 +65,8 @@ async def api(tmp_path, monkeypatch, cube):
         yield client
 
 
-async def _no_containers() -> dict[str, str]:
-    return {}
+async def _no_container() -> str:
+    return ""
 
 
 # --- the token middleware ----------------------------------------------------
@@ -91,7 +84,7 @@ async def test_every_other_route_is_refused_without_the_token():
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=server.app), base_url="http://test"
     ) as bare:
-        for path in ("/api/chats", "/api/catalog", "/api/sources", "/api/dashboards", "/"):
+        for path in ("/api/chats", "/api/catalog", "/api/source", "/api/dashboards", "/"):
             assert (await bare.get(path)).status_code == 401, path
 
 
@@ -385,35 +378,33 @@ async def test_the_catalog_route_reports_what_the_session_serves(api, catalog):
     assert next(e for e in body["entities"] if e["name"] == "revenue")["view"] is True
 
 
-# --- sources -----------------------------------------------------------------
+# --- the data source ---------------------------------------------------------
 
 
-async def test_the_sources_list_is_empty_before_anything_is_added(api):
-    body = (await api.get("/api/sources")).json()
-    assert body["sources"] == []
-    assert body["next_port"] > 0
+async def test_the_source_is_null_before_a_database_is_connected(api):
+    assert (await api.get("/api/source")).json() is None
 
 
-async def test_a_stopped_source_says_so_rather_than_reporting_no_model(api):
+async def test_a_stopped_container_says_so_rather_than_reporting_no_model(api):
     """`serving` is null both for a stopped container and for a model Cube will not compile, so
     the row has to say which — the browser is given the answer rather than guessing."""
     _, _, sources = api.stores
-    await sources.add(SHOP)
+    await sources.save(SHOP)
 
-    row = (await api.get("/api/sources")).json()["sources"][0]
+    row = (await api.get("/api/source")).json()
     assert row["serving"] is None
     assert row["serving_state"] == "stopped"
     assert row["running"] is False
     assert "CUBEJS_DB_NAME" in row["credential_keys"]
-    assert "shop" not in str(row.get("credentials", ""))
+    assert row["label"] == "shop"
 
 
-async def test_a_source_row_carries_the_stage_rail_and_the_next_stage(api):
+async def test_the_source_carries_the_stage_rail_and_the_next_stage(api):
     _, _, sources = api.stores
-    await sources.add(SHOP)
-    await sources.save_step("shop", "connect", {"status": "done"})
+    await sources.save(SHOP)
+    await sources.save_step("connect", {"status": "done"})
 
-    row = (await api.get("/api/sources")).json()["sources"][0]
+    row = (await api.get("/api/source")).json()
     assert [s["name"] for s in row["stages"]] == ["connect", "read", "cubes", "describe", "views"]
     assert row["next_stage"] == "read"
     assert next(s for s in row["stages"] if s["name"] == "describe")["blocked_by"] == "cubes"
@@ -421,21 +412,13 @@ async def test_a_source_row_carries_the_stage_rail_and_the_next_stage(api):
 
 async def test_no_credential_value_ever_leaves_the_process(api):
     _, _, sources = api.stores
-    await sources.add(
-        Source(
-            name="secretive",
-            description="",
-            driver="postgres",
-            port=4002,
-            credentials={"CUBEJS_DB_PASS": "hunter2"},
-        )
-    )
-    assert "hunter2" not in (await api.get("/api/sources")).text
+    await sources.save(Source(driver="postgres", credentials={"CUBEJS_DB_PASS": "hunter2"}))
+    assert "hunter2" not in (await api.get("/api/source")).text
 
 
 async def test_the_driver_form_ships_what_is_required_and_no_flag_to_re_derive_it(api):
-    """Item three of this branch: the form filtered booleans where the server filters fixed
-    values, so `Save` could enable on a body `POST /sources` would reject."""
+    """The form filtered booleans where the server filters fixed values, so `Connect` could
+    enable on a body `POST /source` would reject."""
     drivers = {d["key"]: d for d in (await api.get("/api/drivers")).json()["drivers"]}
     postgres = drivers["postgres"]
     assert "CUBEJS_DB_NAME" in postgres["required_envs"]
@@ -449,44 +432,12 @@ async def test_the_driver_form_ships_what_is_required_and_no_flag_to_re_derive_i
     assert "CUBEJS_DB_DATABRICKS_ACCEPT_POLICY" not in offered | set(databricks["required_envs"])
 
 
-async def test_the_form_is_shipped_the_name_rule_it_must_not_contradict(api):
-    """The browser tests it per keystroke and `POST /sources` rejects on it, from one string."""
-    import re
-
-    pattern = (await api.get("/api/drivers")).json()["name_pattern"]
-    assert re.match(pattern, "my-shop") and not re.match(pattern, "\u03c9mega")
-
-
-async def test_a_non_ascii_source_name_is_refused(api):
-    """It would become the container name and the model directory name."""
+async def test_connecting_without_a_required_field_is_refused_by_name(api):
     response = await api.post(
-        "/api/sources",
+        "/api/source",
         json={
-            "name": "\u03c9mega",
             "description": "",
             "driver": "postgres",
-            "port": 4098,
-            "values": {
-                "CUBEJS_DB_HOST": "h",
-                "CUBEJS_DB_PORT": "5432",
-                "CUBEJS_DB_NAME": "n",
-                "CUBEJS_DB_USER": "u",
-                "CUBEJS_DB_PASS": "p",
-            },
-        },
-    )
-    assert response.status_code == 400
-    assert "lowercase" in response.text
-
-
-async def test_creating_a_source_without_a_required_field_is_refused_by_name(api):
-    response = await api.post(
-        "/api/sources",
-        json={
-            "name": "half",
-            "description": "",
-            "driver": "postgres",
-            "port": 4099,
             "values": {"CUBEJS_DB_HOST": "host.docker.internal"},
         },
     )
@@ -494,34 +445,50 @@ async def test_creating_a_source_without_a_required_field_is_refused_by_name(api
     assert "CUBEJS_DB_NAME" in response.text
 
 
+async def test_connecting_replaces_whatever_was_there(api):
+    """One Cube deployment, so there is nothing to add to — and the steps go with the old
+    database, because they describe it."""
+    _, _, sources = api.stores
+    await sources.save(SHOP)
+    await sources.save_step("connect", {"status": "done"})
+
+    body = {
+        "description": "",
+        "driver": "postgres",
+        "values": {
+            "CUBEJS_DB_HOST": "h",
+            "CUBEJS_DB_PORT": "5432",
+            "CUBEJS_DB_NAME": "other",
+            "CUBEJS_DB_USER": "u",
+            "CUBEJS_DB_PASS": "p",
+        },
+    }
+    row = (await api.post("/api/source", json=body)).json()
+    assert row["label"] == "other"
+    assert row["steps"] == {}
+
+
 async def test_an_unknown_action_is_a_404_from_the_route(api):
     """The route checks the stage list itself so the answer is 404 rather than a failed job."""
     _, _, sources = api.stores
-    await sources.add(SHOP)
-    response = await api.post("/api/sources/shop/actions/enrich", json={})
+    await sources.save(SHOP)
+    response = await api.post("/api/source/actions/enrich", json={})
     assert response.status_code == 404
     assert "enrich" in response.text
 
 
-async def test_an_unknown_source_is_a_404(api):
-    assert (await api.get("/api/sources/ghost/catalog")).status_code == 404
+async def test_reading_the_source_before_one_exists_is_a_404(api):
+    assert (await api.get("/api/source/model")).status_code == 200
+    assert (await api.post("/api/source/check")).status_code == 404
 
 
 # --- dashboards --------------------------------------------------------------
 
 
-async def test_a_dashboard_needs_an_active_source(api):
-    """Its tiles would query nothing, and a saved query against the wrong warehouse renders a
-    plausible number. Refused at creation rather than at refresh."""
-    response = await api.post("/api/dashboards", json={"title": "Weekly"})
-    assert response.status_code == 400
-    assert "active" in response.text.lower()
-
-
 async def test_an_unknown_dashboard_reads_as_404_but_refreshes_as_a_failed_run(api):
-    """Not an inconsistency to fix here: `run._open` returns an outcome rather than raising, so
-    that the source check cannot apply to `validate` and not to `refresh`. The button renders
-    the outcome, so a deleted board reports `failed` instead of throwing."""
+    """Not an inconsistency to fix here: `refresh._open` returns an outcome rather than raising,
+    so that a check cannot apply to `validate` and not to `refresh`. The button renders the
+    outcome, so a deleted board reports `failed` instead of throwing."""
     assert (await api.get("/api/dashboards/nope")).status_code == 404
     response = await api.post("/api/dashboards/nope/refresh")
     assert response.status_code == 200
@@ -529,22 +496,11 @@ async def test_an_unknown_dashboard_reads_as_404_but_refreshes_as_a_failed_run(a
     assert "nope" in response.json()["error"]
 
 
-async def test_a_dashboard_binds_to_the_active_source_at_creation(api, monkeypatch):
-    """`source_name` is stamped once, and `run.source_mismatch` is what stops a stored query
-    running against a different warehouse later."""
-    _, _, sources = api.stores
-    await sources.add(SHOP)
-    monkeypatch.setattr(settings, "cube_url", SHOP.cube_url)
-
-    created = (await api.post("/api/dashboards", json={"title": "Weekly"})).json()
-    assert created["source_name"] == "shop"
-
-
 async def test_refreshing_an_empty_board_is_refused_not_ok(api):
     """`validate` calls an empty board ok and `refresh` calls it refused, deliberately — there
     is nothing to run. The status is what the button reports."""
     _, boards, _ = api.stores
-    board = await boards.create("Weekly", "shop")
+    board = await boards.create("Weekly")
     body = (await api.post(f"/api/dashboards/{board.id}/refresh")).json()
     assert body["ok"] is False
     assert body["status"] == "refused"
@@ -553,7 +509,7 @@ async def test_refreshing_an_empty_board_is_refused_not_ok(api):
 
 async def test_a_dashboard_is_listed_renamed_and_deleted(api):
     _, boards, _ = api.stores
-    board = await boards.create("Weekly", "shop")
+    board = await boards.create("Weekly")
 
     listed = (await api.get("/api/dashboards")).json()
     assert [b["title"] for b in listed] == ["Weekly"]

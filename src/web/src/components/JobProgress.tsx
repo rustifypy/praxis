@@ -50,7 +50,7 @@ function Elapsed({ since, running }: { since?: number; running: boolean }) {
 }
 
 /**
- * The running job, inline in the source it belongs to.
+ * The running job, inline on the data page it was started from.
  *
  * Reconnecting is not special-cased: the server replays its buffer before going live, so
  * a refresh mid-describe draws exactly what was on screen before.
@@ -74,7 +74,11 @@ export function JobProgress({ job, onCancel }: { job: JobState; onCancel: () => 
     <div className={`job ${job.done ? "done" : "live"}`}>
       <div className="job-head">
         <span className="job-title">
-          {job.done ? (job.error ? "Failed" : "Finished") : `Working on ${job.source}`}
+          {job.done
+            ? job.error
+              ? "Failed"
+              : "Finished"
+            : `${ACTION_LABEL[job.current ?? ""] ?? "Working"}…`}
         </span>
         <Elapsed since={job.started_at ? job.started_at * 1000 : undefined} running={!job.done} />
         {!job.done && (

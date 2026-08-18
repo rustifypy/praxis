@@ -6,10 +6,8 @@ import yaml
 from analyst_agent.agent.tools import editor as tools
 from analyst_agent.dashboards.store import DashboardStore
 from analyst_agent.sources import registry, vcs
-from analyst_agent.sources.registry import Source
 from analyst_agent.transcript import ChatStore
 
-SOURCE = Source(name="shop", description="", driver="postgres", port=4001)
 ALBUM = {
     "name": "album",
     "sql_table": "public.album",
@@ -21,12 +19,12 @@ ALBUM = {
 @pytest.fixture
 async def ctx(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "project_root", lambda: tmp_path)
-    base = registry.scaffold_source_dirs(SOURCE, root=tmp_path)
+    base = registry.scaffold_dirs(root=tmp_path)
     (base / "cubes" / "album.yml").write_text(yaml.safe_dump({"cubes": [ALBUM]}, sort_keys=False))
     await vcs.ensure(base)
     dashboards = DashboardStore(tmp_path / "analyst.db")
     await dashboards.init()
-    return tools.EditContext(source=SOURCE, client=None, dashboards=dashboards)
+    return tools.EditContext(client=None, dashboards=dashboards)
 
 
 def named(built: list, name: str):
@@ -117,13 +115,13 @@ async def test_commit_hands_the_merge_back_to_the_user(ctx):
 
 
 async def test_editor_chats_are_not_in_the_chat_list(tmp_path):
-    """They belong to a source, not to the chat sidebar."""
+    """They belong to the model editor, not to the chat sidebar."""
     store = ChatStore(tmp_path / "analyst.db")
     await store.init()
     await store.create("What was revenue?")
-    edit = await store.create("Editing add-margin", "shop", "model", "add-margin")
+    edit = await store.create("Editing add-margin", "model", "add-margin")
 
     assert [c.title for c in await store.list_chats()] == ["What was revenue?"]
-    assert [c.id for c in await store.list_chats("model", "shop")] == [edit.id]
-    assert (await store.get(edit.id)).source_name == "shop"
+    assert [c.id for c in await store.list_chats("model")] == [edit.id]
+    assert (await store.get(edit.id)).branch == "add-margin"
     assert await store.get("nope") is None

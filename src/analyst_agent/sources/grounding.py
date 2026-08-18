@@ -1,13 +1,12 @@
-"""One source's grounding — rules, skills, certified queries — as markdown with frontmatter.
-Per source, not per installation: it names members, so one global set is wrong with two.
+"""The grounding — rules, skills, certified queries — as markdown with frontmatter, read
+from the model directory beside the cubes and views it names.
 """
 
 import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from .registry import Source
-from .store import SourceStore
+from . import registry
 
 
 @dataclass
@@ -40,10 +39,8 @@ class Artefact:
         return parsed if isinstance(parsed, dict) else None
 
 
-def _load_dir(root: Path | None, name: str) -> list[Artefact]:
+def _load_dir(root: Path, name: str) -> list[Artefact]:
     """Every .md in root/name, its frontmatter split off into meta."""
-    if root is None:
-        return []
     directory = root / name
     if not directory.is_dir():
         return []
@@ -70,13 +67,12 @@ def _load_dir(root: Path | None, name: str) -> list[Artefact]:
 
 
 class Grounding:
-    """What one source's grounding holds, or nothing at all. `root=None` is a real state: a
-    fresh source, or a `CUBE_URL` with no row behind it.
+    """What the grounding directory holds, or nothing at all — a directory that does not
+    exist yet is a fresh install rather than an error.
     """
 
-    def __init__(self, root: str | Path | None = None, source: str = ""):
-        self.root = Path(root) if root is not None else None
-        self.source = source
+    def __init__(self, root: str | Path):
+        self.root = Path(root)
         self.rules = _load_dir(self.root, "rules")
         self.skills = _load_dir(self.root, "skills")
         self.certified = _load_dir(self.root, "certified_queries")
@@ -128,23 +124,12 @@ class Grounding:
         return "\n\n".join(blocks)
 
 
-def for_source(source: Source | None) -> Grounding:
-    """The grounding a source carries. `None` — no source — carries none."""
-    if source is None:
-        return Grounding()
-    return Grounding(source.grounding_dir(), source=source.name)
+def load() -> Grounding:
+    """The grounding as the agent reads it, re-read per turn so editing a rule takes effect on
+    the next message.
 
-
-async def for_active_source() -> Grounding:
-    """The grounding for whichever source `CUBE_URL` points at, read per turn so editing a rule
-    takes effect on the next message. Opens the registry itself: both entry points need this.
-
-    TODO: this is the only agent input resolved from the working directory
-    (`registry.project_root`), while the model comes over HTTP and `sources.db` is absolute.
-    Launch the portal from anywhere else and grounding silently resolves to a missing
-    directory. Storing the source's directory in its `sources.db` row fixes this and the same
-    latent bug in `publish.write`.
+    Resolved from the working directory (`registry.project_root`), which the model directory
+    also is — launch the portal from elsewhere and both resolve to a directory that is not
+    there, grounding silently and `publish.write` loudly.
     """
-    store = SourceStore()
-    await store.init()
-    return for_source(await store.active())
+    return Grounding(registry.grounding_dir())

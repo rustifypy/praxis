@@ -8,11 +8,10 @@ from pathlib import Path
 from ...core.events import Event, emit
 from ...cube.client import CubeClient, CubeError
 from ...dashboards.store import DashboardStore
-from ...sources import vcs
+from ...sources import grounding, vcs
 from ...sources.editing import impact, workspace
-from ...sources.grounding import for_source
 from ...sources.modelgen import publish
-from ...sources.registry import Source
+from ...sources.registry import model_dir
 
 EVENT_KEYS = frozenset({"tool", "label", "ok", "note", "errors"})
 """Every key an editor tool's event may carry — asserted by a test. Absent on purpose: the
@@ -21,15 +20,14 @@ file bodies. A transcript records that a file was written, and the branch record
 
 @dataclass
 class EditContext:
-    """One source's model, on whatever branch is checked out."""
+    """The model, on whatever branch is checked out."""
 
-    source: Source
     client: CubeClient
     dashboards: DashboardStore
 
     @property
     def repo(self) -> Path:
-        return self.source.model_dir()
+        return model_dir()
 
 
 def _start(tool_name: str, label: str) -> None:
@@ -54,7 +52,7 @@ def build_editor_tools(ctx: EditContext) -> list:
         _end(tool_name, False, errors=outcome.errors)
         if outcome.kind == "branch":
             return (
-                f"{outcome.reason}. Tell the user to create a branch on the source page before "
+                f"{outcome.reason}. Tell the user to create a branch on the data page before "
                 "you edit anything."
             )
         return outcome.reason
@@ -65,7 +63,7 @@ def build_editor_tools(ctx: EditContext) -> list:
         other tool takes a path, and paths are not guessable."""
         _start("list_model_files", "Listing the model files")
         branch = await vcs.current(ctx.repo)
-        names = sorted(workspace.files(ctx.source))
+        names = sorted(workspace.files())
         _end("list_model_files", True, note=f"{len(names)} files on {branch}")
         dirty = await vcs.status(ctx.repo)
         return f"branch: {branch}\nuncommitted: {', '.join(dirty) or 'nothing'}\n" + "\n".join(
@@ -76,7 +74,7 @@ def build_editor_tools(ctx: EditContext) -> list:
     async def read_model_file(path: str) -> str:
         """Read one model file, e.g. `cubes/invoice_line.yml` or `views/sales.yml`."""
         _start("read_model_file", f"Reading {path}")
-        target, _ = workspace.resolve(ctx.source, path)
+        target, _ = workspace.resolve(path)
         if target is None or not target.is_file():
             _end("read_model_file", False)
             return f"No model file at {path!r}. Call list_model_files."
@@ -93,7 +91,7 @@ def build_editor_tools(ctx: EditContext) -> list:
         are yours to rewrite. A rejection comes back with the reason; fix it and call again.
         """
         _start("write_model_file", f"Writing {path}")
-        outcome = await workspace.write(ctx.source, path, text)
+        outcome = await workspace.write(path, text)
         if not outcome.ok:
             return _refused("write_model_file", outcome)
 
@@ -101,14 +99,14 @@ def build_editor_tools(ctx: EditContext) -> list:
         warnings = "\n".join(f"- {w}" for w in outcome.warnings)
         return (
             f"Wrote {outcome.path}. **This is live** — the container watches these files in dev "
-            "mode, so the source is already answering with it.\n" + warnings
+            "mode, so Cube is already answering with it.\n" + warnings
         ).strip()
 
     @tool
     async def delete_model_file(path: str) -> str:
         """Delete one model file. Refused when it would remove a cube or any of its members."""
         _start("delete_model_file", f"Deleting {path}")
-        outcome = await workspace.delete(ctx.source, path)
+        outcome = await workspace.delete(path)
         if not outcome.ok:
             return _refused("delete_model_file", outcome)
         _end("delete_model_file", True, note=outcome.path)
@@ -124,11 +122,11 @@ def build_editor_tools(ctx: EditContext) -> list:
         _start("validate_model", "Restarting Cube and compiling the model")
         from ...sources import docker
 
-        if not (await docker.restart(ctx.source.service)).ok:
+        if not (await docker.restart()).ok:
             _end("validate_model", False)
-            return f"Could not restart {ctx.source.service}."
+            return f"Could not restart {docker.CONTAINER}."
 
-        validation = await publish.check(ctx.source)
+        validation = await publish.check()
         if not validation.compiled:
             _end("validate_model", False, errors=[validation.compile_error[:200]])
             return f"Cube refused the model:\n{validation.compile_error}"
@@ -144,9 +142,7 @@ def build_editor_tools(ctx: EditContext) -> list:
             _end("validate_model", True, note="compiled; impact unread")
             return "\n".join([*lines, f"Could not check saved queries: {exc}"])
 
-        report = await impact.check(
-            ctx.source.name, catalog, ctx.dashboards, for_source(ctx.source)
-        )
+        report = await impact.check(catalog, ctx.dashboards, grounding.load())
         _end(
             "validate_model",
             True,
@@ -159,7 +155,7 @@ def build_editor_tools(ctx: EditContext) -> list:
     async def commit_changes(message: str) -> str:
         """Commit the edits so far, with a one-line message saying what changed and why."""
         _start("commit_changes", message[:60])
-        if refusal := await workspace.editable(ctx.source):
+        if refusal := await workspace.editable():
             return _refused("commit_changes", refusal)
         result = await vcs.commit(ctx.repo, message)
         if not result.ok:

@@ -23,7 +23,6 @@ from .core.events import Event
 class Chat:
     id: str
     title: str
-    source_name: str
     kind: str
     """'question' or 'model' — which agent this chat runs."""
     branch: str
@@ -46,7 +45,6 @@ class ChatStore:
     async def create(
         self,
         title: str = "New chat",
-        source_name: str = "",
         kind: str = "question",
         branch: str = "",
     ) -> Chat:
@@ -54,7 +52,6 @@ class ChatStore:
         chat = Chat(
             id=uuid.uuid4().hex,
             title=title,
-            source_name=source_name,
             kind=kind,
             branch=branch,
             created_at=now,
@@ -64,12 +61,11 @@ class ChatStore:
             # Named, not positional: a column added to the schema would otherwise shift
             # every value one place to the left without erroring.
             await db.execute(
-                "INSERT INTO chats (id, title, source_name, kind, branch,"
-                " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO chats (id, title, kind, branch, created_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     chat.id,
                     chat.title,
-                    chat.source_name,
                     chat.kind,
                     chat.branch,
                     chat.created_at,
@@ -79,16 +75,13 @@ class ChatStore:
             await db.commit()
         return chat
 
-    async def list_chats(self, kind: str = "question", source_name: str = "") -> list[Chat]:
+    async def list_chats(self, kind: str = "question") -> list[Chat]:
         """Chats of one kind, newest first. Defaults to the question chats, which is the
-        sidebar; model chats belong to a source and are listed on its page instead."""
-        sql = "SELECT * FROM chats WHERE kind = ?"
-        args: list[object] = [kind]
-        if source_name:
-            sql += " AND source_name = ?"
-            args.append(source_name)
+        sidebar; model chats are listed on the data page instead."""
         async with self._db() as db:
-            rows = await db.execute_fetchall(sql + " ORDER BY updated_at DESC", args)
+            rows = await db.execute_fetchall(
+                "SELECT * FROM chats WHERE kind = ? ORDER BY updated_at DESC", (kind,)
+            )
         return [Chat(**dict(r)) for r in rows]
 
     async def get(self, chat_id: str) -> Chat | None:

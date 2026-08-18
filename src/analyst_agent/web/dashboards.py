@@ -5,7 +5,7 @@ since the refresh is atomic and has no partial state to stream.
 from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from ..core.config import settings
 from ..cube.client import CubeClient, CubeError
@@ -27,19 +27,20 @@ class Rename(BaseModel):
     title: str
 
 
+class Window(BaseModel):
+    # The same shape as `TimeDimension.dateRange`: a relative string, an absolute [from, to],
+    # or None for no override. The value itself is validated where every other query value is
+    # — by the gate, when the refresh compiles.
+    model_config = ConfigDict(extra="forbid")
+
+    date_range: list[str] | str | None = None
+
+
 async def init_state(app) -> None:
     """One store for the process, created at startup like the sources one."""
     store = DashboardStore()
     await store.init()
     app.state.dashboards = store
-
-
-async def active_name(request: Request) -> str:
-    """The source `CUBE_URL` points at, or "" when it points outside the registry. Resolved
-    here because the registry is the web layer's to reach — `dashboards` takes it as an
-    argument so that package can stay ignorant of `sources`."""
-    active = await request.app.state.sources.active()
-    return active.name if active else ""
 
 
 @router.get("")
@@ -61,15 +62,7 @@ async def list_dashboards(request: Request) -> list[dict]:
 
 @router.post("")
 async def create_dashboard(body: NewDashboard, request: Request) -> dict:
-    """Binds to the source the portal is querying; without one its tiles query nothing."""
-    active = await active_name(request)
-    if not active:
-        raise HTTPException(
-            400,
-            "No registered source is active. Set CUBE_URL to a source in the registry and "
-            "restart before creating a dashboard.",
-        )
-    board = await request.app.state.dashboards.create(body.title, active)
+    board = await request.app.state.dashboards.create(body.title)
     return board.__dict__
 
 
@@ -112,6 +105,7 @@ async def read_dashboard(dashboard_id: str, request: Request) -> dict:
                     tilecheck.outgrown(tile.chart, columns, record.rows) if record.rows else ""
                 ),
                 "columns": record.columns,
+                "insight": record.insight,
                 "rows": record.rows or [],
                 "row_count": record.row_count,
                 "resolved_ranges": record.resolved_ranges,
@@ -121,17 +115,6 @@ async def read_dashboard(dashboard_id: str, request: Request) -> dict:
                 "deltas": [asdict(d) for d in changes],
                 "compared_at": since,
             }
-
-    # Asked once. A mismatch also skips the compile pass — checking tiles against another
-    # source's catalog reports every member as missing, which reads as a broken dashboard
-    # rather than as the wrong database.
-    active = await active_name(request)
-    mismatch = runner.source_mismatch(board.source_name, active)
-    checks = (
-        {"available": False, "reason": mismatch, "broken": []}
-        if mismatch
-        else await _checks(dashboard_id, store, request.app.state.cube, active)
-    )
 
     return {
         **board.__dict__,
@@ -146,6 +129,14 @@ async def read_dashboard(dashboard_id: str, request: Request) -> dict:
             for t in tiles
         ],
         "layout": spec,
+        # Shipped rather than mirrored in the browser: how wide a board may be is a layout
+        # rule, and a second copy of it is one the column picker can drift from.
+        "max_columns": layouts.MAX_COLUMNS,
+        "window": await store.window(dashboard_id),
+        # How many tiles the window actually reaches. A tile with no time member runs
+        # unchanged under it, and a board that did not say so would be quietly wrong about
+        # what its own control does.
+        "windowed_tiles": sum(1 for t in tiles if t.time_member),
         "layout_version": current["version"] if current else None,
         "history": await store.layout_history(dashboard_id),
         "run": (
@@ -160,19 +151,16 @@ async def read_dashboard(dashboard_id: str, request: Request) -> dict:
             }
         ),
         "results": results,
-        "mismatch": mismatch,
-        "checks": checks,
+        "checks": await _checks(dashboard_id, store, request.app.state.cube),
     }
 
 
-async def _checks(dashboard_id: str, store: DashboardStore, cube: CubeClient, active: str) -> dict:
+async def _checks(dashboard_id: str, store: DashboardStore, cube: CubeClient) -> dict:
     """Compile every tile without executing it, and never fail the page for trying. Turns a
     member dropped by a model rebuild into a banner on arrival."""
     try:
         catalog = await cube.catalog()
-        outcome = await runner.validate(
-            dashboard_id, store, catalog, cube, settings.max_rows, active_name=active
-        )
+        outcome = await runner.validate(dashboard_id, store, catalog, cube, settings.max_rows)
     except CubeError as exc:
         # The session wraps transport failures, so a stopped container arrives here rather than
         # as a ConnectError — which once escaped an `except OSError` and 500'd the page.
@@ -205,12 +193,9 @@ async def refresh_dashboard(dashboard_id: str, request: Request) -> dict:
     """Execute every tile's stored query. Atomic: all of them compile, or none of them run."""
     store = request.app.state.dashboards
     cube = request.app.state.cube
-    active = await active_name(request)
     try:
         catalog = await cube.catalog()
-        outcome = await runner.refresh(
-            dashboard_id, store, catalog, cube, settings.max_rows, active_name=active
-        )
+        outcome = await runner.refresh(dashboard_id, store, catalog, cube, settings.max_rows)
     except CubeError as exc:
         # 502 rather than 500: the container being down is not this server malfunctioning,
         # and the message is what the button shows.
@@ -234,6 +219,15 @@ async def refresh_dashboard(dashboard_id: str, request: Request) -> dict:
             for t in outcome.tiles
         ],
     }
+
+
+@router.post("/{dashboard_id}/window")
+async def set_window(dashboard_id: str, body: Window, request: Request) -> dict:
+    """Set the board's window. Applied on the next refresh — which the page runs straight
+    after, so the picker never describes a window the numbers on screen were not read under.
+    """
+    await request.app.state.dashboards.set_window(dashboard_id, body.date_range)
+    return {"window": body.date_range}
 
 
 @router.post("/{dashboard_id}/layout")

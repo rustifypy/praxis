@@ -30,7 +30,7 @@ async def test_a_job_publishes_start_and_end():
         runner.emit("step_start", step="connect")
         runner.emit("step_end", step="connect", ok=True)
 
-    job = await runner.start("shop", ["connect"], work)
+    job = await runner.start(["connect"], work)
     await job.task
     assert [e.type for e in job.events] == ["job_start", "step_start", "step_end", "job_end"]
     assert job.done and not job.error
@@ -42,7 +42,7 @@ async def test_a_failing_step_becomes_the_jobs_error_not_an_exception():
     async def work(job):
         raise RuntimeError("Cube rejected the model")
 
-    job = await runner.start("shop", ["cubes"], work)
+    job = await runner.start(["cubes"], work)
     await job.task
     assert job.done
     assert job.error == "Cube rejected the model"
@@ -57,13 +57,13 @@ async def test_a_second_job_is_refused_while_one_runs():
     async def work(job):
         await release.wait()
 
-    first = await runner.start("shop", ["describe"], work)
+    first = await runner.start(["describe"], work)
     with pytest.raises(jobs.Busy):
-        await runner.start("other", ["connect"], work)
+        await runner.start(["connect"], work)
     release.set()
     await first.task
     # Once it finishes the runner is free again.
-    await (await runner.start("other", ["connect"], lambda job: asyncio.sleep(0))).task
+    await (await runner.start(["connect"], lambda job: asyncio.sleep(0))).task
 
 
 async def test_the_lock_names_what_is_holding_it():
@@ -95,7 +95,7 @@ async def test_a_watcher_gets_the_buffer_then_the_live_events():
         await release.wait()
         runner.emit("progress", done=7, total=12)
 
-    job = await runner.start("shop", ["describe"], work)
+    job = await runner.start(["describe"], work)
     await started.wait()
 
     watcher = asyncio.create_task(drain(runner))
@@ -120,7 +120,7 @@ async def test_a_watcher_never_sees_the_same_event_twice():
             runner.emit("progress", done=i)
         await release.wait()
 
-    job = await runner.start("shop", ["describe"], work)
+    job = await runner.start(["describe"], work)
     watcher = asyncio.create_task(drain(runner))
     await asyncio.sleep(0)
     release.set()
@@ -131,7 +131,7 @@ async def test_a_watcher_never_sees_the_same_event_twice():
 
 async def test_watching_a_finished_job_replays_it_and_stops():
     runner = jobs.Runner()
-    job = await runner.start("shop", ["connect"], lambda job: asyncio.sleep(0))
+    job = await runner.start(["connect"], lambda job: asyncio.sleep(0))
     await job.task
     assert [e.type for e in await drain(runner)] == ["job_start", "job_end"]
 
@@ -151,7 +151,7 @@ async def test_cancel_stops_the_next_step_not_the_one_in_flight():
             in_first_step.set()
             await release.wait()
 
-    job = await runner.start("shop", ["connect", "cubes", "describe"], work)
+    job = await runner.start(["connect", "cubes", "describe"], work)
     await in_first_step.wait()
     assert runner.cancel()
     release.set()
@@ -172,7 +172,7 @@ async def test_the_buffer_is_bounded_so_a_wide_schema_cannot_grow_it_forever(mon
         for i in range(50):
             runner.emit("progress", done=i)
 
-    job = await runner.start("shop", ["describe"], work)
+    job = await runner.start(["describe"], work)
     await job.task
     assert len(job.events) == 10
     # The tail is what is kept — the end of a job is what a late watcher needs.

@@ -73,12 +73,17 @@ def test_more_columns_than_a_chart_stays_readable_in_is_rejected():
 
 
 def test_the_default_layout_leads_with_the_kpis():
-    live = [fake_tile("chart"), fake_tile("total", kind="kpi"), fake_tile("grid", kind="table")]
+    live = [
+        fake_tile("chart"),
+        fake_tile("total", kind="kpi"),
+        fake_tile("grid", kind="table"),
+        fake_tile("trend", kind="stat"),
+    ]
     spec = layout.default_layout(live)
 
-    assert [i["tile"] for i in spec["items"]] == ["total", "chart", "grid"]
+    assert [i["tile"] for i in spec["items"]] == ["total", "trend", "chart", "grid"]
     # A table's columns are its content, so it takes the whole row.
-    assert [i["span"] for i in spec["items"]] == [1, 1, 2]
+    assert [i["span"] for i in spec["items"]] == [1, 1, 1, 2]
 
 
 # --- the tools ---------------------------------------------------------------------
@@ -96,13 +101,13 @@ def events(monkeypatch):
 async def kit(tmp_path, catalog):
     store = DashboardStore(tmp_path / "analyst.db")
     await store.init()
-    ctx = tools.DashboardContext(store=store, catalog=catalog, source_name="chinook")
+    ctx = tools.DashboardContext(store=store, catalog=catalog)
     return store, {t.name: t for t in tools.build_dashboard_tools(ctx)}
 
 
 async def test_a_tile_is_saved_with_the_time_member_a_date_control_would_target(kit, events):
     store, tool = kit
-    board = await store.create("Revenue", "chinook")
+    board = await store.create("Revenue")
     query = {
         "measures": ["orders.net_revenue"],
         "timeDimensions": [{"dimension": "orders.created_at", "granularity": "month"}],
@@ -119,7 +124,7 @@ async def test_a_tile_is_saved_with_the_time_member_a_date_control_would_target(
 
 async def test_a_tile_naming_a_member_that_does_not_exist_is_rejected(kit, events):
     store, tool = kit
-    board = await store.create("Revenue", "chinook")
+    board = await store.create("Revenue")
 
     out = await tool["add_tile"].ainvoke(
         {
@@ -136,7 +141,7 @@ async def test_a_tile_naming_a_member_that_does_not_exist_is_rejected(kit, event
 
 async def test_a_fixed_window_is_saved_and_reported_as_pinned(kit, events):
     store, tool = kit
-    board = await store.create("Revenue", "chinook")
+    board = await store.create("Revenue")
 
     out = await tool["add_tile"].ainvoke(
         {
@@ -162,7 +167,7 @@ async def test_a_fixed_window_is_saved_and_reported_as_pinned(kit, events):
 
 async def test_a_removed_tile_is_recoverable_by_reverting_a_layout(kit, events):
     store, tool = kit
-    board = await store.create("Revenue", "chinook")
+    board = await store.create("Revenue")
     first = await store.add_tile(board.id, "one", QUERY, BAR)
     second = await store.add_tile(board.id, "two", QUERY, BAR)
 
@@ -184,7 +189,7 @@ async def test_a_removed_tile_is_recoverable_by_reverting_a_layout(kit, events):
 
 async def test_reverting_appends_rather_than_rewinding_so_it_is_itself_undoable(kit, events):
     store, tool = kit
-    board = await store.create("Revenue", "chinook")
+    board = await store.create("Revenue")
     first = await store.add_tile(board.id, "one", QUERY, BAR)
     second = await store.add_tile(board.id, "two", QUERY, BAR)
     pair = [{"tile": first.id, "span": 1}, {"tile": second.id, "span": 1}]
@@ -202,18 +207,6 @@ async def test_reverting_appends_rather_than_rewinding_so_it_is_itself_undoable(
     ]
 
 
-async def test_a_dashboard_cannot_be_created_with_no_active_source(tmp_path, catalog, events):
-    store = DashboardStore(tmp_path / "analyst.db")
-    await store.init()
-    ctx = tools.DashboardContext(store=store, catalog=catalog, source_name="")
-    tool = {t.name: t for t in tools.build_dashboard_tools(ctx)}
-
-    out = await tool["create_dashboard"].ainvoke({"title": "Nowhere"})
-
-    assert "Nothing was created" in out
-    assert await store.list_dashboards() == []
-
-
 async def test_no_dashboard_tool_can_refresh_one(kit):
     _, tool = kit
     # Executing twelve stored queries is a page action, not a turn. The absence is the
@@ -225,7 +218,7 @@ async def test_dashboard_events_never_carry_state(kit, events):
     """The intent-only rule. A tool trace that recorded a layout would go stale the next
     time anything was edited, because the row is the truth and the event is not."""
     store, tool = kit
-    board = await store.create("Revenue", "chinook")
+    board = await store.create("Revenue")
     tile = await store.add_tile(board.id, "one", QUERY, BAR)
 
     await tool["list_dashboards"].ainvoke({})
@@ -254,7 +247,7 @@ async def test_a_tool_works_when_it_is_driven_outside_a_graph(kit):
     `RuntimeError`, and a bare `except RuntimeError` let that through and killed the call.
     """
     store, tool = kit
-    board = await store.create("Revenue", "chinook")
+    board = await store.create("Revenue")
 
     out = await tool["add_tile"].ainvoke(
         {"dashboard_id": board.id, "title": "Total", "query": KPI_QUERY, "chart": KPI}

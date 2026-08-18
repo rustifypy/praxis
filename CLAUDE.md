@@ -9,8 +9,8 @@ make install                  # uv sync --all-groups
 make test                     # uv run pytest -q — no containers, no model calls
 make lint                     # ruff check + ruff format --check
 make fmt                      # ruff format + ruff check --fix
-make up / make down           # the shared Cube Store (sources are their own containers)
-make logs SOURCE=<name>       # follow one source's container
+make up / make down           # the shared Cube Store (Cube itself is its own container)
+make logs                     # follow the Cube container
 
 uv run pytest tests/test_gate.py::test_valid_query_passes    # a single test
 uv run pytest tests/test_model_generation.py -q              # one file
@@ -26,10 +26,8 @@ arguments**: host, port and data directory come from settings, so `WEB_PORT=8481
 analyst` is how you move it and `.env` is where it lives. `analyst`
 starts the portal and nothing else. **The portal is the only surface**: add capability to
 `web/sources.py` and the panel, never a second entry point beside it. Two of them means the
-connection form and the four steps' confirmations get written twice, and anything resolving
-its target through `settings.api_root` — the single global `CUBE_URL` — cannot survive more
-than one Cube container without a `--source` flag and a `SourceStore` lookup a launcher has
-no reason to hold. Anything headless belongs behind the portal's token guard, not beside it.
+connection form and the four steps' confirmations get written twice. Anything headless
+belongs behind the portal's token guard, not beside it.
 
 `typer` and `rich` are deliberately absent from the dependency list — nothing here needs
 either. That is why the launcher prints with `print(..., flush=True)` rather than
@@ -67,18 +65,17 @@ Three rules keep the tiers honest when a feature wants to cross one:
 - **A tool is agent vocabulary wherever the state it edits lives.** All three toolsets are in
   `agent/tools/`, importing the stores they write through.
 - **What a lower tier cannot look up, it takes as an argument.** `dashboards.refresh` is
-  handed `active_name`; it never opens the registry. That is the whole reason `dashboards`
-  and `sources` are orderable at all.
-- **Annotate against a shape, not a package.** `cube.client.Addressable` is "somewhere to
-  send a request", so the Cube client does not name the registry that depends on it. An
-  import inside `if TYPE_CHECKING:` is a cycle that has not failed yet, not a solution.
+  handed a `CubeClient` and a `Catalog`; it never opens the source row. That is the whole
+  reason `dashboards` and `sources` are orderable at all.
+- **An import inside `if TYPE_CHECKING:` is a cycle that has not failed yet**, not a
+  solution. Move the thing down a tier, or pass it in.
 
 ## Six subsystems
 
-**Query time** (`cube/`, `agent/`, `sources/grounding.py`) — the agent answers
-questions about **one** source: `CUBE_URL` picks it, `grounding.for_active_source` is
-the only place that resolves it, and its grounding is whatever that source carries.
-It never writes SQL. It emits Cube JSON queries that pass a four-tier gate
+**Query time** (`cube/`, `agent/`, `sources/grounding.py`) — the agent answers questions
+about the one connected database: `CUBE_URL` is where Cube answers and `CubeClient.local`
+is the only thing that reads it. It never writes SQL. It emits Cube JSON queries that pass
+a four-tier gate
 (pydantic schema → local semantic checks against the cached catalog → `POST /v1/sql`
 which compiles without executing → `POST /v1/load`). Failures return as text the agent
 can act on, never exceptions. See README for the tier table.
@@ -98,12 +95,10 @@ and none of it survives parsing SQL. The expressiveness gap is real — `CubeQue
 is closed the way it should be: post-processing over rows that already passed the gate, in the
 sandbox, rather than by widening what the gate inspects. See **Code execution** below.
 
-Grounding is **per source and has no global layer** — it names members, so one shared
-set is wrong the moment there are two warehouses, and the agent was being handed
-`revenue.net_revenue` definitions for a database with no revenue cube. It lives at
-`cube/sources/<name>/grounding/{rules,skills,certified_queries}`. A `CUBE_URL` with no
-source row behind it grounds on nothing rather than erroring, which is what
-`Grounding.is_empty` is for.
+Grounding lives **beside the cubes it names**, at
+`cube/model/grounding/{rules,skills,certified_queries}` — so it is versioned with the model
+it describes and a branch carries its own. A directory that does not exist yet grounds on
+nothing rather than erroring, which is what `Grounding.is_empty` is for.
 
 **Model generation** (`sources/modelgen/`) — builds the Cube data model a source exposes.
 `modelgen` and not `model`, because "model" in this codebase is also the LLM:
@@ -123,7 +118,7 @@ Three invariants hold throughout: **the LLM returns decisions, never YAML** (pyd
 objects via `with_structured_output`, then checked against a derived menu); **Cube is the
 validator** — a candidate model goes to the real container and Cube says what is wrong,
 so do not write a YAML checker; and **nothing survives only in memory** — the steps run
-minutes or days apart, so each writes what the next needs into the `sources` row.
+minutes or days apart, so each writes what the next needs into the `source` row.
 
 `publish.install` is the only way a model reaches a container: write → restart → ask.
 
@@ -140,18 +135,18 @@ schema), and a deselected table is indistinguishable from that.
 
 **Editing & branching** (`sources/editing/{edits,impact,workspace}.py`,
 `sources/vcs.py`, `agent/tools/editor.py`, `web/model_edit.py`,
-`src/web/src/components/{ModelEditor,EditorChat}.tsx`) — a source's model directory is a git
-repo, and the checked-out branch is what the container serves, because the directory is a bind
-mount rather than something copied in. There is no per-branch endpoint the way Cube Cloud has
-one: `git checkout` on the host *is* the deploy, so this subsystem is a gate in front of that
-one mount rather than a sandbox beside it.
+`src/web/src/components/{ModelEditor,EditorChat}.tsx`) — `cube/model/` is a git repo, and the
+checked-out branch is what the container serves, because the directory is a bind mount rather
+than something copied in. There is no per-branch endpoint the way Cube Cloud has one:
+`git checkout` on the host *is* the deploy, so this subsystem is a gate in front of that one
+mount rather than a sandbox beside it.
 
 | module | role |
 |---|---|
 | `sources/vcs.py` | git as a subprocess against the model directory — branches, diff, merge, and `files_at` for reading main's blobs out of `.git` without checking main out. Beside `modelgen/` and `editing/` rather than inside either: generation commits what it writes and editing branches off it |
 | `edits.py` | tiers 1-2: valid YAML, then append-only cubes vs. freely-rewritable views, diffed against **main**, never against the branch's own previous state |
 | `workspace.py` | the directory as a working tree: `write` and `delete`, which both the HTTP routes and the editor agent's tools go through — one path, so the two cannot disagree on what a valid edit is |
-| `impact.py` | every dashboard tile and certified query bound to the source, checked against the *served* catalog — not a member-diff of main against the branch, because "is what this tile reads still here" is the question that survives whatever caused the breakage |
+| `impact.py` | every dashboard tile and certified query, checked against the *served* catalog — not a member-diff of main against the branch, because "is what this tile reads still here" is the question that survives whatever caused the breakage |
 | `agent/tools/editor.py` | the editor agent's six tools — no merge, checkout or branch-create; those restart the container and land work, so they stay buttons on the page |
 | `web/model_edit.py` | the HTTP surface: branches, files, validate (tier 3), commit, merge, and the editor chat |
 
@@ -161,11 +156,10 @@ Two invariants:
    mount and reloads in under a second, so `edits.check` is what keeps a file that will not
    compile off disk in the first place — `write_model_file` and `PUT /files/{path}` both run
    the identical two-tier check before `write_text`, and neither has another way to refuse.
-2. **Impact is only ever measured against the branch actually checked out.** Two sources can
-   both carry a member of the same name, and a number from the wrong warehouse would look
-   exactly as plausible as a right one. `branch_diff` and `merge` both refuse to compute impact
-   for any branch that is not the one checked out — there is no isolated endpoint to ask a
-   not-checked-out branch's question against.
+2. **Impact is only ever measured against the branch actually checked out.** Only one catalog
+   is served at a time, so a report computed for any other branch would describe a model
+   nothing is running. `branch_diff` and `merge` both refuse to compute impact for a branch
+   that is not checked out — there is no isolated endpoint to ask that question against.
 
 Main is generated, never edited directly — `_guard`/`_on_a_branch` refuse a write there. A
 branch only ever moves forward from main: no pull, no rebase, no remote at all
@@ -199,7 +193,7 @@ three invariants; read it before changing anything here:
 | `store.py` | `dashboards`/`tiles`/`layouts`/`runs`/`tile_results` in `analyst.db` |
 | `tiles.py` | what a valid tile is: `validate` at authoring, `outgrown` on every refresh |
 | `layout.py` | placement only; a partial layout is *completed*, never treated as hiding |
-| `refresh.py` | `validate` (tiers 1-3) and `refresh` (+ tier 4), the atomic pass. Takes the active source's name rather than resolving it, so this package never imports `sources` |
+| `refresh.py` | `validate` (tiers 1-3) and `refresh` (+ tier 4), the atomic pass |
 | `delta.py` | change since the previous refresh, single-row results only |
 | `insights.py` | one model call per refresh for the whole board, never per tile |
 | `agent/tools/dashboards.py` | the eight agent tools — which do **not** include refreshing |
@@ -352,8 +346,8 @@ browser the way Jupyter does. One flat event stream is the contract between agen
 | `web/server.py` | routes, SSE, token auth, static mount |
 | `src/web/` | React source; **builds into `analyst_agent/web/static/`** |
 | `src/web/src/components/Rail.tsx` | the mode switch — chat, boards or data, and nothing else |
-| `src/web/src/components/ChatHeader.tsx` | the active source, and switching it — nothing deeper |
-| `src/web/src/components/ServedModel.tsx` | the compiled model **and** this source's grounding, one list |
+| `src/web/src/components/ChatHeader.tsx` | what is being queried, and a link to manage it |
+| `src/web/src/components/ServedModel.tsx` | the compiled model **and** its grounding, one list |
 | `src/web/src/components/ResultBlock.tsx` | one query's data: the table, the chart above it, CSV |
 | `src/web/src/components/FileBlock.tsx` | what a script wrote: images inline, everything else a download |
 | `src/web/src/components/Composer.tsx` | the question, and the files it arrives with |
@@ -409,21 +403,22 @@ the bind mount and the download route is how it is read.
 
 **The browser is separate products, so it is separate modes.** `Rail.tsx` owns the switch
 and the column beside it swaps whole — `ChatNav`, `DashboardNav` or `DataNav`, never two.
-Chat and sources shared one sidebar until the chat list stayed live and clickable while you
+Chat and data shared one sidebar until the chat list stayed live and clickable while you
 were administering a database. Boards sit between them because that is the order the work
-happens in: made in chat, bound to a source. The mode is read off the hash and nowhere else
-(`useHash`), as is which dashboard is open; a mirrored React copy disagreed with the address
-bar after a back button. A hash and not a router — three views do not justify one.
+happens in: made in chat, read against the model. The mode is read off the hash and nowhere
+else (`useHash`), as is which dashboard is open; a mirrored React copy disagreed with the
+address bar after a back button. A hash and not a router — three views do not justify one.
 
-`ChatHeader` is where "which source am I querying" lives: the chip carries the name, the
-health dot and `servingNote` — the size of the model, which is what says a source is
-*built* and not merely connected — and its panel is a source **switcher and nothing
-else**. `ServedModel` does not belong in it: "what can I ask about" feels like a question
-you have with a cursor in the composer, but it is the wrong depth for a dropdown — clicking
-the chip to check which database you are on would open an admin screen over the transcript.
-`ServedModel` lives on the source page only, one deliberate click
-away via "Manage sources"; the panel is sized to its own longest row, not to that
-component.
+**Data mode has no middle column** (`.app.no-nav`), because there is one connection and a
+sidebar listing it would be a list of one. Chat and boards keep theirs.
+
+`ChatHeader` is where "what am I querying" lives: the chip carries the database's name, the
+health dot, the branch when it is not main, and `servingNote` — the size of the model, which
+is what says it is *built* and not merely connected. The chip is a **link to the data page
+and nothing else**. `ServedModel` does not belong in it: "what can I ask about" feels like a
+question you have with a cursor in the composer, but it is the wrong depth for a dropdown —
+clicking the chip to check which database you are on would open an admin screen over the
+transcript. It lives on the data page only, one deliberate click away.
 
 `ServedModel` is **master–detail, not accordions**: the entity list is a fixed column and
 members render in the box beside it, because expanding in place pushed every row below
@@ -432,7 +427,7 @@ selection* follows the best match, since re-ranking rows under someone who is ty
 what they are reaching for.
 
 **Its sections are collapsed by default** and there is no selection on arrival. Five
-sections open at once is a column of eighty rows; shut, the shape of a whole source fits
+sections open at once is a column of eighty rows; shut, the shape of the whole model fits
 on one screen, which is why the count stays on the header. Two consequences that are not
 preferences: a filter force-opens every section, because typing into a column of shut
 headers and watching only the counts change is a search that appears to do nothing; and
@@ -466,7 +461,7 @@ rather than from `steps`; the browser iterates the rail it ships on `SourceRow.s
 
 **One file, one schema.** `core.db.SCHEMA` is every table this process creates, and
 `~/.analyst/analyst.db` holds all of them: `chats` and `events` (the transcript),
-`results`, `dashboards`/`tiles`/`layouts`/`runs`/`tile_results`, `sources`, and
+`results`, `dashboards`/`tiles`/`layouts`/`windows`/`runs`/`tile_results`, `source`, and
 LangGraph's `checkpoints`/`writes` — those last two created by `AsyncSqliteSaver` rather
 than here. `core.db.connect` is how it is opened, so `PRAGMA foreign_keys` cannot drift between
 the three stores that open it.
@@ -475,7 +470,7 @@ The schema lives in `core/db.py` rather than beside each store because **the uni
 not the store**: `ChatStore`, `DashboardStore` and `SourceStore` all write it and none owns
 it, and a schema split across three modules reads as three databases.
 
-The file is **chmod 600** — `SourceStore.init` sets it, because `sources.credentials` is
+The file is **chmod 600** — `SourceStore.init` sets it, because `source.credentials` is
 plaintext JSON and the file mode is the whole guard.
 
 One person on one machine: the token guard is the whole access story, and
@@ -486,28 +481,32 @@ One person on one machine: the token guard is the whole access story, and
 the sandbox, so a row describing it could only ever be a second copy of `ls` — and the copy is
 what would go stale. Deleting a chat takes the workspace with it (`scratch.remove`).
 
-## Sources
+## The data source
 
-One Cube container per data source, and **one row in `sources` is the whole source** —
-credentials included. `sources/docker.py` starts each container with `docker run -e` built
-from that row, so there is nothing on disk that can drift from it: no registry file, no
-per-source credential file, no generated compose file, and do not add one.
-`docker-compose.yml` is hand-written and holds only the shared Cube Store, on an explicitly
-named `analyst-net` network that standalone containers join.
+**One Cube deployment.** One container, one model directory, and **one row in `source`** —
+credentials included, with `id = 1` enforced by a CHECK rather than by convention.
+`sources/docker.py` starts the container with `docker run -e` built from that row, so there
+is nothing on disk that can drift from it: no registry file, no credential file, no
+generated compose file, and do not add one. `docker-compose.yml` is hand-written and holds
+only the shared Cube Store, on an explicitly named `analyst-net` network the container joins.
 
-The registry is a table in `analyst.db` like everything else — chats, dashboards, sources
-and the checkpointer in one file under `DATA_DIR`. So `--data-dir` scopes the whole install
-rather than just the history: a scratch directory is a scratch *everything*, sources
-included.
+That row is a table in `analyst.db` like everything else — chats, dashboards, the source and
+the checkpointer in one file under `DATA_DIR`. So `DATA_DIR` scopes the whole install rather
+than just the history: a scratch directory is a scratch *everything*, connection included.
 
-**A source owns its URL.** `sources.cube_url` is written from the port at creation and is
-what every query follows — `Source.api_root` is the only thing that builds a request URL,
-and `health`, `run` and `CubeClient.for_source` all read it rather than deriving one. A
-chat carries `source_name` and no URL of its own for the same reason: two copies would be
-one wrong number away from answering out of the wrong warehouse. `CUBE_URL` still picks
-which source is *active*, and `SourceStore.active()` is the one place that resolves it —
-grounding, a dashboard refresh and a newly created chat all go through it rather than
-each scanning the registry.
+**There is one address, and it is `CUBE_URL`.** `settings.api_root` builds it, `CubeClient.local`
+is the only thing that reads it, and `settings.cube_port` derives the published port from it so
+docker and the query path cannot name different numbers. Nothing stores a second copy — a chat,
+a dashboard and a tile all query wherever `CUBE_URL` points, because there is nowhere else.
+
+The container name and the model path are **constants, not stored values** —
+`docker.CONTAINER` is `cube-analyst` and `registry.MODEL_ROOT` is `cube/model`. Nothing
+selects them, so nothing can disagree about which container or which directory is meant.
+
+**Connecting is a replacement, not an addition.** `SourceStore.save` is `INSERT OR REPLACE`
+and resets `steps` and `state` with it: those describe the tables of a database that is no
+longer connected, and keeping them would offer a "Build cubes" that rewrites the model from
+a catalog nothing read.
 
 **A chat has a `kind`.** `'question'` runs the query agent, `'model'` the editor agent;
 both share this table and the transcript format and differ only there. `list_chats`
@@ -516,11 +515,11 @@ filters on it, so the sidebar shows question chats and the model editor shows it
 `core/jobs.py` runs **one job at a time, machine-wide**, guarded by a `flock` — the
 probe container has one name, so a second portal process must wait rather than delete it
 underneath the first. A job is not stored: it lives in memory, streams to whoever is watching, and
-writes its outcome onto the source's `steps` as it goes. Refreshing the browser
+writes its outcome onto the source row's `steps` as it goes. Refreshing the browser
 re-attaches (the buffer replays); restarting the server loses the narration, not the
 result.
 
-`source.model_dir()` is also a git repo once `vcs.ensure` has touched it — see **Editing &
+`registry.model_dir()` is also a git repo once `vcs.ensure` has touched it — see **Editing &
 branching** above for what that buys and what it costs (one container, so one checked-out
 branch, at a time).
 
@@ -619,20 +618,20 @@ branch, at a time).
   a correct model as a dozen problems; the actionable case is a *cube* no view reaches at
   all, which is flagged on the entity instead.
 - **Cube compiles every `*.yml` anywhere under the model mount, not just `cubes/` and
-  `views/`.** Verified on a live source: a `grounding/certified_queries/probe.yml` took
-  chinook from 13 cubes to **0**, with `Compile errors: ... Unexpected YAML key: name.
-  Only 'cubes', 'views', and 'view_groups' are allowed here` — the error names the
-  grounding file, and every query against that source is down until it goes. A `.md` in
+  `views/`.** Verified live: a `grounding/certified_queries/probe.yml` took chinook from 13
+  cubes to **0**, with `Compile errors: ... Unexpected YAML key: name. Only 'cubes',
+  'views', and 'view_groups' are allowed here` — the error names the grounding file, and
+  every query is down until it goes. A `.md` in
   the same place is ignored entirely, which is why grounding is markdown and why
   `_load_dir` globs `*.md`. There is no top-level Cube key for a saved query, so no
   "Cube-compliant" YAML can hold one; the only free-form slot is `meta:`, which
   `publish.write` regenerates. If grounding ever needs a structured format, that is a
   decision to make grounding *generated* — not a way to keep hand-written files.
 - **Cube Core *does* hot-reload model files when `CUBEJS_DEV_MODE=true`** — which is how every
-  source container here runs. A new `views/x.yml` was served in under a second with no restart,
-  and a file with a bad `join_path` took the whole source to a compile error just as fast, then
+  container here runs. A new `views/x.yml` was served in under a second with no restart,
+  and a file with a bad `join_path` took the whole model to a compile error just as fast, then
   recovered the moment it was deleted. Two consequences: a save is **live**, so the edit gate refusing bad YAML *before* the
-  write is what keeps a source up, not the restart afterwards; and a restart is still what
+  write is what keeps Cube up, not the restart afterwards; and a restart is still what
   `publish.install` and a branch checkout use, because a whole model changing at once should be
   compiled from a known state rather than from whatever the watcher saw mid-write.
 - **Cube qualifies a single-identifier `sql:` but passes an expression through verbatim.**
@@ -647,7 +646,7 @@ branch, at a time).
   `localhost`.
 - **Escape model/Cube/database text before `console.print`.** Rich reads `[...]` as
   markup and silently swallowed the gate's `[rule-id]` prefixes. Use `rich.markup.escape`.
-- **`cube/sources/` is the only thing written into the working directory.** That
+- **`cube/model/` is the only thing written into the working directory.** That
   directory belongs to whoever installed this — it is a dependency, and their `cube/` is
   theirs to version. Everything else goes under `DATA_DIR`
   (`~/.analyst`): `analyst.db`, the job lock, and `probe-model/` (the catalog probe's
@@ -670,9 +669,9 @@ branch, at a time).
 - **`docker run --network` needs a network that already exists.** Nothing else creates one,
   so `docker.ensure_network` runs before every create. Compose
   prefixes container names with its project (`analyst-ds-cubestore-router-1`) but the
-  service name is the alias on the network, which is what sources resolve — so a
+  service name is the alias on the network, which is what the container resolves — so a
   `--filter name=^...$` anchored on the service name matches nothing.
-- **Source ports are published on `127.0.0.1` only.** `CUBEJS_DEV_MODE=true` disables JWT
+- **Cube's port is published on `127.0.0.1` only.** `CUBEJS_DEV_MODE=true` disables JWT
   verification, and a `0.0.0.0` bind would answer the whole network unauthenticated.
 - **A progress sink may return a value.** The web's sink returns the `Event` it emitted, so
   `steps.Report` is `Callable[[str, dict], object]` and `_say` calls it without reading the
@@ -690,15 +689,14 @@ branch, at a time).
 - **`overflow-y: auto` computes `overflow-x` to `auto` as well.** An absolutely positioned
   popover wider than such a container does not spill out of it — it makes that container
   scroll sideways, and the content is unreachable. `Info` is `position: fixed` and placed
-  from `getBoundingClientRect`, which is what makes it safe inside the sources list column
-  and the chat header's scrolling panel. It closes on scroll because a fixed panel does
-  not travel with its anchor.
+  from `getBoundingClientRect`, which is what makes it safe inside a scrolling panel. It
+  closes on scroll because a fixed panel does not travel with its anchor.
 - **`.panel` is in the DOM with no rule behind it.** `ToolCall.tsx` renders
   `<div className="panel">` and `styles.css` defines only `--panel` (a colour token),
   `.panel-head` and `.panel-toggle`. Defining `.panel` retroactively restyles the tool
   trace. This is the `.source`/`.dot` trap already sprung — the name is taken by markup
   rather than by CSS, so grepping the stylesheet alone will not find it. (`.panel-head` is
-  also defined twice at equal specificity, so the sources-page copy wins on `gap` and
+  also defined twice at equal specificity, so the data-page copy wins on `gap` and
   leaks a `margin-bottom` into the transcript.)
 - **`.answer.streaming > :last-child::after` is the streaming caret**, so anything appended
   as the last child of `.answer` grows a blinking cursor. A result block is a sibling of
@@ -760,20 +758,17 @@ branch, at a time).
   body**, and `list[dict]` then fails at import. `ChatStore.list_chats` is named that way
   for this reason.
 - **One rule, one place, or it will drift.** Four of these were caught in review after
-  being written twice: what a valid new source is (`registry.validate_new`), what
-  re-running a step discards (`store.invalidated_by`, shipped to the browser as
-  `invalidates` rather than recomputed there), which source is active
-  (`Source.is_active`), and what a failed step record looks like (`steps._record`, written
-  only by `steps.action`). Health goes over the wire structured (`Health.as_dict`) for the
-  same reason — the browser was matching on the word "down". Collapsing source management
+  being written twice: which connection fields are required (`drivers.missing_fields`, run
+  by the route and shipped to the form as `required_envs`), what re-running a step discards
+  (`store.invalidated_by`, shipped to the browser as `invalidates` rather than recomputed
+  there), and what a failed step record looks like (`steps._record`, written only by
+  `steps.action`). Health goes over the wire structured (`Health.as_dict`) for the same
+  reason — the browser was matching on the word "down". Collapsing connection management
   onto the portal alone was the same problem at a larger scale. `drivers.split_mounts` is
-  the newest one: create and edit both have to turn a typed host path into a mount plus a
+  another: connect and edit both have to turn a typed host path into a mount plus a
   container path, and only one of them getting it right is a key file Cube cannot find.
-  Dashboards add two: `layout.validate` is what both the agent's `set_layout` and the
-  browser's `POST /{id}/layout` go through, and `refresh.source_mismatch` is the only thing
-  standing between a saved query and a number from the wrong warehouse — two sources can
-  both have `sales.revenue`, nothing downstream would error, and the tile would render a
-  plausible figure about a different database.
+  `layout.validate` is what both the agent's `set_layout` and the browser's
+  `POST /{id}/layout` go through, for the same reason.
 - **A bind mount whose host path does not exist is not an error — docker creates an empty
   directory there.** For a key file that means Cube opens a folder and fails somewhere far
   away. `web.sources._paths` stats the file and 400s while the person is still looking at

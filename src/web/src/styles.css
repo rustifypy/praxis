@@ -108,12 +108,14 @@ textarea {
   line-height: 1.2;
 }
 
-/* Rail, then the column that belongs entirely to whichever mode the rail is on. Chat and
-   sources shared one sidebar and neither was served by it. */
 .app {
   display: grid;
-  grid-template-columns: 56px 248px 1fr;
+  grid-template-columns: 56px 248px minmax(0, 1fr);
   height: 100%;
+}
+
+.app.no-nav {
+  grid-template-columns: 56px minmax(0, 1fr);
 }
 
 /* ============================ shared motion ============================ */
@@ -739,10 +741,12 @@ textarea {
   animation: rise 0.26s var(--ease);
 }
 
+/* The right margin is `.row`'s own gutter rather than a flat 24px, so the bubble ends on the
+   column edge every other row starts and ends on instead of out in the transcript's margin. */
 .row.user {
   width: fit-content;
   max-width: min(600px, calc(100% - 48px));
-  margin: 26px 24px 16px auto;
+  margin: 26px max(24px, calc((100% - 760px) / 2)) 16px auto;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 14px 14px 4px 14px;
@@ -1812,6 +1816,226 @@ textarea {
   margin-left: auto;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
+}
+
+.res-band {
+  fill-opacity: 0.5;
+  stroke: none;
+}
+
+.res-slice {
+  stroke: var(--raised);
+  stroke-width: 2;
+}
+
+.res-bare {
+  padding: 12px;
+}
+
+.res-bare svg {
+  display: block;
+  width: 100%;
+  height: 90px;
+}
+
+.res-bare-ends {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 4px;
+  color: var(--faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.res-donut {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  padding: 12px;
+}
+
+.res-donut svg {
+  display: block;
+  width: 190px;
+  height: 190px;
+  flex: none;
+}
+
+.res-donut-total {
+  fill: var(--ink);
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.res-donut-cap {
+  fill: var(--faint);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.res-donut-legend {
+  display: grid;
+  flex: 1;
+  min-width: 150px;
+  gap: 5px;
+  margin: 0;
+}
+
+.res-donut-legend li {
+  gap: 8px;
+}
+
+.res-donut-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.res-donut-share {
+  margin-left: auto;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.res-hbar-name {
+  text-anchor: end;
+}
+
+.res-heat {
+  padding: 10px 12px 12px;
+}
+
+.res-heat svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.res-heat-scale {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  padding-top: 6px;
+  color: var(--faint);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.res-heat-step {
+  width: 22px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+.res-heat-scale span:first-child {
+  margin-right: 4px;
+}
+
+.res-heat-scale span:last-child {
+  margin-left: 4px;
+}
+
+.res-gauge {
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+}
+
+.res-gauge svg {
+  display: block;
+  width: 210px;
+  height: auto;
+}
+
+.res-gauge-track {
+  fill: var(--line);
+}
+
+.res-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 26px;
+  padding: 12px;
+}
+
+.res-stat {
+  display: flex;
+  min-width: 148px;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.res-stat-label {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.res-stat-figure {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.res-stat-value {
+  color: var(--ink);
+  font-size: 28px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+
+.res-stat-delta {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.res-stat-delta.up {
+  background: color-mix(in srgb, var(--ok) 13%, transparent);
+  color: var(--ok);
+}
+
+.res-stat-delta.down {
+  background: color-mix(in srgb, var(--bad) 13%, transparent);
+  color: var(--bad);
+}
+
+.res-stat-delta.flat {
+  background: color-mix(in srgb, var(--faint) 13%, transparent);
+  color: var(--faint);
+}
+
+.res-spark {
+  display: block;
+  width: 100%;
+  max-width: 300px;
+  height: 30px;
+  margin-top: 2px;
+}
+
+.res-spark-area {
+  fill-opacity: 0.13;
+  stroke: none;
+}
+
+.res-spark-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
 }
 
 /* One row with no grouping: each measure is a figure, not a plot. */
@@ -3073,7 +3297,7 @@ button.danger.solid {
 /* A local single-user tool on a desktop, so this only keeps the three-column shell from
    crushing the content — it is not a phone layout. */
 @media (max-width: 980px) {
-  .app { grid-template-columns: 52px 204px 1fr; }
+  .app { grid-template-columns: 52px 204px minmax(0, 1fr); }
   .src-panel { width: min(460px, calc(100vw - 300px)); }
 
   /* Below this the detail box would be narrower than a member row, so the split stacks
@@ -3768,8 +3992,10 @@ button.danger.solid {
 }
 
 .dash-title h2 {
-  margin: 0;
-  font-size: 18px;
+  margin: 0 0 1px;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .dash-meta {
@@ -3780,6 +4006,8 @@ button.danger.solid {
 .dash-actions {
   display: flex;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 7px;
 }
 
@@ -3813,6 +4041,51 @@ button.danger.solid {
   cursor: default;
 }
 
+/* Outranks `.dash-actions > button` above, which would otherwise paint this as one more
+   bordered grey box beside Refresh. */
+.dash-actions > button.dash-undo {
+  border-color: transparent;
+  background: none;
+  color: var(--accent);
+}
+
+/* Both header pickers — columns and window. One rule rather than two near-identical ones,
+   which is how they start to drift. */
+.dash-select {
+  min-height: var(--control);
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.dash-select:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* A window reaching no tile at all is the one case worth colouring: the control is on and
+   doing nothing. */
+.dash-window-none {
+  color: var(--warn);
+}
+
+/* Outranks `.dash-actions > button`. Pressed is a filled chip and not only a hue, so the
+   state survives being read without colour. */
+.dash-actions > button.dash-toggle[aria-pressed="true"] {
+  border-color: transparent;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.dash-actions > button.dash-toggle[aria-pressed="false"] {
+  color: var(--faint);
+}
+
 .dash-banner {
   margin-bottom: 10px;
   padding: 9px 12px;
@@ -3840,11 +4113,38 @@ button.danger.solid {
   color: var(--faint);
 }
 
-/* The run's summary paragraph, stamped with when. An insight is a claim about numbers, so
-   one with no "as of" attached invites being quoted long after the data moved. */
+/* The run's summary as a card rather than loose prose: unstyled, it was indistinguishable
+   from body text and read as chrome, which is the opposite of what it is. */
 .dash-insight {
+  margin: 0 0 18px;
+  padding: 11px 14px 13px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.dash-insight-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 6px;
+}
+
+.dash-insight-tag {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.dash-insight p {
   max-width: 74ch;
-  margin: 0 0 16px;
+  margin: 0;
   color: var(--ink);
   font-size: 13.5px;
   line-height: 1.65;
@@ -3852,6 +4152,35 @@ button.danger.solid {
 
 .dash-insight-when {
   color: var(--faint);
+  font-size: 11.5px;
+}
+
+/* Board-level and indeterminate on purpose: the refresh is atomic, so a bar per tile would
+   show the partial state a refusal exists to prevent. */
+.dash-progress {
+  overflow: hidden;
+  height: 2px;
+  margin-bottom: 14px;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+.dash-progress::after {
+  display: block;
+  width: 34%;
+  height: 100%;
+  animation: dash-slide 1.1s var(--ease) infinite;
+  background: var(--accent);
+  content: "";
+}
+
+@keyframes dash-slide {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(330%);
+  }
 }
 
 .dash-grid {
@@ -3859,8 +4188,32 @@ button.danger.solid {
   gap: 14px;
 }
 
+/* The column count is an inline style off the saved layout, so the narrow-screen collapse
+   has to outrank it. */
+@media (max-width: 860px) {
+  .dash-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .dash-cell {
+    grid-column: span 1 !important;
+  }
+}
+
 .dash-cell {
   min-width: 0;
+}
+
+.dash-cell.lifted {
+  cursor: grabbing;
+  opacity: 0.45;
+}
+
+/* On the tile rather than the cell: the cell is the grid track and an outline on it would
+   sit outside the gap. */
+.dash-cell.over > .dash-tile {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .dash-tile {
@@ -3870,19 +4223,44 @@ button.danger.solid {
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius);
+  animation: dash-rise 0.26s var(--ease) both;
   background: var(--raised);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 4%);
+  transition:
+    border-color 0.16s var(--ease),
+    box-shadow 0.16s var(--ease);
+}
+
+/* On the tile, not the cell: `.dash-cell.lifted` owns the cell's opacity while a tile is
+   held, and an animation filling `both` would override it. */
+@keyframes dash-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.dash-tile:hover {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+  box-shadow: 0 4px 14px rgb(0 0 0 / 8%);
 }
 
 .dash-tile-head {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 12px 6px;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
 }
 
 .dash-tile-head h3 {
   overflow: hidden;
+  flex: 1;
+  min-width: 0;
   margin: 0;
   font-size: 13px;
   font-weight: 600;
@@ -3890,17 +4268,64 @@ button.danger.solid {
   white-space: nowrap;
 }
 
+/* Arrange chrome. Dimmed rather than hidden until hover: a control that only exists under
+   the pointer is one nobody finds, and the keyboard path needs it visible on focus. */
+.dash-grip,
+.dash-span {
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--faint);
+  opacity: 0.45;
+  transition:
+    opacity 0.15s,
+    color 0.15s;
+}
+
+.dash-grip {
+  display: grid;
+  width: 14px;
+  height: 18px;
+  place-items: center;
+  font-size: 12px;
+  line-height: 1;
+  cursor: grab;
+}
+
+.dash-span {
+  min-height: 17px;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.dash-tile:hover .dash-grip,
+.dash-tile:hover .dash-span,
+.dash-grip:focus-visible,
+.dash-span:focus-visible {
+  color: var(--muted);
+  opacity: 1;
+}
+
 /* The window Cube actually resolved. On every tile that filters by time, because it is the
    only thing that says whether this tile's numbers moved with the refresh. */
 .dash-tile-window {
   flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--code-bg);
   color: var(--faint);
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 10px;
 }
 
 .dash-tile-chart {
-  padding: 2px 8px 8px;
+  padding: 8px 8px 10px;
 }
 
 .dash-tile-empty {
@@ -3910,10 +4335,72 @@ button.danger.solid {
   font-size: 12.5px;
 }
 
+/* A tile that has never been refreshed keeps the shape it will have, so the grid does not
+   reflow under the first Refresh and the sentence is not the whole tile. */
+.dash-waiting .dash-tile-empty {
+  padding: 4px 12px 16px;
+}
+
+.dash-skeleton {
+  display: flex;
+  align-items: flex-end;
+  height: 116px;
+  gap: 9px;
+  padding: 16px 14px 0;
+}
+
+.dash-skeleton span {
+  flex: 1;
+  animation: dash-shimmer 1.5s linear infinite;
+  background: linear-gradient(90deg, var(--panel), var(--line), var(--panel));
+  background-size: 220% 100%;
+  border-radius: 4px 4px 0 0;
+}
+
+.dash-skeleton span:nth-child(1) {
+  height: 42%;
+}
+
+.dash-skeleton span:nth-child(2) {
+  height: 68%;
+}
+
+.dash-skeleton span:nth-child(3) {
+  height: 54%;
+}
+
+.dash-skeleton span:nth-child(4) {
+  height: 88%;
+}
+
+.dash-skeleton span:nth-child(5) {
+  height: 61%;
+}
+
+@keyframes dash-shimmer {
+  from {
+    background-position: 220% 0;
+  }
+  to {
+    background-position: -220% 0;
+  }
+}
+
 .dash-tile-broken {
   padding: 10px 12px 14px;
   color: var(--bad);
   font-size: 12px;
+  line-height: 1.5;
+}
+
+/* The tile's own one-liner. `margin-top: auto` pins it to the bottom of the tile, so captions
+   line up across a row instead of floating wherever each chart happens to end. */
+.dash-caption {
+  margin: auto 0 0;
+  padding: 8px 12px 10px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  color: var(--muted);
+  font-size: 11.5px;
   line-height: 1.5;
 }
 
@@ -3937,16 +4424,22 @@ button.danger.solid {
   font-size: 12px;
 }
 
+/* `text-align` explicitly: a bare `th` centres, so every non-numeric column had a centred
+   header over a left-aligned body. `.right` below still wins for the numeric ones. */
 .dash-tile-table th,
 .dash-tile-table td {
   padding: 5px 12px;
   border-bottom: 1px solid var(--line);
+  text-align: left;
   white-space: nowrap;
 }
 
 .dash-tile-table th {
   color: var(--muted);
+  font-size: 10.5px;
   font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 .dash-tile-table th.right,
@@ -3964,44 +4457,65 @@ button.danger.solid {
 
 .dash-kpi-row {
   display: flex;
+  flex: 1;
   flex-wrap: wrap;
-  gap: 18px 26px;
-  padding: 6px 12px 16px;
+  align-content: center;
+  gap: 18px 30px;
+  padding: 16px 14px 18px;
 }
 
 .dash-kpi {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  align-items: flex-start;
+  gap: 3px;
 }
 
 .dash-kpi-value {
-  font-size: 25px;
+  color: var(--ink);
+  font-size: 30px;
   font-variant-numeric: tabular-nums;
-  line-height: 1.15;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
 }
 
+/* The micro-label idiom: small, spaced and set apart from the figure it names, so the
+   number is the thing read first. */
 .dash-kpi-label {
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 /* An arrow and a sign both carry direction, so colour is never the only cue — the same rule
-   the chart palette follows, for the same reason. */
+   the chart palette follows, for the same reason. The tint is emphasis on top of that. */
 .dash-delta {
-  font-size: 11.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 3px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
+  font-weight: 600;
 }
 
 .dash-delta.up {
+  background: color-mix(in srgb, var(--ok) 13%, transparent);
   color: var(--ok);
 }
 
 .dash-delta.down {
+  background: color-mix(in srgb, var(--bad) 13%, transparent);
   color: var(--bad);
 }
 
 .dash-delta.flat {
+  background: color-mix(in srgb, var(--faint) 13%, transparent);
   color: var(--faint);
 }
 

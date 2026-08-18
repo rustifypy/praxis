@@ -10,7 +10,7 @@ import yaml
 from ...cube.client import CubeClient, CubeError
 from ...cube.schema import CubeQuery
 from .. import docker
-from ..registry import Source, project_root
+from ..registry import model_dir, project_root
 from .decide import CubeDecision, Enrichment, MeasureDecision, ViewDecision, exposed_members
 
 RESTART_TIMEOUT_S = 90.0
@@ -124,21 +124,20 @@ def build_files(bodies: dict[str, dict], enrichment: Enrichment | None = None) -
 # --- getting it into the container -----------------------------------------
 
 
-def write(source: Source, files: dict[str, str], root: Path | None = None) -> None:
+def write(files: dict[str, str], root: Path | None = None) -> None:
     """Replace the model. Every `*.yml` goes first, so a cube that is no longer emitted does not
     linger and keep compiling.
     """
-    model_dir = source.model_dir(root or project_root())
-    for existing in model_dir.rglob("*.yml"):
+    directory = model_dir(root or project_root())
+    for existing in directory.rglob("*.yml"):
         existing.unlink()
     for relative, body in files.items():
-        target = model_dir / relative
+        target = directory / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(body)
 
 
 async def install(
-    source: Source,
     files: dict[str, str],
     *,
     members: bool = True,
@@ -146,16 +145,15 @@ async def install(
     enrichment: Enrichment | None = None,
 ) -> Validation:
     """Write the model, restart Cube, and report what Cube makes of it."""
-    write(source, files)
+    write(files)
     # A restart rather than trusting the file watcher: a whole model is rewritten here, and
     # `check` must report on that model rather than on a half-seen one.
-    if not (await docker.restart(source.service)).ok:
-        return Validation(compile_error=f"could not restart {source.service}")
-    return await check(source, members=members, every_measure=every_measure, enrichment=enrichment)
+    if not (await docker.restart()).ok:
+        return Validation(compile_error=f"could not restart {docker.CONTAINER}")
+    return await check(members=members, every_measure=every_measure, enrichment=enrichment)
 
 
 async def check(
-    source: Source,
     timeout: float = RESTART_TIMEOUT_S,
     every_measure: bool = False,
     members: bool = True,
@@ -164,7 +162,7 @@ async def check(
     """Read compile errors from /v1/meta, then compile queries through /v1/sql."""
     out = Validation()
 
-    async with CubeClient.for_source(source) as cube:
+    async with CubeClient.local() as cube:
         try:
             # Startup races look like errors too, so the session retries anything but a
             # genuine compile error, which it raises rather than waiting out the deadline.

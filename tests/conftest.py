@@ -3,9 +3,18 @@ from dataclasses import dataclass, field
 import httpx
 import pytest
 
+from analyst_agent.core.config import settings
 from analyst_agent.cube.catalog import Catalog
 from analyst_agent.cube.client import CompileResult, CubeError, LoadResult
 from analyst_agent.cube.schema import CubeQuery
+
+
+@pytest.fixture(autouse=True)
+def local_cube(monkeypatch):
+    """Pin where Cube answers. There is one address and it comes from settings, so without
+    this every test that touches health or the client reads the developer's own `.env`."""
+    monkeypatch.setattr(settings, "cube_url", "http://localhost:4000")
+
 
 META = {
     "cubes": [

@@ -55,9 +55,9 @@ async def lifespan(app: FastAPI):
     # All three stores open the same file; each runs the one SCHEMA, whoever is first.
     await dashboards.init_state(app)
     await state.init_state(app)
-    # One session for the active source, for the life of the process: `CUBE_URL` fixes which
-    # source that is at boot, and its catalog cache is what every query turn reads.
-    async with checkpointer() as saver, CubeClient.active() as cube:
+    # One Cube session for the life of the process; its catalog cache is what every query
+    # turn reads.
+    async with checkpointer() as saver, CubeClient.local() as cube:
         app.state.sandbox = asyncio.create_task(container.rebuild())
         app.state.store = store
         app.state.saver = saver
@@ -107,9 +107,7 @@ async def list_chats(request: Request) -> list[dict]:
 
 @app.post("/api/chats")
 async def create_chat(body: NewChat, request: Request) -> dict:
-    """A chat belongs to a source, and the active one is the only candidate today."""
-    active = await request.app.state.sources.active()
-    chat = await request.app.state.store.create(body.title, active.name if active else "")
+    chat = await request.app.state.store.create(body.title)
     return chat.__dict__
 
 
