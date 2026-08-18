@@ -14,9 +14,8 @@ from ..core.events import Event
 from ..core.llm import reasoning_of, text_of
 from ..cube.client import ADMIN_TIMEOUT_S, CubeClient
 from ..dashboards.store import DashboardStore
-from ..sources import vcs
-from ..sources.grounding import for_active_source
-from ..sources.registry import Source
+from ..sources import grounding, vcs
+from ..sources.registry import model_dir
 from ..transcript import ChatStore
 from .build import (
     COMPACTION_TAG,
@@ -120,14 +119,14 @@ async def stream_turn(
     files: list[str] | None = None,
     approvals: asyncio.Queue | None = None,
 ) -> AsyncIterator[Event]:
-    """`cube` is the app's session for the active source — borrowed, never closed here. It
-    re-mints its own token, so a chat outliving the 15-minute JWT no longer 403s mid-thought."""
+    """`cube` is the app's session — borrowed, never closed here. It re-mints its own token,
+    so a chat outliving the 15-minute JWT no longer 403s mid-thought."""
 
     async def build(turn_id: str):
         session = Session(
             catalog=await cube.catalog(),
             client=cube,
-            grounding=await for_active_source(),
+            grounding=grounding.load(),
             max_rows=settings.max_rows,
             # Result sets are kept beside the transcript, under this turn, so the table
             # and the CSV have something to address after the stream has closed.
@@ -141,17 +140,10 @@ async def stream_turn(
         # that" on turn three, and after a restart.
         session.executed, session.rejected = replay(await store.events(chat_id))
 
-        # The tools that author dashboards. `grounding.source` is the active source's name,
-        # already resolved by `for_active_source` — one lookup, and a new dashboard binds to
-        # the same source the answers in this chat came from.
         return build_agent(
             session,
             checkpointer=saver,
-            dashboards=DashboardContext(
-                store=DashboardStore(),
-                catalog=session.catalog,
-                source_name=session.grounding.source,
-            ),
+            dashboards=DashboardContext(store=DashboardStore(), catalog=session.catalog),
         )
 
     async for event in run_turn(build, chat_id, question, store, cancel, files):
@@ -161,23 +153,22 @@ async def stream_turn(
 async def stream_edit_turn(
     chat_id: str,
     question: str,
-    source: Source,
     store: ChatStore,
     saver,
     cancel: asyncio.Event | None = None,
 ) -> AsyncIterator[Event]:
-    """One turn of a model-editor chat. Its Cube session is pinned to this source's own URL —
-    the query agent's follows CUBE_URL, and the source being edited may not be that one."""
+    """One turn of a model-editor chat. Its own Cube session, on the admin timeout: an editor
+    turn restarts the container and waits for a compile, which a query timeout is not sized for.
+    """
 
-    async with CubeClient.for_source(source, timeout=ADMIN_TIMEOUT_S) as client:
+    async with CubeClient.local(timeout=ADMIN_TIMEOUT_S) as client:
 
         async def build(_turn_id: str):
             # Read per turn, not stored: the branch is whichever one is checked out, because
             # that is the one being served, and the page can switch it between turns.
-            branch = await vcs.current(source.model_dir())
+            branch = await vcs.current(model_dir())
             return build_editor_agent(
-                EditContext(source=source, client=client, dashboards=DashboardStore()),
-                source.name,
+                EditContext(client=client, dashboards=DashboardStore()),
                 branch,
                 checkpointer=saver,
             )

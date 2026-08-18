@@ -4,15 +4,15 @@ import { useState } from "react";
 import { useDismiss } from "../hooks";
 
 /**
- * Destructive confirmation that costs a moment's attention: type the name.
+ * Destructive confirmation that costs a moment's attention: type the word.
  *
  * `window.confirm` is rejected everywhere else in this app — it freezes the page, cannot
  * be styled, and reads as a browser error — and it was least defensible here, on the one
  * action that destroys a container and a model directory that takes an LLM call per table
- * to rebuild. A muscle-memory Enter dismisses a confirm; it does not type a name.
+ * to rebuild. A muscle-memory Enter dismisses a confirm; it does not type a word.
  */
-export function ConfirmName({
-  name,
+export function Confirm({
+  word,
   title,
   children,
   confirmLabel,
@@ -20,7 +20,7 @@ export function ConfirmName({
   onConfirm,
 }: {
   /** What the user has to type. */
-  name: string;
+  word: string;
   title: string;
   children: ReactNode;
   confirmLabel: string;
@@ -29,7 +29,7 @@ export function ConfirmName({
 }) {
   const [typed, setTyped] = useState("");
   const ref = useDismiss<HTMLDivElement>(true, onCancel);
-  const armed = typed.trim() === name;
+  const armed = typed.trim() === word;
 
   return (
     <div className="modal-scrim">
@@ -38,7 +38,7 @@ export function ConfirmName({
         <div className="modal-body">{children}</div>
 
         <label>
-          Type <code>{name}</code> to confirm
+          Type <code>{word}</code> to confirm
           <input
             value={typed}
             autoFocus

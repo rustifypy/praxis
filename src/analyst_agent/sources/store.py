@@ -1,16 +1,16 @@
-"""The source registry, credentials included, in `analyst.db` with everything else. The
-schema is in `core/db.py`."""
+"""The data source — credentials included — in `analyst.db` with everything else. One Cube
+deployment, so one row; the schema is in `core/db.py`."""
 
 import json
 import time
 from pathlib import Path
 from typing import Literal, get_args
 
-import aiosqlite
 from pydantic import validate_call
 
 from ..core.config import settings
 from ..core.db import SCHEMA, connect
+from .docker import CONTAINER
 from .registry import Source
 
 Step = Literal["connect", "cubes", "describe", "views"]
@@ -21,11 +21,14 @@ STEPS: tuple[Step, ...] = get_args(Step)
 """The same names to iterate, index and join. Derived, so the two cannot drift."""
 
 Stage = Literal["connect", "read", "cubes", "describe", "views"]
-"""Every action a person can run, in order — the one definition of the workflow. `run.action`
+"""Every action a person can run, in order — the one definition of the workflow. `steps.action`
 dispatches on it, `stages` renders it, and the browser iterates the shipped rail rather than
 keeping a fourth copy. `read` is the odd one: it records no step row, so its state is whether
 a catalog is cached, and nothing gates it."""
 STAGES: tuple[Stage, ...] = get_args(Stage)
+
+ROW = 1
+"""The only row id there is. `core.db.SCHEMA` enforces it with a CHECK."""
 
 
 class SourceStore:
@@ -42,21 +45,20 @@ class SourceStore:
         # Database passwords in plaintext, so owner-only: the file mode is the whole guard.
         self.path.chmod(0o600)
 
-    # --- rows ---------------------------------------------------------------
+    # --- the row ------------------------------------------------------------
 
-    async def add(self, source: Source) -> None:
+    async def save(self, source: Source) -> None:
+        """Write the connection, replacing whatever was there. Steps and state are reset with
+        it: they describe a database, and this is a different one."""
         now = time.time()
         async with self._db() as db:
             await db.execute(
-                "INSERT INTO sources (name, description, driver, port, cube_url, credentials,"
-                " mounts, steps, state, created_at, updated_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, '{}', '{}', ?, ?)",
+                "INSERT OR REPLACE INTO source (id, description, driver, credentials, mounts,"
+                " steps, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, '{}', '{}', ?, ?)",
                 (
-                    source.name,
+                    ROW,
                     source.description,
                     source.driver,
-                    source.port,
-                    source.cube_url,
                     json.dumps(source.credentials),
                     json.dumps(source.mounts),
                     now,
@@ -65,44 +67,25 @@ class SourceStore:
             )
             await db.commit()
 
-    async def active(self) -> Source | None:
-        """The source `CUBE_URL` points at. One definition, so grounding, a dashboard refresh
-        and a newly created chat cannot disagree about which source is being queried."""
-        return next((s for s in await self.all() if s.is_active), None)
-
-    async def all(self) -> list[Source]:
+    async def get(self) -> Source | None:
+        """The connection, or None before one has been made."""
         async with self._db() as db:
-            rows = await db.execute_fetchall("SELECT * FROM sources ORDER BY created_at")
-        return [_source(r) for r in rows]
+            rows = await db.execute_fetchall("SELECT * FROM source WHERE id = ?", (ROW,))
+        if not rows:
+            return None
+        row = rows[0]
+        return Source(
+            driver=row["driver"],
+            description=row["description"],
+            mounts=json.loads(row["mounts"]),
+            credentials=json.loads(row["credentials"]),
+        )
 
-    async def get(self, name: str) -> Source | None:
-        async with self._db() as db:
-            rows = await db.execute_fetchall("SELECT * FROM sources WHERE name = ?", (name,))
-        return _source(rows[0]) if rows else None
-
-    async def names(self) -> list[str]:
-        async with self._db() as db:
-            rows = await db.execute_fetchall("SELECT name FROM sources ORDER BY created_at")
-        return [r["name"] for r in rows]
-
-    async def catalog_read(self, name: str) -> bool:
-        return has_catalog(await self.state(name))
-
-    async def all_catalog_read(self) -> dict[str, bool]:
-        """Every source's answer in one read, for the endpoint that renders all of them."""
-        async with self._db() as db:
-            rows = await db.execute_fetchall("SELECT name, state FROM sources")
-        return {r["name"]: has_catalog(json.loads(r["state"])) for r in rows}
-
-    async def all_steps(self) -> dict[str, dict]:
-        """Every source's step records, in one read."""
-        async with self._db() as db:
-            rows = await db.execute_fetchall("SELECT name, steps FROM sources")
-        return {r["name"]: json.loads(r["steps"]) for r in rows}
+    async def catalog_read(self) -> bool:
+        return has_catalog(await self.state())
 
     async def update(
         self,
-        name: str,
         *,
         description: str | None = None,
         credentials: dict[str, str] | None = None,
@@ -123,79 +106,64 @@ class SourceStore:
             return
         async with self._db() as db:
             await db.execute(
-                f"UPDATE sources SET {', '.join(sets)}, updated_at = ? WHERE name = ?",
-                (*values, time.time(), name),
+                f"UPDATE source SET {', '.join(sets)}, updated_at = ? WHERE id = ?",
+                (*values, time.time(), ROW),
             )
             await db.commit()
 
-    async def remove(self, name: str) -> None:
+    async def remove(self) -> None:
         async with self._db() as db:
-            await db.execute("DELETE FROM sources WHERE name = ?", (name,))
+            await db.execute("DELETE FROM source WHERE id = ?", (ROW,))
             await db.commit()
 
     # --- the JSON columns ---------------------------------------------------
 
-    async def steps(self, name: str) -> dict:
-        return await self._blob(name, "steps")
+    async def steps(self) -> dict:
+        return await self._blob("steps")
 
     @validate_call
-    async def save_step(self, name: str, step: Step, payload: dict) -> None:
+    async def save_step(self, step: Step, payload: dict) -> None:
         """Replace one step's record, leaving the other three untouched."""
-        current = await self.steps(name)
+        current = await self.steps()
         current[step] = payload
-        await self._save_blob(name, "steps", current)
+        await self._save_blob("steps", current)
 
-    async def clear_steps_after(self, name: str, step: str) -> list[str]:
+    async def clear_steps_after(self, step: str) -> list[str]:
         """Forget the steps that depend on `step`, and say which were forgotten."""
-        current = await self.steps(name)
+        current = await self.steps()
         dropped = invalidated_by(current, step)
         for s in dropped:
             current.pop(s)
         if dropped:
-            await self._save_blob(name, "steps", current)
+            await self._save_blob("steps", current)
         return dropped
 
-    async def state(self, name: str) -> dict:
+    async def state(self) -> dict:
         """The cached catalog, cube bodies and enrichment decisions."""
-        return await self._blob(name, "state")
+        return await self._blob("state")
 
-    async def save_state(self, name: str, patch: dict) -> None:
+    async def save_state(self, patch: dict) -> None:
         """Merge `patch` into the stored state at the top level."""
-        current = await self.state(name)
+        current = await self.state()
         current.update(patch)
-        await self._save_blob(name, "state", current)
+        await self._save_blob("state", current)
 
-    async def _blob(self, name: str, column: str) -> dict:
+    async def _blob(self, column: str) -> dict:
         async with self._db() as db:
-            rows = await db.execute_fetchall(
-                f"SELECT {column} FROM sources WHERE name = ?", (name,)
-            )
+            rows = await db.execute_fetchall(f"SELECT {column} FROM source WHERE id = ?", (ROW,))
         return json.loads(rows[0][column]) if rows else {}
 
-    async def _save_blob(self, name: str, column: str, value: dict) -> None:
+    async def _save_blob(self, column: str, value: dict) -> None:
         async with self._db() as db:
             await db.execute(
-                f"UPDATE sources SET {column} = ?, updated_at = ? WHERE name = ?",
-                (json.dumps(value, default=str), time.time(), name),
+                f"UPDATE source SET {column} = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(value, default=str), time.time(), ROW),
             )
             await db.commit()
 
 
-def _source(row: aiosqlite.Row) -> Source:
-    return Source(
-        name=row["name"],
-        description=row["description"],
-        driver=row["driver"],
-        port=int(row["port"]),
-        cube_url=row["cube_url"],
-        mounts=json.loads(row["mounts"]),
-        credentials=json.loads(row["credentials"]),
-    )
-
-
 def has_catalog(state: dict) -> bool:
-    """`read`'s state. It records no step row, so a cached catalog is the only evidence it ran —
-    asked one source at a time by the detail endpoints and all at once by the list."""
+    """`read`'s state. It records no step row, so a cached catalog is the only evidence it ran."""
     return bool(state.get("catalog"))
 
 
@@ -205,7 +173,7 @@ def invalidated_by(steps: dict, step: str) -> list[str]:
 
 
 def blocked_by(steps: dict, stage: str) -> str:
-    """The step that must succeed before `stage` may run, or "". `run.action` enforces this and
+    """The step that must succeed before `stage` may run, or "". `steps.action` enforces this and
     the browser explains it, both from this one answer. `cubes` needs `connect` and not `read`,
     because `cubes` reads the catalog itself when none is cached."""
     if stage not in STEPS:
@@ -232,15 +200,14 @@ def stages(steps: dict, catalog_read: bool) -> list[dict]:
 def public(
     source: Source, steps: dict, running: bool, health: dict, catalog_read: bool = False
 ) -> dict:
-    """A source as the browser may see it — every field except the credentials."""
+    """The source as the browser may see it — every field except the credentials."""
     rail = stages(steps, catalog_read)
     return {
-        "name": source.name,
+        "label": source.label,
         "description": source.description,
         "driver": source.driver,
-        "port": source.port,
-        "url": source.cube_url,
-        "container": source.service,
+        "url": settings.cube_url,
+        "container": CONTAINER,
         # Which connection fields are set, so the edit form can show them filled —
         # names only, never values.
         "credential_keys": sorted(source.credentials),
@@ -257,9 +224,8 @@ def public(
         "invalidates": {step: invalidated_by(steps, step) for step in STEPS},
         "stages": rail,
         # The primary action every screen offers. One answer, so a sidebar and a page cannot
-        # name different next steps for the same source.
+        # name different next steps.
         "next_stage": next((s["name"] for s in rail if s["state"] != "done"), None),
-        "active": source.is_active,
     }
 
 

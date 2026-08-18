@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import * as api from "../sources";
-import type { BranchDiff, Branches, Impact, ModelValidation, ServedModel } from "../sources";
-import type { SourceGrounding } from "../sources";
+import type { BranchDiff, Branches, Grounding, Impact, ModelValidation, ServedModel } from "../sources";
 import { EditorChat } from "./EditorChat";
 import { ServedModel as ModelList } from "./ServedModel";
 
@@ -44,7 +43,7 @@ function Breakage({ impact }: { impact: Impact }) {
 }
 
 /**
- * The model: what this source serves, and — on a branch — how to change it.
+ * The model: what Cube serves, and — on a branch — how to change it.
  *
  * One panel, and one body with three modes: the model, one file, or the review before a
  * merge. Editing does not get a toolbar of its own — that would stack three rows of controls
@@ -55,17 +54,15 @@ function Breakage({ impact }: { impact: Impact }) {
  * resolved its includes and aliases; the YAML is what you edit to move them.
  */
 export function ModelEditor({
-  name,
   running,
   model,
   grounding,
   loading,
   onReload,
 }: {
-  name: string;
   running: boolean;
   model: ServedModel | null;
-  grounding: SourceGrounding | null;
+  grounding: Grounding | null;
   loading: boolean;
   onReload: () => void;
 }) {
@@ -91,8 +88,8 @@ export function ModelEditor({
   const breaks = diff?.impact?.broken.length ?? 0;
 
   const load = useCallback(async () => {
-    setBranches(await api.branches(name));
-  }, [name]);
+    setBranches(await api.branches());
+  }, []);
 
   useEffect(() => {
     void load().catch((e: Error) => setNote({ tone: "bad", lines: [e.message] }));
@@ -113,7 +110,7 @@ export function ModelEditor({
 
   const open = (file: string) =>
     void guard("open", async () => {
-      const body = await api.modelFile(name, file);
+      const body = await api.modelFile(file);
       setPath(file);
       setText(body.text);
       setSaved(body.text);
@@ -130,7 +127,7 @@ export function ModelEditor({
 
   const save = () =>
     void guard("save", async () => {
-      const result = await api.writeModelFile(name, path, text);
+      const result = await api.writeModelFile(path, text);
       setSaved(text);
       await load();
       onReload();
@@ -148,7 +145,7 @@ export function ModelEditor({
           disabled={Boolean(busy) || dirty.length > 0}
           onChange={(e) =>
             void guard("checkout", async () => {
-              setBranches(await api.checkoutBranch(name, e.target.value));
+              setBranches(await api.checkoutBranch(e.target.value));
               setMode("model");
               setValidation(null);
               onReload();
@@ -169,7 +166,7 @@ export function ModelEditor({
             onSubmit={(e) => {
               e.preventDefault();
               void guard("branch", async () => {
-                setBranches(await api.createBranch(name, newName.trim()));
+                setBranches(await api.createBranch(newName.trim()));
                 setNaming(false);
                 setNewName("");
                 onReload();
@@ -210,7 +207,7 @@ export function ModelEditor({
           title="Compile the model and report what it breaks"
           onClick={() =>
             void guard("validate", async () => {
-              setValidation(await api.validateModel(name));
+              setValidation(await api.validateModel());
               onReload();
             })
           }
@@ -223,7 +220,7 @@ export function ModelEditor({
               disabled={Boolean(busy)}
               onClick={() =>
                 void guard("commit", async () => {
-                  await api.commitModel(name, `edit ${on}`);
+                  await api.commitModel(`edit ${on}`);
                   await load();
                   onReload();
                 })
@@ -236,7 +233,7 @@ export function ModelEditor({
               disabled={Boolean(busy)}
               onClick={() =>
                 void guard("discard", async () => {
-                  await api.discardModel(name);
+                  await api.discardModel();
                   setMode("model");
                   await load();
                   onReload();
@@ -253,7 +250,7 @@ export function ModelEditor({
             disabled={Boolean(busy)}
             onClick={() =>
               void guard("diff", async () => {
-                setDiff(await api.branchDiff(name, on));
+                setDiff(await api.branchDiff(on));
                 setMode("review");
               })
             }
@@ -317,7 +314,7 @@ export function ModelEditor({
               disabled={!diff?.changed.length || dirty.length > 0 || Boolean(busy)}
               onClick={() =>
                 void guard("merge", async () => {
-                  const result = await api.mergeBranch(name, on, breaks > 0);
+                  const result = await api.mergeBranch(on, breaks > 0);
                   setValidation(result);
                   setDiff(null);
                   setMode("model");
@@ -386,7 +383,7 @@ export function ModelEditor({
           <button className="editor-assist-head" onClick={() => setChatting(!chatting)}>
             <span aria-hidden>{chatting ? "▾" : "▸"}</span> Ask the editor to change something
           </button>
-          {chatting && <EditorChat name={name} onChanged={() => void load().then(onReload)} />}
+          {chatting && <EditorChat onChanged={() => void load().then(onReload)} />}
         </div>
       )}
     </div>

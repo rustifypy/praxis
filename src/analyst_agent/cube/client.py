@@ -1,14 +1,13 @@
-"""One session against one Cube container: its root, its token, and everything read from it.
+"""One session against the Cube container: its root, its token, and everything read from it.
 
-Every call to a Cube container goes through here, so a caller cannot forget to authenticate.
-The two exceptions are `/readyz` (outside the base path, unauthenticated by design) and
+Every call to Cube goes through here, so a caller cannot forget to authenticate. The two
+exceptions are `/readyz` (outside the base path, unauthenticated by design) and
 `/playground/db-schema` (dev-mode only, and the probe's alone).
 """
 
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Protocol
 
 import httpx
 import jwt
@@ -16,17 +15,6 @@ import jwt
 from ..core.config import settings
 from .catalog import Catalog
 from .schema import CubeQuery
-
-
-class Addressable(Protocol):
-    """Somewhere to send a request, which is all `for_source` and `catalog_of` need. A
-    `Source` satisfies it structurally; naming that type here would make the Cube client
-    depend on the registry that depends on the Cube client.
-    """
-
-    @property
-    def api_root(self) -> str: ...
-
 
 # HS256's key must be at least as long as its output, or the signature is weaker than
 # the algorithm claims. pyjwt warns below this on every single token it mints.
@@ -93,7 +81,7 @@ class CubeError(RuntimeError):
 
 
 class CubeClient:
-    """One Cube container, for as long as you hold it. Whoever constructs it closes it."""
+    """The Cube container, for as long as you hold it. Whoever constructs it closes it."""
 
     def __init__(
         self,
@@ -118,21 +106,10 @@ class CubeClient:
         self._lock = asyncio.Lock()
 
     @classmethod
-    def active(cls, *, claims: dict | None = None, timeout: float | None = None) -> "CubeClient":
-        """The source `CUBE_URL` points at. The only reader of `api_root`, so a session cannot
-        drift from the global the way a cache keyed on it did."""
+    def local(cls, *, claims: dict | None = None, timeout: float | None = None) -> "CubeClient":
+        """The Cube container this portal runs. The only reader of `api_root`, so no session
+        can drift from the one address."""
         return cls(settings.api_root, settings.cube_api_secret, claims=claims, timeout=timeout)
-
-    @classmethod
-    def for_source(
-        cls, source: Addressable, *, claims: dict | None = None, timeout: float | None = None
-    ) -> "CubeClient":
-        return cls(
-            source.api_root,
-            settings.cube_api_secret,
-            claims=claims,
-            timeout=timeout,
-        )
 
     @property
     def root(self) -> str:
@@ -257,9 +234,9 @@ class CubeClient:
         return r.status_code, body if isinstance(body, dict) else {}, r.text
 
 
-async def catalog_of(source: Addressable, *, timeout: float = ADMIN_TIMEOUT_S) -> Catalog:
-    """One source's served model. The admin screens want exactly this and nothing else."""
-    async with CubeClient.for_source(source, timeout=timeout) as cube:
+async def served_catalog(*, timeout: float = ADMIN_TIMEOUT_S) -> Catalog:
+    """The served model, read once. The admin screens want exactly this and nothing else."""
+    async with CubeClient.local(timeout=timeout) as cube:
         return await cube.catalog()
 
 

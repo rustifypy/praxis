@@ -1,4 +1,5 @@
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -6,6 +7,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    # Where the Cube container answers. One deployment, so this is the address, not a
+    # selection among several.
     cube_url: str = "http://localhost:4000"
     cube_base_path: str = "/cubejs-api"
     # Must equal CUBEJS_API_SECRET and be at least 32 bytes — mint_token enforces it.
@@ -44,6 +47,12 @@ class Settings(BaseSettings):
     @property
     def api_root(self) -> str:
         return f"{self.cube_url.rstrip('/')}{self.cube_base_path}"
+
+    @property
+    def cube_port(self) -> int:
+        """The port to publish the container on, read off `cube_url` so the address a query
+        follows and the port docker binds cannot name different numbers."""
+        return urlparse(self.cube_url).port or 4000
 
     @property
     def dir_path(self) -> Path:

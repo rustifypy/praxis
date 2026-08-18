@@ -118,7 +118,7 @@ async def read_catalog(source: Source, timeout: float = BOOT_TIMEOUT_S) -> Intro
     if not docker.installed():
         raise RuntimeError("docker not found")
     if not source.credentials:
-        raise RuntimeError(f"no credentials stored for {source.name!r}")
+        raise RuntimeError("no credentials stored — run Connect first")
 
     catalog = Introspection()
 

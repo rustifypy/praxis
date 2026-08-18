@@ -26,8 +26,8 @@ ROWS = [{"orders.status": "paid", "orders.net_revenue": 100}]
 
 
 @pytest.fixture
-def tools(cube, catalog):
-    session = Session(catalog=catalog, client=cube, grounding=Grounding())
+def tools(cube, catalog, tmp_path):
+    session = Session(catalog=catalog, client=cube, grounding=Grounding(tmp_path))
     return {t.name: t for t in build_tools(session)}, session
 
 

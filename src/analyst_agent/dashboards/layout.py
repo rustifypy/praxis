@@ -8,15 +8,17 @@ MAX_COLUMNS = 3
 """Past three a tile is too narrow for a time axis with readable ticks — `ResultChart`'s label
 thinning is sized for a full-width block."""
 
-FULL_WIDTH = ("table",)
+FULL_WIDTH = ("table", "heatmap")
 """A table's columns are its content, so a half-width one is a horizontal scrollbar."""
+
+HEADLINE = ("kpi", "stat", "gauge")
 
 
 def default_layout(tiles: list[Tile], columns: int = 2) -> dict:
     """KPIs first — a row of single numbers is the summary a dashboard is opened for. Everything
     else keeps creation order, which is the order the tiles were thought of."""
-    kpis = [t for t in tiles if t.chart.get("type") == "kpi"]
-    rest = [t for t in tiles if t.chart.get("type") != "kpi"]
+    kpis = [t for t in tiles if t.chart.get("type") in HEADLINE]
+    rest = [t for t in tiles if t.chart.get("type") not in HEADLINE]
     return {
         "columns": columns,
         "items": [

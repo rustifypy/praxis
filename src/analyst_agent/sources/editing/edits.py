@@ -3,7 +3,7 @@
 Tier 3 is Cube itself (write, restart, `publish.check`), and it runs against the **live**
 container, because a branch is served rather than deployed. That is what makes these two tiers
 load-bearing rather than a convenience: what they refuse never reaches disk, so it never takes
-the source down.
+the model down.
 
 The base for every comparison is **main**, not the branch's previous state. A member main
 carries is frozen because a dashboard or a certified query may name it; a member the branch
@@ -19,8 +19,8 @@ from ..modelgen.decide import IDENTIFIER, SQL_WORDS
 
 TOP_LEVEL = ("cubes", "views", "view_groups")
 """What Cube accepts at the top of a model file. Anything else fails compilation for the
-**whole source**, not just the file: a stray `grounding/certified_queries/probe.yml` took chinook
-from 13 cubes to 0, and every query against it was down until the file went."""
+**whole model**, not just the file: a stray `grounding/certified_queries/probe.yml` took chinook
+from 13 cubes to 0, and every query was down until the file went."""
 
 DOC_FIELDS = frozenset({"description", "title", "meta", "format"})
 """What may change on something main already has. `public` is deliberately absent — hiding a

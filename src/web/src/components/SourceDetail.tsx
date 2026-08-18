@@ -4,11 +4,12 @@ import { ago, useDismiss } from "../hooks";
 import * as api from "../sources";
 import type {
   CatalogInfo,
+  Grounding,
   JobState,
   ServedModel as Model,
-  SourceGrounding,
   SourceRow,
   StageName,
+  System,
 } from "../sources";
 import {
   STAGE_BLURB,
@@ -18,41 +19,42 @@ import {
   servingNote,
   summarise,
 } from "../sources";
-import { ConfirmName } from "./ConfirmName";
+import { Confirm } from "./Confirm";
 import { Info } from "./Info";
 import { JobProgress } from "./JobProgress";
 import { Menu } from "./Menu";
 import { ModelEditor } from "./ModelEditor";
+import { SystemBanners } from "./SystemBanners";
 import { TablePicker } from "./TablePicker";
 
 /**
- * One source, on its own page.
+ * The data page: the connected database, its pipeline, and its model.
  *
- * Three rules shape this screen. One primary action, because a source always has exactly
- * one obvious next move and burying it among seven peer buttons hid it. One stage panel
- * open at a time, because the pipeline is a sequence with a position, not four
- * independent accordions. And destruction lives at the bottom behind a typed name, not
- * beside "Test connection".
+ * Three rules shape this screen. One primary action, because there is always exactly one
+ * obvious next move and burying it among seven peer buttons hid it. One stage panel open at
+ * a time, because the pipeline is a sequence with a position, not four independent
+ * accordions. And destruction lives at the bottom behind a typed word, not beside "Test
+ * connection".
  */
 export function SourceDetail({
   source,
+  system,
   job,
   busy,
   onRefresh,
   onEdit,
-  onBack,
 }: {
   source: SourceRow;
+  system: System;
   job: JobState | null;
   busy: boolean;
   onRefresh: () => void;
   onEdit: () => void;
-  onBack: () => void;
 }) {
   const [catalog, setCatalog] = useState<CatalogInfo | null>(null);
   const [model, setModel] = useState<Model | null>(null);
   const [loadingModel, setLoadingModel] = useState(false);
-  const [grounding, setGrounding] = useState<SourceGrounding | null>(null);
+  const [grounding, setGrounding] = useState<Grounding | null>(null);
   const [loadingGrounding, setLoadingGrounding] = useState(false);
   const [checking, setChecking] = useState(false);
   const [checkedAt, setCheckedAt] = useState(0);
@@ -75,15 +77,15 @@ export function SourceDetail({
 
   const loadCatalog = useCallback(() => {
     void api
-      .catalog(source.name)
+      .catalog()
       .then(setCatalog)
       .catch(() => setCatalog(null));
-  }, [source.name]);
+  }, []);
 
   const loadModel = useCallback(() => {
     setLoadingModel(true);
     void api
-      .servedModel(source.name)
+      .servedModel()
       .then(setModel)
       // The request itself failed, so nothing is known about the branch either — the editor
       // reads its own branch state and is not blocked by this.
@@ -99,18 +101,18 @@ export function SourceDetail({
         }),
       )
       .finally(() => setLoadingModel(false));
-  }, [source.name]);
+  }, []);
 
   const loadGrounding = useCallback(() => {
     setLoadingGrounding(true);
     void api
-      .sourceGrounding(source.name)
+      .grounding()
       .then(setGrounding)
       .catch(() => setGrounding({ root: "", exists: false, artefacts: [] }))
       .finally(() => setLoadingGrounding(false));
-  }, [source.name]);
+  }, []);
 
-  // The catalog is cached in sources.db and reads no database, so fetching it on arrival
+  // The catalog is cached in analyst.db and reads no database, so fetching it on arrival
   // is cheap — and the stepper cannot draw the Read stage without it.
   useEffect(() => {
     loadCatalog();
@@ -127,16 +129,10 @@ export function SourceDetail({
     else setModel(null);
   }, [source.running, job?.done, loadModel]);
 
-  // Nothing is open until a stage is clicked, and moving to another source closes it
-  // again. The stepper already says where the pipeline stands; a panel volunteering its
-  // contents put a wall of stage detail under every arrival.
-  useEffect(() => {
-    setStage(null);
-  }, [source.name]);
-
-  // The exception: a failure must not hide behind a closed panel. Deliberately keyed on
-  // the job rather than on `source`, which is a new object after every refresh and would
-  // reopen the panel each time — including right after someone closed it.
+  // The exception to nothing being open on arrival: a failure must not hide behind a closed
+  // panel. Deliberately keyed on the job rather than on `source`, which is a new object after
+  // every refresh and would reopen the panel each time — including right after someone closed
+  // it.
   useEffect(() => {
     if (!job?.done || !job.error) return;
     const failed = source.stages.find((s) => s.state === "error");
@@ -159,7 +155,7 @@ export function SourceDetail({
   const test = async () => {
     setChecking(true);
     try {
-      await guard(() => api.checkNow(source.name));
+      await guard(() => api.checkNow());
       setCheckedAt(Date.now());
     } finally {
       setChecking(false);
@@ -172,14 +168,13 @@ export function SourceDetail({
       return;
     }
     setLogs("Loading…");
-    void api.logs(source.name).then((r) => setLogs(r.logs || "(no output)"));
+    void api.logs().then((r) => setLogs(r.logs || "(no output)"));
   };
 
-  const runStage = (name: StageName) =>
-    void guard(() => api.runAction(source.name, name), "stage");
+  const runStage = (name: StageName) => void guard(() => api.runAction(name), "stage");
 
   const selected = stage;
-  // The server's rail, not a second reading of `steps` — `run.action` enforces the same
+  // The server's rail, not a second reading of `steps` — `steps.action` enforces the same
   // ordering rule and ships its answer, so this cannot explain a different one.
   const current = source.stages.find((s) => s.name === selected);
   const blocker = current?.blocked_by ? `Run ${STAGE_LABEL[current.blocked_by]} first` : "";
@@ -192,22 +187,11 @@ export function SourceDetail({
 
   return (
     <div className="detail">
-      <nav className="crumbs">
-        <button onClick={onBack}>Sources</button>
-        <span aria-hidden>/</span>
-        <span>{source.name}</span>
-      </nav>
-
       <header className="detail-head">
         <span className={`health-dot ${health.tone}`} title={source.health.status} />
-        <h1>{source.name}</h1>
-        {source.active ? (
-          <span className="badge accent">active</span>
-        ) : (
-          <span className="badge">not connected</span>
-        )}
+        <h1>{source.label}</h1>
         <span className="detail-what">
-          {source.driver} · :{source.port}
+          {source.driver}
           {` · ${servingNote(source)}`}
           {checkedAt > 0 && ` · checked ${ago(checkedAt / 1000)}`}
         </span>
@@ -236,16 +220,16 @@ export function SourceDetail({
             </button>
           )}
 
-          {/* The container's own Cube. In dev mode this is the playground; otherwise it
-              is the API root. Rendered only while it is up — a link to a stopped
-              container is a browser error page, not an answer. */}
+          {/* Cube itself. In dev mode this is the playground; otherwise it is the API root.
+              Rendered only while it is up — a link to a stopped container is a browser error
+              page, not an answer. */}
           {source.running && (
             <a
               className="cube-link"
               href={source.url}
               target="_blank"
               rel="noreferrer"
-              title={`Open this source's Cube at ${source.url}`}
+              title={`Open Cube at ${source.url}`}
             >
               Cube <span aria-hidden>↗</span>
             </a>
@@ -259,19 +243,19 @@ export function SourceDetail({
                 disabled: source.running ? undefined : "the container is not running",
               },
               source.running
-                ? { label: "Restart", onSelect: () => void guard(() => api.control(source.name, "restart")) }
+                ? { label: "Restart", onSelect: () => void guard(() => api.control("restart")) }
                 : {
                     label: source.container_state === "missing" ? "Create container" : "Start",
                     onSelect: () =>
                       void guard(() =>
                         source.container_state === "missing"
-                          ? api.runAction(source.name, "connect")
-                          : api.control(source.name, "start"),
+                          ? api.runAction("connect")
+                          : api.control("start"),
                       ),
                   },
               {
                 label: "Stop",
-                onSelect: () => void guard(() => api.control(source.name, "stop")),
+                onSelect: () => void guard(() => api.control("stop")),
                 disabled: source.running ? undefined : "already stopped",
               },
               { label: logs === null ? "Container output" : "Hide output", onSelect: showLogs },
@@ -281,14 +265,10 @@ export function SourceDetail({
                 disabled: busy ? "a job is running" : undefined,
               },
               {
-                label: "Remove source",
+                label: "Disconnect",
                 danger: true,
                 onSelect: () => setConfirmRemove(true),
-                disabled: source.active
-                  ? "point CUBE_URL elsewhere first — the portal queries this one"
-                  : busy
-                    ? "a job is running"
-                    : undefined,
+                disabled: busy ? "a job is running" : undefined,
               },
             ]}
           />
@@ -296,6 +276,8 @@ export function SourceDetail({
       </header>
 
       {source.description && <p className="detail-desc">{source.description}</p>}
+
+      <SystemBanners system={system} />
 
       {topError && <p className="banner bad">{topError}</p>}
       {health.tone === "bad" && (
@@ -315,9 +297,7 @@ export function SourceDetail({
         </p>
       )}
 
-      {logs !== null && (
-        <pre className="source-logs">{logs}</pre>
-      )}
+      {logs !== null && <pre className="source-logs">{logs}</pre>}
 
       {job && <JobProgress job={job} onCancel={() => void api.cancelJob()} />}
 
@@ -326,8 +306,8 @@ export function SourceDetail({
           <h3>Pipeline</h3>
           <Info label="About the pipeline">
             Five stages, each runnable and re-runnable on its own — what one needs from the
-            last is stored on the source rather than held in memory, so they can run minutes
-            or days apart. Click a stage to see what it produced and to run it again.
+            last is stored rather than held in memory, so they can run minutes or days apart.
+            Click a stage to see what it produced and to run it again.
           </Info>
         </div>
 
@@ -390,17 +370,16 @@ export function SourceDetail({
 
           {selected === "cubes" && catalogRead && catalog ? (
             <TablePicker
-              name={source.name}
               catalog={catalog}
               busy={busy || Boolean(blocker)}
               discards={discards}
               onRun={(schema, tables) =>
                 void guard(
-                  () => api.runAction(source.name, "cubes", { schema_name: schema, tables }),
+                  () => api.runAction("cubes", { schema_name: schema, tables }),
                   "stage",
                 )
               }
-              onReread={() => void guard(() => api.runAction(source.name, "read"), "stage")}
+              onReread={() => void guard(() => api.runAction("read"), "stage")}
             />
           ) : (
             <div className="stage-cta">
@@ -448,17 +427,16 @@ export function SourceDetail({
           <h3>Model</h3>
           <Info label="About the model panel">
             Everything the agent brings to a question, and — on a branch — where you change
-            it. The list is read live from this source's <code>/v1/meta</code> and parsed by
-            the same code the agent queries through, so it is what a question can actually
-            reach rather than what the YAML on disk says. In dev mode Cube watches these
-            files, so a save is live at once — which is why what you may save is gated rather
-            than what you may load, and why a file that will not compile is refused before it
-            is written. Grounding is the markdown this source hands the agent <em>before</em> a
-            question does, and it is re-read every turn.
+            it. The list is read live from Cube's <code>/v1/meta</code> and parsed by the same
+            code the agent queries through, so it is what a question can actually reach rather
+            than what the YAML on disk says. In dev mode Cube watches these files, so a save is
+            live at once — which is why what you may save is gated rather than what you may
+            load, and why a file that will not compile is refused before it is written.
+            Grounding is the markdown handed to the agent <em>before</em> a question is, and it
+            is re-read every turn.
           </Info>
         </div>
         <ModelEditor
-          name={source.name}
           running={source.running}
           model={model}
           grounding={grounding}
@@ -471,26 +449,25 @@ export function SourceDetail({
       </section>
 
       {confirmRemove && (
-        <ConfirmName
-          name={source.name}
-          title={`Remove ${source.name}?`}
-          confirmLabel="Remove source"
+        <Confirm
+          word="disconnect"
+          title="Disconnect this database?"
+          confirmLabel="Disconnect"
           onCancel={() => setConfirmRemove(false)}
           onConfirm={() => {
             setConfirmRemove(false);
-            void guard(() => api.remove(source.name)).then(onBack);
+            void guard(() => api.remove());
           }}
         >
           <p>
-            This stops and deletes <code>{source.container}</code>, removes the row and its
-            stored credentials, and deletes the model directory{" "}
-            <code>cube/sources/{source.name}/</code>.
+            This stops and deletes <code>{source.container}</code>, removes the stored
+            credentials, and deletes the model directory <code>cube/model/</code>.
           </p>
           <p>
             Rebuilding it costs one model call per table. If that directory is not committed,
             there is no way back.
           </p>
-        </ConfirmName>
+        </Confirm>
       )}
     </div>
   );

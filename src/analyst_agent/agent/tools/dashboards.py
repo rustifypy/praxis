@@ -24,7 +24,6 @@ class DashboardContext:
 
     store: DashboardStore
     catalog: Catalog
-    source_name: str
 
 
 def _start(tool_name: str, label: str) -> None:
@@ -55,10 +54,7 @@ def build_dashboard_tools(ctx: DashboardContext) -> list:
             live = await ctx.store.tiles(board.id)
             last = await ctx.store.latest_run(board.id)
             when = "never refreshed" if last is None else f"last refreshed {last.started_at:.0f}"
-            lines.append(
-                f"- `{board.id}` {board.title!r} on source '{board.source_name}' — "
-                f"{len(live)} tiles, {when}"
-            )
+            lines.append(f"- `{board.id}` {board.title!r} — {len(live)} tiles, {when}")
         return "\n".join(lines)
 
     @tool
@@ -74,7 +70,7 @@ def build_dashboard_tools(ctx: DashboardContext) -> list:
         current = await ctx.store.layout(dashboard_id)
         _end("read_dashboard", True, note=f"{board.title} — {len(live)} tiles")
 
-        out = [f"# {board.title} (source: {board.source_name})"]
+        out = [f"# {board.title}"]
         for tile in live:
             out.append(
                 f"\n## `{tile.id}` {tile.title!r}\n"
@@ -89,28 +85,20 @@ def build_dashboard_tools(ctx: DashboardContext) -> list:
 
     @tool
     async def create_dashboard(title: str) -> str:
-        """Create an empty dashboard bound to the source this portal is querying. Add tiles
-        to it with `add_tile`."""
+        """Create an empty dashboard. Add tiles to it with `add_tile`."""
         _start("create_dashboard", f"Creating {title!r}")
-        if not ctx.source_name:
-            _end("create_dashboard", False)
-            return (
-                "No registered source is active, so a dashboard would have nothing to bind "
-                "its queries to. Nothing was created."
-            )
-        board = await ctx.store.create(title, ctx.source_name)
-        _end("create_dashboard", True, note=f"{title} on {ctx.source_name}")
-        return (
-            f"Created {title!r} on source '{ctx.source_name}' with id `{board.id}`. "
-            "It has no tiles yet."
-        )
+        board = await ctx.store.create(title)
+        _end("create_dashboard", True, note=title)
+        return f"Created {title!r} with id `{board.id}`. It has no tiles yet."
 
     @tool
     async def add_tile(dashboard_id: str, title: str, query: dict, chart: dict) -> str:
-        """Save a query and its chart as a tile. `query` is a Cube JSON query, the same
-        shape `run_query` takes; `chart` is {type, x, y, series} with type one of line, bar, kpi
-        or table. The query is checked but not executed — the tile shows data after the
-        dashboard is refreshed from its page."""
+        """Save a query and its chart as a tile. `chart` is {type, x, y, series, target}.
+        Types: line, area, stacked_area, bar, stacked_bar, grouped_bar, hbar, donut, scatter,
+        heatmap, gauge, sparkline, kpi, stat, table. stat, sparkline, area and stacked_area
+        need a time grain on x; stacked and grouped bars and heatmap take a series (heatmap
+        requires one, as its second axis); scatter needs a measure on x; gauge takes a target
+        and one row. Checked but not executed — a tile shows data after a refresh."""
         _start("add_tile", f"Adding {title!r}")
         board = await ctx.store.get(dashboard_id)
         if board is None:

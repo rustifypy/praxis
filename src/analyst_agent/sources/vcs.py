@@ -1,4 +1,4 @@
-"""Per-source version control. The model directory is a git repo, so a branch is a git
+"""Version control over the model directory. It is a git repo, so a branch is a git
 branch and the checked-out branch is what the container serves.
 
 Beside `modelgen` and `editing` rather than inside either: generation commits what it writes
@@ -81,7 +81,7 @@ async def ensure(path: Path) -> Result:
         "commit",
         "--allow-empty",
         "-m",
-        "initial — source scaffold",
+        "initial — model scaffold",
     )
 
 
@@ -89,8 +89,7 @@ async def ensure(path: Path) -> Result:
 
 
 def validate_branch(name: str, taken: list[str] | None = None) -> str | None:
-    """Returns an error message, or None when the name is usable. Mirrors
-    `registry.validate_name`: the same shape of answer, for the same kind of caller."""
+    """Returns an error message, or None when the name is usable."""
     if not name:
         return "a branch name is required"
     if name == MAIN:
@@ -218,7 +217,7 @@ async def merge(path: Path, branch: str, message: str = "") -> Result:
 
     A conflict is aborted immediately rather than reported and left: git writes conflict
     markers into the working tree, that tree is the live bind mount, and a `<<<<<<<` inside a
-    cube file takes the source to **zero cubes** the moment Cube reloads — the same failure a
+    cube file takes the model to **zero cubes** the moment Cube reloads — the same failure a
     stray `grounding/probe.yml` causes, from a direction nobody would look for it.
     """
     result = await run(

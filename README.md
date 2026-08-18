@@ -45,12 +45,12 @@ make install
 make web                      # build the frontend, then open the portal
 ```
 
-Then: **Data** in the rail → Add source → walk the five stages, and the Serving panel on
-that source's page shows what Cube compiled. Switch to **Chat** and ask questions; the
-header there names the source you are querying and lists everything it exposes. **Boards**
-sits between the two — pin a question you'll ask again and it becomes a tile.
+Then: **Data** in the rail → Connect a database → walk the five stages, and the Model
+panel shows what Cube compiled. Switch to **Chat** and ask questions; the header there
+names the database you are querying and how much of it is modelled. **Boards** sits
+between the two — pin a question you'll ask again and it becomes a tile.
 
-There is no bundled database — bring your own. Adding it in the portal starts its
+There is no bundled database — bring your own. Connecting it in the portal starts the
 Cube container and verifies the connection. A database running on this machine is
 `host.docker.internal` from inside the container, not `localhost`.
 
@@ -94,11 +94,11 @@ against a running `analyst`. `make web-build` is what produces what ships.
 
 One SQLite file, `~/.analyst/analyst.db`, holds all of it: chats and the flat event stream
 that *is* the transcript, full result sets, dashboards and their tiles and refresh history,
-the source registry with its credentials, and the LangGraph checkpointer that gives a chat
-its memory. `--data-dir` moves the lot, so pointing it at a scratch directory gives you a
-scratch *everything* — including an empty source registry.
+the connection with its credentials, and the LangGraph checkpointer that gives a chat its
+memory. `DATA_DIR` moves the lot, so pointing it at a scratch directory gives you a scratch
+*everything* — including an unconnected database.
 
-The file is chmod 600, because the source credentials in it are plaintext.
+The file is chmod 600, because the database credentials in it are plaintext.
 
 There is no migration mechanism, deliberately. `CREATE TABLE IF NOT EXISTS` does not diff,
 so adding a table to an existing database works and adding a column silently does not —
@@ -128,26 +128,30 @@ kind it is from what Cube actually resolved.
 One model call runs per refresh for the whole board — a cross-tile paragraph on what
 changed — never one call per tile.
 
-## Data sources
+## The data source
 
-Each source is one Cube container with its own model directory. **One row in the `sources`
-table is the whole source**, credentials included — there is no registry file, no
-credential file, and no generated compose file. `sources/docker.py` builds a `docker run`
-from that row, which is why adding a source is one INSERT and one command, and why nothing
-on disk can fall out of sync with it. The row also carries the source's `cube_url`, so
-whatever queries it follows the source rather than deriving an address of its own. The
-trade is that the credentials are visible to `docker inspect`; the database is chmod 600
-and the ports are bound to `127.0.0.1`.
+**One Cube deployment.** One container, one model directory, one row in the `source`
+table — `id = 1` is a CHECK, not a convention — and credentials are in that row, so there
+is no registry file, no credential file, and no generated compose file.
+`sources/docker.py` builds a `docker run` from it, which is why connecting a database is
+one INSERT and one command, and why nothing on disk can fall out of sync with it. The
+address is `CUBE_URL` and nothing derives another. The trade is that the credentials are
+visible to `docker inspect`; the database file is chmod 600 and the port is bound to
+`127.0.0.1`.
 
 `docker-compose.yml` is hand-written and holds only the shared Cube Store, on a network
-named `analyst-net` that each source container joins.
+named `analyst-net` that the Cube container joins.
 
-Sources are managed from the portal — **Data** in the rail — and only from there. Each
-source has its own page: a stepper for the five stages with one panel open at a time, the
-container controls behind an overflow menu, a connection test, a **Serving** panel showing
-what Cube compiled from `/v1/meta`, and a danger zone. One connection form and one
-validator are easier to keep honest than two, and the model stages need the progress
-stream a terminal cannot show as well.
+The connection is managed from the portal — **Data** in the rail — and only from there:
+a stepper for the five stages with one panel open at a time, the container controls behind
+an overflow menu, a connection test, a **Model** panel showing what Cube compiled from
+`/v1/meta`, and a danger zone. One connection form and one validator are easier to keep
+honest than two, and the model stages need the progress stream a terminal cannot show as
+well.
+
+Connecting a second database *replaces* the first, and takes the recorded steps with it —
+they describe a database that is no longer there. The model directory is version-controlled,
+so what was built is still recoverable from git.
 
 ### Four steps
 
@@ -158,50 +162,49 @@ read is a fifth action with no step row — the portal shows it as its own stage
 
 | step | what it does |
 |---|---|
-| **Connect** | create the container from the row, wait for `/readyz` |
+| **Connect** | create the container from the connection, wait for `/readyz` |
 | **Build cubes** | read every schema once, pick tables, emit cubes, install |
 | **Describe with AI** | one model call per table: descriptions, measures, `ai_context` |
 | **Build views** | views over the join paths, validated across every join |
 
 Each is runnable and re-runnable on its own — what one step needs from the last is stored
-on the source, not held in memory. `run.action` is the single entry point, so the order
-rule and what a failure records live in one place. The catalog read covers **every**
+in the source row, not held in memory. `steps.action` is the single entry point, so the
+order rule and what a failure records live in one place. The catalog read covers **every**
 schema in one throwaway container, so choosing tables afterwards is instant and offline,
 and ticking a fact table pulls in what it references. That matters: describing is one
 model call per table, so four hundred tables is an hour of them.
 
 Re-running an earlier step rewrites every model file, views included. The portal asks
-first; there is no undo in the tool. `cube/sources/<name>/` is yours to version-control,
-and `git` is the way back — with a diff of what the rebuild changed, which a one-deep
-backup could never show you.
+first; there is no undo in the tool. `cube/model/` is yours to version-control, and `git`
+is the way back — with a diff of what the rebuild changed, which a one-deep backup could
+never show you.
 
 One job runs at a time, machine-wide: the probe container has one name, so two model
 generations would destroy each other. The lock is a `flock`, so a second portal process
 waits rather than corrupting the first.
 
-`CUBE_URL` selects the source the agent queries — the portal marks exactly one **active**
-and every other one *configured, not connected*. Cube's playground is on that same port.
+Cube's playground is on the same port as the API.
 
 Cube Core runs in dev mode here, and **does** hot-reload model files: a saved YAML change
 is served in under a second, no restart. That is why the edit gate below runs before the
-write and not after — a file that will not compile takes the whole source down the instant
+write and not after — a file that will not compile takes the whole model down the instant
 it lands.
 
 ### Editing the model
 
-`cube/sources/<name>/` is a git repo. The checked-out branch is what the container serves —
-there's no separate dev endpoint, `git checkout` on the host *is* the deploy — so editing
-happens on a branch, never on `main`, which the pipeline above generates and nothing else
-writes to.
+`cube/model/` is a git repo. The checked-out branch is what the container serves — there's
+no separate dev endpoint, `git checkout` on the host *is* the deploy — so editing happens
+on a branch, never on `main`, which the pipeline above generates and nothing else writes
+to.
 
-From a source's page: create a branch, then either edit YAML files directly or open the
+From the data page: create a branch, then either edit YAML files directly or open the
 editor chat and describe the change. Both paths run through the same two-tier gate before
 anything reaches disk — cubes are **append-only** (add measures/dimensions/segments, edit
 `description`/`title`/`meta`/`format`, never rename or remove what's there), views are
 freely rewritable. **Validate** restarts the container, asks Cube what compiled, and checks
-every dashboard tile and certified query bound to the source against what's actually being
-served. **Merge** does the same check one more time, then folds the branch into `main` and
-restarts — refused if it would break a saved query, unless you force it.
+every dashboard tile and certified query against what's actually being served. **Merge**
+does the same check one more time, then folds the branch into `main` and restarts —
+refused if it would break a saved query, unless you force it.
 
 There's no remote and no PR review inside the tool: no pull, no rebase, nothing to sync
 with. Review happens the way it would for any git branch — `git diff`, `git log`, in your
@@ -213,7 +216,7 @@ un-aggregated rows and void the aggregate-only guarantee.
 ## Grounding
 
 Markdown with frontmatter, mirroring Cube's own `agents/` convention, under
-`cube/sources/<name>/grounding/`:
+`cube/model/grounding/`:
 
 - `rules/` — `type: always` loads every turn; `type: agent_requested` loads on
   demand via `load_grounding`
@@ -223,11 +226,9 @@ Markdown with frontmatter, mirroring Cube's own `agents/` convention, under
 
 Edit these instead of the system prompt. They are reviewed diffs in git.
 
-**Grounding belongs to a source, and there is no global layer.** It names members
-— "revenue" means `revenue.net_revenue` — so one shared set is wrong the moment
-there are two warehouses. `CUBE_URL` picks the source, and its grounding is
-whatever that source carries. A `CUBE_URL` with no source behind it grounds on
-nothing, and the agent answers from the system prompt alone.
+**Grounding lives beside the cubes it names**, inside the same directory, so it is
+versioned with the model it describes and a branch carries its own. An empty directory
+is a real state: the agent then answers from the system prompt alone.
 
 **Markdown only.** The directory is inside the tree Cube mounts as its model, and
 Cube compiles every `*.yml` it finds anywhere under that mount — one grounding
@@ -243,9 +244,8 @@ make test lint
 ```
 
 `analyst` only starts the portal, and takes no arguments — host, port and data directory
-come from the environment or `.env`. Querying goes through the
-portal because the portal is what selects a source: the single global `CUBE_URL` does not
-survive more than one Cube container.
+come from the environment or `.env`. It cannot be replaced by pointing uvicorn at the app:
+the access token is minted at import and nothing else prints it.
 
 `src/web/` is the frontend source and sits outside the Python package deliberately. Its
 build output does not: `uv_build` ships only `src/analyst_agent`, so Vite writes to

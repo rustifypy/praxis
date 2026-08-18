@@ -16,17 +16,12 @@ async def store(tmp_path):
 
 @pytest.fixture
 async def board(store):
-    return await store.create("Revenue", "chinook")
-
-
-async def test_a_dashboard_records_the_source_its_queries_mean_something_against(store):
-    made = await store.create("Revenue", "chinook")
-    assert (await store.get(made.id)).source_name == "chinook"
+    return await store.create("Revenue")
 
 
 async def test_dashboards_are_listed_most_recently_touched_first(store):
-    first = await store.create("first", "chinook")
-    second = await store.create("second", "chinook")
+    first = await store.create("first")
+    second = await store.create("second")
     await store.add_tile(first.id, "a tile", QUERY, CHART)
 
     assert [d.id for d in await store.list_dashboards()] == [first.id, second.id]
@@ -177,7 +172,7 @@ async def test_pruning_counts_runs_per_tile_not_per_dashboard(store, board):
 
 
 async def test_deleting_a_dashboard_takes_its_tiles_runs_and_results(store, board):
-    keep = await store.create("keep", "chinook")
+    keep = await store.create("keep")
     kept = await store.add_tile(keep.id, "kept", QUERY, CHART)
     tile = await store.add_tile(board.id, "By status", QUERY, CHART)
     run = await store.start_run(board.id)

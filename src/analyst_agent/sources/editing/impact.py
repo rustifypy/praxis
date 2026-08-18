@@ -1,5 +1,5 @@
-"""What merging a branch would break — the members saved queries name, against what this
-source is serving now."""
+"""What merging a branch would break — the members saved queries name, against what Cube is
+serving now."""
 
 from dataclasses import dataclass, field
 
@@ -59,12 +59,11 @@ def missing_members(query: dict, catalog: Catalog) -> tuple[list[str], dict[str,
 
 
 async def check(
-    source_name: str,
     catalog: Catalog,
     dashboards: DashboardStore,
     grounding: Grounding,
 ) -> Impact:
-    """Every saved query bound to this source, against the model it is serving.
+    """Every saved query, against the model being served.
 
     Deliberately not a diff of main's members against the branch's: only one catalog is ever
     served at a time, and asking "is what this tile reads still here" answers the question that
@@ -73,8 +72,6 @@ async def check(
     """
     out = Impact()
     for board in await dashboards.list_dashboards():
-        if board.source_name != source_name:
-            continue
         for tile in await dashboards.tiles(board.id):
             out.checked += 1
             absent, nearest = missing_members(tile.query, catalog)

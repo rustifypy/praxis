@@ -191,6 +191,14 @@ export const deleteDashboard = (id: string) =>
 export const refreshDashboard = (id: string) =>
   json<RefreshOutcome>(`/api/dashboards/${id}/refresh`, { method: "POST" });
 
+/** Applied on the next refresh, which the page runs straight after — so the picker never
+ *  describes a window the numbers on screen were not read under. */
+export const setWindow = (id: string, dateRange: string | string[] | null) =>
+  json<{ window: string | string[] | null }>(`/api/dashboards/${id}/window`, {
+    method: "POST",
+    body: JSON.stringify({ date_range: dateRange }),
+  });
+
 export const saveLayout = (id: string, spec: unknown, note: string) =>
   json<{ version: number }>(`/api/dashboards/${id}/layout`, {
     method: "POST",

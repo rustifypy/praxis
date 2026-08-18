@@ -22,7 +22,7 @@ const KINDS = [
     section: "rules",
     title: "Rules",
     subtitle: "what it takes as given",
-    info: "What the agent treats as settled. A rule with type: always is concatenated into the system prompt of every turn against this source — that is the expensive half, and where a metric definition belongs. type: agent_requested puts only the name and description in the prompt; the body loads when the agent calls load_grounding for it.",
+    info: "What the agent treats as settled. A rule with type: always is concatenated into the system prompt of every turn — that is the expensive half, and where a metric definition belongs. type: agent_requested puts only the name and description in the prompt; the body loads when the agent calls load_grounding for it.",
     empty:
       "No rules. The agent answers with none of your definitions — “revenue” means whatever it infers from member names.",
   },
@@ -157,7 +157,7 @@ export function ArtefactDetail({
       <p className="served-rel">
         {artefact.kind === "rule" &&
           (artefact.loading === "always" ? (
-            <>In the system prompt of every turn against this source.</>
+            <>In the system prompt of every turn.</>
           ) : (
             <>
               Offered as a name and description; the body below reaches the agent only when

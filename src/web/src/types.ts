@@ -25,8 +25,9 @@ export interface AgentEvent {
 export interface Chat {
   id: string;
   title: string;
-  owner_id: string;
-  cube_url: string;
+  /** 'question' or 'model' — which agent this chat runs. */
+  kind: string;
+  branch: string;
   created_at: number;
   updated_at: number;
 }
@@ -50,12 +51,30 @@ export interface ResultColumn {
  *
  * `null` is a normal outcome. Two dimensions crossed or forty categories is a table.
  */
+export type ChartType =
+  | "line"
+  | "area"
+  | "stacked_area"
+  | "bar"
+  | "stacked_bar"
+  | "grouped_bar"
+  | "hbar"
+  | "donut"
+  | "scatter"
+  | "heatmap"
+  | "gauge"
+  | "sparkline"
+  | "kpi"
+  | "stat";
+
 export interface ChartSpec {
-  type: "line" | "bar" | "kpi";
+  type: ChartType;
   y: string[];
   x: string;
   /** Column whose values split `y` into one line each. Empty for a single series. */
   series: string;
+  /** The figure a gauge is measured against. Null on every other type. */
+  target?: number | null;
 }
 
 export interface ToolEnd {
@@ -143,7 +162,6 @@ export type Item =
 export interface DashboardRow {
   id: string;
   title: string;
-  source_name: string;
   tiles: number;
   refreshed_at: number | null;
   updated_at: number;
@@ -159,10 +177,11 @@ export interface TileRow {
 
 /** `table` has no axes — it draws whatever columns the query returned. */
 export interface TileChart {
-  type: "line" | "bar" | "kpi" | "table";
+  type: ChartType | "table";
   y?: string[];
   x?: string;
   series?: string;
+  target?: number | null;
 }
 
 export interface TileDelta {
@@ -180,6 +199,9 @@ export interface TileResultRow {
    *  so a reload cannot resurrect a chart the shape outgrew. */
   degraded: string;
   columns: ResultColumn[];
+  /** This tile's caption from the run that produced these rows, or "" when the model had
+   *  nothing worth saying about it. Written by the same call as the board summary. */
+  insight: string;
   rows: Record<string, unknown>[];
   row_count: number;
   /** What Cube resolved each dateRange to. The only thing saying whether a refresh moved
@@ -200,9 +222,16 @@ export interface LayoutItem {
 export interface DashboardDetail {
   id: string;
   title: string;
-  source_name: string;
   tiles: TileRow[];
   layout: { columns: number; items: LayoutItem[] };
+  /** From `layout.MAX_COLUMNS`, so the column picker cannot offer a width the server refuses. */
+  max_columns: number;
+  /** The board's window, written into each tile's primary time dimension at refresh. Null is
+   *  no override — every tile runs the range its own stored query carries. */
+  window: string | string[] | null;
+  /** How many tiles the window reaches. The rest have no time dimension to write into, and a
+   *  board that did not say so would be wrong about what its own control does. */
+  windowed_tiles: number;
   layout_version: number | null;
   history: { version: number; note: string; created_at: number }[];
   run: {
@@ -213,8 +242,6 @@ export interface DashboardDetail {
     finished_at: number | null;
   } | null;
   results: Record<string, TileResultRow>;
-  /** Why refreshing would answer from the wrong database, or null. */
-  mismatch: string | null;
   /** Tiles that no longer compile. `available` is false when the container is down, which is
    *  not the same as nothing being broken. */
   checks: { available: boolean; reason: string; broken: { tile_id: string; title: string; errors: string[] }[] };

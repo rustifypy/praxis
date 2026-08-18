@@ -9,12 +9,11 @@ import { Dashboard } from "./components/Dashboard";
 import { DashboardNav } from "./components/DashboardNav";
 import type { ComposerHandle } from "./components/Composer";
 import { Composer } from "./components/Composer";
-import { DataNav } from "./components/DataNav";
+import { Connect } from "./components/Connect";
 import { FileBlock } from "./components/FileBlock";
 import { Rail } from "./components/Rail";
 import { ResultBlock } from "./components/ResultBlock";
 import { SourceDetail } from "./components/SourceDetail";
-import { Sources } from "./components/Sources";
 import { Thinking } from "./components/Thinking";
 import { ToolCall } from "./components/ToolCall";
 import { Welcome } from "./components/Welcome";
@@ -47,14 +46,11 @@ export default function App() {
   // Which mode the rail is on. A hash rather than a router: three views do not justify
   // one, and the hash is the only state — a mirrored React copy let the two disagree.
   const hash = useHash();
-  const view: "chat" | "dashboards" | "sources" = hash.startsWith("#sources")
-    ? "sources"
+  const view: "chat" | "dashboards" | "data" = hash.startsWith("#data")
+    ? "data"
     : hash.startsWith("#boards")
       ? "dashboards"
       : "chat";
-  const selected = hash.startsWith("#sources/")
-    ? decodeURIComponent(hash.slice("#sources/".length))
-    : null;
   // Which dashboard is open, read off the hash for the same reason the mode is: a mirrored
   // React copy disagreed with the address bar after a back button.
   const openBoard = hash.startsWith("#boards/")
@@ -62,17 +58,12 @@ export default function App() {
     : null;
   const [dashboards, setDashboards] = useState<DashboardRow[]>([]);
   const [system, setSystem] = useState<System>({ ok: true });
-  const [sources, setSources] = useState<SourceRow[]>([]);
-  const [nextPort, setNextPort] = useState(4001);
+  const [source, setSource] = useState<SourceRow | null>(null);
   const [drivers, setDrivers] = useState<DriverSpec[]>([]);
-  const [driverMeta, setDriverMeta] = useState({
-    local_hosts: [] as string[],
-    localhost_note: "",
-    name_pattern: "",
-  });
+  const [driverMeta, setDriverMeta] = useState({ local_hosts: [] as string[], localhost_note: "" });
   const [job, setJob] = useState<JobState | null>(null);
-  // The connection drawer: "new" to add, a source row to edit its credentials.
-  const [drawer, setDrawer] = useState<"new" | SourceRow | null>(null);
+  // The connection drawer: "new" to connect one, "edit" to change its credentials.
+  const [drawer, setDrawer] = useState<"new" | "edit" | null>(null);
 
   const abort = useRef<AbortController | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -115,16 +106,15 @@ export default function App() {
     [refreshDashboards],
   );
 
-  const refreshSources = useCallback(async () => {
+  const refreshSource = useCallback(async () => {
     // All three concurrently: /api/system spawns docker, and awaiting it after the
     // others serialised the slowest call for no reason.
-    const [listed, current, health] = await Promise.all([
-      sourcesApi.list(),
+    const [connected, current, health] = await Promise.all([
+      sourcesApi.source(),
       sourcesApi.job(),
       sourcesApi.system(),
     ]);
-    setSources(listed.sources);
-    setNextPort(listed.next_port);
+    setSource(connected);
     setSystem(health);
     // The stream is the sole carrier of events; this only refreshes the header, so an
     // in-flight job keeps the events it has already received.
@@ -146,21 +136,17 @@ export default function App() {
       } catch (err) {
         setFatal(String(err));
       }
-      // Sources are independent of the chat: a broken Cube must not hide the panel that
-      // is how you fix it.
+      // The data page is independent of the chat: a broken Cube must not hide the panel
+      // that is how you fix it.
       try {
-        const [meta] = await Promise.all([sourcesApi.drivers(), refreshSources()]);
+        const [meta] = await Promise.all([sourcesApi.drivers(), refreshSource()]);
         setDrivers(meta.drivers);
-        setDriverMeta({
-          local_hosts: meta.local_hosts,
-          localhost_note: meta.localhost_note,
-          name_pattern: meta.name_pattern,
-        });
+        setDriverMeta({ local_hosts: meta.local_hosts, localhost_note: meta.localhost_note });
       } catch {
         /* /api/system reports why; the panel says so itself. */
       }
     })();
-  }, [open, refreshSources, refreshDashboards]);
+  }, [open, refreshSource, refreshDashboards]);
 
   // Follow a running job, and re-attach to one already in flight after a refresh — the
   // server replays its buffer before going live, so both are the same code path.
@@ -180,17 +166,14 @@ export default function App() {
       });
       // `job_end` always follows the last `step_end`; refreshing on both ran every
       // docker call twice back to back.
-      if (event.type === "job_end") void refreshSources();
+      if (event.type === "job_end") void refreshSource();
     });
-  }, [job?.id, job?.done, refreshSources]);
+  }, [job?.id, job?.done, refreshSource]);
 
-  const showSources = useCallback(
-    (name?: string) => {
-      window.location.hash = name ? `#sources/${encodeURIComponent(name)}` : "#sources";
-      void refreshSources();
-    },
-    [refreshSources],
-  );
+  const showData = useCallback(() => {
+    window.location.hash = "#data";
+    void refreshSource();
+  }, [refreshSource]);
 
   // Set scrollTop directly rather than scrollIntoView: a smooth scroll retriggered on
   // every token fights itself and the transcript judders.
@@ -277,15 +260,17 @@ export default function App() {
     );
   }
 
+  // Data mode has no list beside its page — there is one connection — so the middle column
+  // is absent there rather than empty.
   return (
-    <div className="app">
+    <div className={`app ${view === "data" ? "no-nav" : ""}`}>
       <Rail
         view={view}
         jobRunning={Boolean(job && !job.done)}
         onSelect={(next) => {
           if (next === "chat") window.location.hash = "";
           else if (next === "dashboards") showBoards();
-          else showSources();
+          else showData();
         }}
       />
 
@@ -293,7 +278,6 @@ export default function App() {
         <DashboardNav
           dashboards={dashboards}
           selected={openBoard}
-          activeSource={sources.find((s) => s.active)?.name ?? ""}
           onOpen={(id) => showBoards(id)}
           onCreate={async () => {
             try {
@@ -314,44 +298,31 @@ export default function App() {
           onRename={(id, title) => void rename(id, title)}
           onDelete={(id) => void remove(id)}
         />
-      ) : (
-        <DataNav
-          sources={sources}
-          selected={selected}
-          job={job}
-          canAdd={system.ok}
-          onOpen={(name) => showSources(name)}
-          onAll={() => showSources()}
-          onAdd={() => setDrawer("new")}
-        />
-      )}
+      ) : null}
 
       {drawer && (
         <AddSource
           drivers={drivers}
           localHosts={driverMeta.local_hosts}
           localhostNote={driverMeta.localhost_note}
-          namePattern={driverMeta.name_pattern}
-          nextPort={nextPort}
-          taken={sources.map((s) => s.name)}
-          editing={drawer === "new" ? undefined : drawer}
+          editing={drawer === "edit" && source ? source : undefined}
           onCancel={() => setDrawer(null)}
-          onCreate={async (body) => {
-            const created = await sourcesApi.create(body);
+          onConnect={async (body) => {
+            await sourcesApi.connect(body);
             setDrawer(null);
-            // Onto its own page — connecting is about to narrate progress there.
-            showSources(created.name);
-            // Straight into connecting: adding a source nobody starts is a dead end.
-            await sourcesApi.runAction(created.name, "connect");
-            await refreshSources();
+            // Onto the data page — connecting is about to narrate progress there.
+            showData();
+            // Straight into connecting: a stored connection nobody starts is a dead end.
+            await sourcesApi.runAction("connect");
+            await refreshSource();
           }}
-          onSave={async (name, body) => {
-            await sourcesApi.edit(name, body);
+          onSave={async (body) => {
+            await sourcesApi.edit(body);
             setDrawer(null);
-            await refreshSources();
+            await refreshSource();
             // Credentials only take effect on a fresh container, so reconnect for them.
-            await sourcesApi.runAction(name, "connect");
-            await refreshSources();
+            await sourcesApi.runAction("connect");
+            await refreshSource();
           }}
         />
       )}
@@ -375,32 +346,24 @@ export default function App() {
             </div>
           )}
         </main>
-      ) : view === "sources" ? (
+      ) : view === "data" ? (
         <main className="main">
-          {selected && sources.some((s) => s.name === selected) ? (
+          {source ? (
             <SourceDetail
-              source={sources.find((s) => s.name === selected)!}
-              job={job?.source === selected ? job : null}
+              source={source}
+              system={system}
+              job={job}
               busy={Boolean(job && !job.done)}
-              onRefresh={() => void refreshSources()}
-              onEdit={() => setDrawer(sources.find((s) => s.name === selected)!)}
-              onBack={() => showSources()}
+              onRefresh={() => void refreshSource()}
+              onEdit={() => setDrawer("edit")}
             />
           ) : (
-            <Sources
-              system={system}
-              sources={sources}
-              job={job}
-              nextPort={nextPort}
-              onRefresh={() => void refreshSources()}
-              onAdd={() => setDrawer("new")}
-              onOpen={(name) => showSources(name)}
-            />
+            <Connect system={system} onAdd={() => setDrawer("new")} />
           )}
         </main>
       ) : (
       <main className="main chat-main">
-        <ChatHeader sources={sources} cubeUrl={cubeUrl} onShowSources={showSources} />
+        <ChatHeader source={source} cubeUrl={cubeUrl} onShowData={showData} />
 
         <div
           className="transcript"

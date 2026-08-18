@@ -13,7 +13,6 @@ from ..core import jobs as job_runner
 from ..sources import docker, modelgen
 from ..sources.modelgen.steps import StepFailed
 from ..sources.store import STAGES
-from .state import find
 from .stream import sse
 
 router = APIRouter(prefix="/api")
@@ -46,42 +45,40 @@ async def job_stream(request: Request) -> StreamingResponse:
     return sse(request.app.state.jobs.watch())
 
 
-@router.post("/sources/{name}/actions/{name_of_action}")
-async def run_action(name: str, name_of_action: str, body: RunStep, request: Request) -> dict:
+@router.post("/source/actions/{action}")
+async def run_action(action: str, body: RunStep, request: Request) -> dict:
     """Start a job that runs one action, and answer as soon as it exists."""
-    if name_of_action not in STAGES:
-        raise HTTPException(404, f"no such action {name_of_action!r} — one of {', '.join(STAGES)}")
-    source = await find(request, name)
+    if action not in STAGES:
+        raise HTTPException(404, f"no such action {action!r} — one of {', '.join(STAGES)}")
     # Bound out here so the closure does not hold the finished request — and with it the
     # whole ASGI scope — alive for the minutes a describe takes.
-    runner = request.app.state.jobs
-    store = request.app.state.sources
-    cache = request.app.state.health
+    app = request.app
+    runner = app.state.jobs
+    store = app.state.sources
 
     async def work(job: job_runner.Job) -> None:
-        job.current = name_of_action
-        runner.emit("step_start", step=name_of_action)
+        job.current = action
+        runner.emit("step_start", step=action)
         try:
             result = await modelgen.steps.action(
-                name_of_action,
-                source,
+                action,
                 store,
                 schema=body.schema_name,
                 tables=body.tables,
                 report=lambda stage, payload: runner.emit("progress", step=stage, **payload),
             )
         except StepFailed as exc:
-            runner.emit("step_end", step=name_of_action, ok=False, error=str(exc))
+            runner.emit("step_end", step=action, ok=False, error=str(exc))
             # The container is left as it is — its logs are the diagnosis.
-            runner.emit("log", message=await docker.logs(source.service, 40))
+            runner.emit("log", message=await docker.logs(40))
             raise
         finally:
             # A rebuild changes what the container serves and nothing watches it for that.
-            cache.pop(source.name, None)
+            app.state.health = None
             job.current = ""
         runner.emit(
             "step_end",
-            step=name_of_action,
+            step=action,
             ok=result.ok,
             summary=result.summary,
             notes=result.notes,
@@ -89,7 +86,7 @@ async def run_action(name: str, name_of_action: str, body: RunStep, request: Req
         )
 
     try:
-        job = await runner.start(source.name, [name_of_action], work)
+        job = await runner.start([action], work)
     except job_runner.Busy as exc:
         raise HTTPException(409, f"a job is already running — {exc}") from None
     return job.snapshot()

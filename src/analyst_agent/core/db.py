@@ -11,9 +11,6 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS chats (
     id          TEXT PRIMARY KEY,
     title       TEXT NOT NULL,
-    -- Which source this chat is about. No cube_url here: the source carries it, so the
-    -- URL a chat queries cannot disagree with the container that answers.
-    source_name TEXT NOT NULL,
     -- 'question' asks about the data, 'model' edits it. The two agents share this table
     -- and this transcript format and differ only here.
     kind        TEXT NOT NULL DEFAULT 'question',
@@ -36,8 +33,6 @@ CREATE TABLE IF NOT EXISTS events (
 );
 
 CREATE INDEX IF NOT EXISTS events_by_chat ON events(chat_id, seq);
-
-CREATE INDEX IF NOT EXISTS chats_by_source ON chats(source_name, updated_at DESC);
 
 -- A query's whole result set, which the event log deliberately does not carry: an event
 -- holds the first hundred rows so a replayed transcript renders without a fetch, and
@@ -63,10 +58,7 @@ CREATE INDEX IF NOT EXISTS results_by_chat ON results(chat_id);
 CREATE TABLE IF NOT EXISTS dashboards (
     id          TEXT PRIMARY KEY,
     title       TEXT NOT NULL,
-    -- Which source these queries mean something against, compared with the active source
-    -- before any refresh: two warehouses can both have `sales.revenue` and nothing would
-    -- error on the wrong one. No chat_id — a dashboard is editable from any chat.
-    source_name TEXT NOT NULL,
+    -- No chat_id — a dashboard is editable from any chat.
     created_at  REAL NOT NULL,
     updated_at  REAL NOT NULL
 );
@@ -98,6 +90,16 @@ CREATE TABLE IF NOT EXISTS layouts (
     note         TEXT NOT NULL DEFAULT '',
     created_at   REAL NOT NULL,
     PRIMARY KEY (dashboard_id, version)
+);
+
+-- The board's window, written into the primary timeDimension of every tile that has one.
+-- Its own table because `dashboards` cannot gain a column, and not inside `layouts.spec`
+-- because that is placement only — a window changes the numbers, not where they sit.
+CREATE TABLE IF NOT EXISTS windows (
+    dashboard_id TEXT PRIMARY KEY REFERENCES dashboards(id) ON DELETE CASCADE,
+    -- JSON, because Cube takes a relative string and an absolute [from, to] pair alike.
+    date_range   TEXT NOT NULL,
+    updated_at   REAL NOT NULL
 );
 
 -- A refresh is an object because it is atomic: it either happened or it did not, and
@@ -135,19 +137,15 @@ CREATE INDEX IF NOT EXISTS runs_by_dashboard  ON runs(dashboard_id, started_at D
 CREATE INDEX IF NOT EXISTS results_by_run     ON tile_results(run_id);
 CREATE INDEX IF NOT EXISTS results_by_tile    ON tile_results(tile_id, created_at DESC);
 
--- --- the registry -----------------------------------------------------------------
--- One row is the whole source, credentials included: `docker run -e` is built from it,
--- so nothing on disk can drift from it. `--data-dir` scopes this along with the history,
--- which is the point — a scratch directory is a whole scratch install.
-CREATE TABLE IF NOT EXISTS sources (
-    name        TEXT PRIMARY KEY,
+-- --- the data source --------------------------------------------------------------
+-- One Cube deployment, so one row: `id = 1` is a CHECK rather than a convention, and
+-- credentials are in it because `docker run -e` is built from it and nothing else on disk
+-- could then drift from it. `--data-dir` scopes this along with the history, which is the
+-- point — a scratch directory is a whole scratch install.
+CREATE TABLE IF NOT EXISTS source (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
     description TEXT NOT NULL DEFAULT '',
     driver      TEXT NOT NULL,
-    -- One published port per source, and the agent selects one of them by CUBE_URL.
-    port        INTEGER NOT NULL UNIQUE,
-    -- Where this source answers. Written from the port at creation, and the one thing a
-    -- chat or a dashboard follows to reach it — nothing resolves a URL from settings.
-    cube_url    TEXT NOT NULL,
     credentials TEXT NOT NULL DEFAULT '{}',
     mounts      TEXT NOT NULL DEFAULT '{}',
     steps       TEXT NOT NULL DEFAULT '{}',
