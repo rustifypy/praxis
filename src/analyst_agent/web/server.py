@@ -20,12 +20,12 @@ from ..cube.client import CubeClient
 from ..cube.shape import Column, export_value
 from ..sandbox import container, scratch
 from ..transcript import ChatStore, checkpointer
-from . import dashboards, files, jobs, model_edit, sources, state, system
+from . import dashboards, files, jobs, mcp, model_edit, sources, state, system
 from .stream import sse
 
 STATIC = Path(__file__).parent / "static"
 COOKIE = "analyst_token"
-# Regenerated every launch, like a Jupyter server token.
+
 TOKEN = secrets.token_urlsafe(24)
 
 
@@ -68,7 +68,15 @@ async def lifespan(app: FastAPI):
         # restart is a fair moment to start asking again.
         app.state.approvals = {}
         app.state.always = set()
-        yield
+        app.state.mcp_max_rows = settings.max_rows
+        # Read once and written through by the routes, so the guard tests memory rather than
+        # opening the database on every tool call. After `store.init()`, which creates the table.
+        app.state.mcp = await mcp.load()
+        # The session manager is started by the mounted app's own lifespan, which a mount does
+        # not run — Starlette only runs the outermost. So it is entered here, inside ours, and
+        # the tools read `app.state` for a catalog that is already open.
+        async with mcp_app.router.lifespan_context(mcp_app):
+            yield
 
 
 app = FastAPI(title="analyst-agent web", lifespan=lifespan)
@@ -79,17 +87,36 @@ app.include_router(dashboards.router)
 app.include_router(model_edit.router)
 app.include_router(files.router)
 
+app.include_router(mcp.router)
+
+mcp_server = mcp.build(app)
+
+app.state.mcp_server = mcp_server
+mcp_app = mcp_server.streamable_http_app(streamable_http_path="/")
+app.mount("/mcp", mcp_app)
+
 
 @app.middleware("http")
 async def guard(request: Request, call_next):
     if request.url.path == "/api/healthz":
         return await call_next(request)
+    if request.url.path.startswith("/mcp"):
+        access = request.app.state.mcp
+        if not access.enabled:
+            return Response("Not Found", status_code=404)
+        header = request.headers.get("authorization", "")
+        offered = header.removeprefix("Bearer ").strip() if header.startswith("Bearer ") else ""
+        if not offered or not secrets.compare_digest(offered, access.token):
+            return Response("Unauthorized.", status_code=401)
+        if request.url.path == "/mcp":
+            request.scope["path"] = "/mcp/"
+        return await call_next(request)
+
     supplied = request.query_params.get("token") or request.cookies.get(COOKIE)
     if not supplied or not secrets.compare_digest(supplied, TOKEN):
         return Response("Unauthorized. Open the URL printed by `analyst`.", status_code=401)
     response = await call_next(request)
     if request.query_params.get("token"):
-        # Move it out of the query string so reloads and SSE carry it implicitly.
         response.set_cookie(COOKIE, TOKEN, httponly=True, samesite="strict")
     return response
 

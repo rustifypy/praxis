@@ -157,6 +157,21 @@ export type Item =
   | { kind: "compacted"; before: number; after: number }
   | { kind: "error"; message: string };
 
+/**
+ * The MCP endpoint as the data page sees it.
+ *
+ * `desktop` and `cli` are built server-side from the address the server binds, so the panel
+ * shows what a client will actually reach rather than what the browser happened to load.
+ */
+export interface McpAccess {
+  enabled: boolean;
+  token: string;
+  url: string;
+  desktop: string;
+  cli: string;
+  tools: { name: string; description: string }[];
+}
+
 /** `results` is keyed by tile id rather than nested, because a tile always exists and its
  *  data may not — an unrefreshed dashboard has every tile and no results. */
 export interface DashboardRow {

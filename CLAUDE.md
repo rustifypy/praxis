@@ -339,7 +339,8 @@ browser the way Jupyter does. One flat event stream is the contract between agen
 | `agent/turn.py` | `stream_turn()` — one turn as an async iterator of events |
 | `web/server.py` | routes, SSE, token auth, static mount |
 | `src/web/` | React source; **builds into `analyst_agent/web/static/`** |
-| `src/web/src/components/Rail.tsx` | the mode switch — chat, boards or data, and nothing else |
+| `src/web/src/components/Rail.tsx` | the mode switch — chat, boards, data or agents, and nothing else |
+| `src/web/src/components/McpPage.tsx` | agent access: the MCP switch, its token, and what to paste |
 | `src/web/src/components/ChatHeader.tsx` | what is being queried, and a link to manage it |
 | `src/web/src/components/ServedModel.tsx` | the compiled model **and** its grounding, one list |
 | `src/web/src/components/ResultBlock.tsx` | one query's data: the table, the chart above it, CSV |
@@ -399,12 +400,14 @@ the bind mount and the download route is how it is read.
 and the column beside it swaps whole — `ChatNav`, `DashboardNav` or `DataNav`, never two.
 Chat and data shared one sidebar until the chat list stayed live and clickable while you
 were administering a database. Boards sit between them because that is the order the work
-happens in: made in chat, read against the model. The mode is read off the hash and nowhere
-else (`useHash`), as is which dashboard is open; a mirrored React copy disagreed with the
-address bar after a back button. A hash and not a router — three views do not justify one.
+happens in: made in chat, read against the model. Agents is last and apart from data: it is
+not "what am I connected to" but "what does something else get to call". The mode is read off
+the hash and nowhere else (`useHash`), as is which dashboard is open; a mirrored React copy
+disagreed with the address bar after a back button. A hash and not a router — four views do
+not justify one. `Rail.Mode` is the union, defined beside the switch that owns it.
 
-**Data mode has no middle column** (`.app.no-nav`), because there is one connection and a
-sidebar listing it would be a list of one. Chat and boards keep theirs.
+**Data and agents have no middle column** (`.app.no-nav`), because there is one connection and
+one endpoint, and a sidebar listing either would be a list of one. Chat and boards keep theirs.
 
 `ChatHeader` is where "what am I querying" lives: the chip carries the database's name, the
 health dot, the branch when it is not main, and `servingNote` — the size of the model, which

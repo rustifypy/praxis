@@ -12,6 +12,8 @@ import { Composer } from "./components/Composer";
 import { Connect } from "./components/Connect";
 import { FileBlock } from "./components/FileBlock";
 import { Rail } from "./components/Rail";
+import type { Mode } from "./components/Rail";
+import { McpPage } from "./components/McpPage";
 import { ResultBlock } from "./components/ResultBlock";
 import { SourceDetail } from "./components/SourceDetail";
 import { Thinking } from "./components/Thinking";
@@ -43,14 +45,16 @@ export default function App() {
   const [entities, setEntities] = useState<{ name: string; view: boolean; members: number }[]>([]);
   const [fatal, setFatal] = useState<string | null>(null);
 
-  // Which mode the rail is on. A hash rather than a router: three views do not justify
+  // Which mode the rail is on. A hash rather than a router: four views do not justify
   // one, and the hash is the only state — a mirrored React copy let the two disagree.
   const hash = useHash();
-  const view: "chat" | "dashboards" | "data" = hash.startsWith("#data")
+  const view: Mode = hash.startsWith("#data")
     ? "data"
-    : hash.startsWith("#boards")
-      ? "dashboards"
-      : "chat";
+    : hash.startsWith("#agents")
+      ? "agents"
+      : hash.startsWith("#boards")
+        ? "dashboards"
+        : "chat";
   // Which dashboard is open, read off the hash for the same reason the mode is: a mirrored
   // React copy disagreed with the address bar after a back button.
   const openBoard = hash.startsWith("#boards/")
@@ -260,16 +264,17 @@ export default function App() {
     );
   }
 
-  // Data mode has no list beside its page — there is one connection — so the middle column
-  // is absent there rather than empty.
+  // Data and agents have no list beside their page — one connection, one endpoint — so the
+  // middle column is absent there rather than empty.
   return (
-    <div className={`app ${view === "data" ? "no-nav" : ""}`}>
+    <div className={`app ${view === "data" || view === "agents" ? "no-nav" : ""}`}>
       <Rail
         view={view}
         jobRunning={Boolean(job && !job.done)}
         onSelect={(next) => {
           if (next === "chat") window.location.hash = "";
           else if (next === "dashboards") showBoards();
+          else if (next === "agents") window.location.hash = "#agents";
           else showData();
         }}
       />
@@ -345,6 +350,10 @@ export default function App() {
                 : "No dashboards yet. Create one, then ask in chat to add tiles to it."}
             </div>
           )}
+        </main>
+      ) : view === "agents" ? (
+        <main className="main">
+          <McpPage />
         </main>
       ) : view === "data" ? (
         <main className="main">
