@@ -125,9 +125,6 @@ a member a model rebuild dropped shows up as a banner, not a silent gap. A refre
 refresh, one asking for `2026-01-01..2026-01-31` never does, and the tile labels which
 kind it is from what Cube actually resolved.
 
-One model call runs per refresh for the whole board — a cross-tile paragraph on what
-changed — never one call per tile.
-
 ## The data source
 
 **One Cube deployment.** One container, one model directory, one row in the `source`

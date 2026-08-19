@@ -42,9 +42,6 @@ export function Dashboard({
   const [over, setOver] = useState<string | null>(null);
   // A display preference, so it belongs neither on the board row nor in the hash — one is
   // shared state and the other is navigation.
-  const [captions, setCaptions] = useState(
-    () => localStorage.getItem("dash-captions") !== "off",
-  );
 
   const load = useCallback(async () => {
     setFailed("");
@@ -181,20 +178,6 @@ export function Dashboard({
               ))}
             </select>
           )}
-          {detail.tiles.length > 0 && (
-            <button
-              className="dash-toggle"
-              aria-pressed={captions}
-              title="Show or hide the one-line caption under each tile"
-              onClick={() => {
-                const next = !captions;
-                setCaptions(next);
-                localStorage.setItem("dash-captions", next ? "on" : "off");
-              }}
-            >
-              Captions
-            </button>
-          )}
           <button
             className="primary"
             onClick={() => void refresh()}
@@ -260,18 +243,6 @@ export function Dashboard({
 
       {busy && <div className="dash-progress" role="status" aria-label="Refreshing" />}
 
-      {detail.run?.insight && (
-        <section className="dash-insight">
-          <header className="dash-insight-head">
-            <span className="dash-insight-tag">Summary</span>
-            {/* An insight is a claim about numbers, so one with no "as of" invites being
-                quoted long after the data moved. */}
-            <span className="dash-insight-when">as of {ago(detail.run.started_at)}</span>
-          </header>
-          <p>{detail.run.insight}</p>
-        </section>
-      )}
-
       {detail.tiles.length === 0 ? (
         <div className="dash-empty">
           <h3>No tiles yet</h3>
@@ -335,7 +306,6 @@ export function Dashboard({
                   onRelease={() => setArmed((cur) => (cur === item.tile ? null : cur))}
                   onNudge={(delta) => nudge(item.tile, delta)}
                   onSpan={() => cycleSpan(item.tile)}
-                  captions={captions}
                 />
               </div>
             );

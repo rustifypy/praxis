@@ -96,7 +96,6 @@ async def read_dashboard(dashboard_id: str, request: Request) -> dict:
                     tilecheck.outgrown(tile.chart, columns, record.rows) if record.rows else ""
                 ),
                 "columns": record.columns,
-                "insight": record.insight,
                 "rows": record.rows or [],
                 "row_count": record.row_count,
                 "resolved_ranges": record.resolved_ranges,
@@ -130,7 +129,6 @@ async def read_dashboard(dashboard_id: str, request: Request) -> dict:
             else {
                 "id": last.id,
                 "status": last.status,
-                "insight": last.insight,
                 "started_at": last.started_at,
                 "finished_at": last.finished_at,
             }
@@ -190,7 +188,6 @@ async def refresh_dashboard(dashboard_id: str, request: Request) -> dict:
         "status": outcome.status,
         "run_id": outcome.run_id,
         "error": outcome.error,
-        "insight": outcome.insight,
         "tiles": [
             {
                 "tile_id": t.tile_id,

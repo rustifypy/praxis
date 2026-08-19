@@ -2,7 +2,6 @@
 
 The atomic pass and the refused/failed split had no tests at all — the pure functions around
 them (`outgrown`, `deltas`, `layout.validate`) were covered and their only caller was not.
-`insights.summarise` is stubbed: it is the one model call in a refresh.
 """
 
 import pytest
@@ -20,16 +19,6 @@ async def boards(tmp_path):
     store = DashboardStore(tmp_path / "analyst.db")
     await store.init()
     return store
-
-
-@pytest.fixture(autouse=True)
-def no_model(monkeypatch):
-    monkeypatch.setattr(runner.insights, "summarise", _canned)
-
-
-async def _canned(title, tiles) -> tuple[str, dict[str, str]]:
-    """The paragraph and a caption per tile id — one call produces both."""
-    return "revenue held steady", {tile[0]: f"{tile[1]} caption" for tile in tiles}
 
 
 async def _board(store: DashboardStore, *queries: dict) -> str:
@@ -112,23 +101,11 @@ async def test_a_refresh_stores_its_rows_and_the_window_cube_resolved(boards, cu
 
     outcome = await runner.refresh(board, boards, cube.served, cube, 5_000)
 
-    assert outcome.ok and outcome.insight == "revenue held steady"
+    assert outcome.ok
     stored = await boards.results_for_run(outcome.run_id)
     assert stored[0].rows == ROWS
     assert stored[0].row_count == 1
     assert stored[0].resolved_ranges == cube.resolved_ranges
-
-
-async def test_every_tile_gets_its_caption_from_the_run_that_produced_its_rows(boards, cube):
-    """One model call returns the paragraph and every caption, and each caption lands on the
-    row it describes rather than on the board."""
-    cube.rows = ROWS
-    board = await _board(boards, QUERY, QUERY)
-
-    outcome = await runner.refresh(board, boards, cube.served, cube, 5_000)
-
-    stored = {r.tile_id: r.insight for r in await boards.results_for_run(outcome.run_id)}
-    assert sorted(stored.values()) == ["tile 0 caption", "tile 1 caption"]
 
 
 async def test_the_second_refresh_reports_change_against_the_first(boards, cube):

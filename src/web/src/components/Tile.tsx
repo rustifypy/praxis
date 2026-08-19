@@ -42,7 +42,6 @@ export function Tile({
   onRelease,
   onNudge,
   onSpan,
-  captions,
 }: {
   tile: TileRow;
   result?: TileResultRow;
@@ -55,7 +54,6 @@ export function Tile({
   onRelease: () => void;
   onNudge: (delta: number) => void;
   onSpan: () => void;
-  captions: boolean;
 }) {
   const chart: TileChart = tile.chart;
   const rows = result?.rows ?? [];
@@ -188,8 +186,6 @@ export function Tile({
           )}
         </div>
       )}
-
-      {captions && result?.insight && <p className="dash-caption">{result.insight}</p>}
 
       {degraded && <p className="dash-tile-note">Drawn as a table: {degraded}.</p>}
     </section>

@@ -195,7 +195,6 @@ three invariants; read it before changing anything here:
 | `layout.py` | placement only; a partial layout is *completed*, never treated as hiding |
 | `refresh.py` | `validate` (tiers 1-3) and `refresh` (+ tier 4), the atomic pass |
 | `delta.py` | change since the previous refresh, single-row results only |
-| `insights.py` | one model call per refresh for the whole board, never per tile |
 | `agent/tools/dashboards.py` | the eight agent tools — which do **not** include refreshing |
 | `web/dashboards.py` | the HTTP surface; refresh lives here and nowhere else |
 
@@ -213,12 +212,16 @@ against the warehouse. A dashboard renders its last `ok` run, so neither blanks 
 cannot draw makes the tile misrepresent itself, so widening the tuple ahead of the branch
 is the one order that is wrong.
 
-`core.db.SCHEMA` will **never gain a column** — `CREATE TABLE IF NOT EXISTS` does not diff, so
-adding a table to a live `analyst.db` works and adding a column silently does not. There is
-no migration mechanism and deliberately so: this runs on one machine for one person, and
-recreating the database is a cheaper answer than a chain nobody else will ever run.
-`tiles.time_member` is written on every tile and read by nothing — it is there because the
-feature needing it would otherwise require exactly that column. Retention is
+`CREATE TABLE IF NOT EXISTS` does not diff: it adds a table to a live `analyst.db` and
+silently skips a new *column* on one that exists. So `core.db.SCHEMA` is what a database is
+created as, and `core.db.MIGRATIONS` is how one that already exists catches up —
+`core.db.apply` runs both, and is what every store calls instead of `executescript`, so a
+migration cannot run for one store and be skipped by another. `user_version` counts what has
+been applied; a database `apply` creates is stamped as current rather than migrated, because
+`SCHEMA` already builds it in its final shape and a migration dropping a column would raise
+on a table that never had one. Migrations are append-only — editing one already applied runs
+nowhere. `tiles.time_member` is written on every tile and read by nothing — it is there
+because the feature needing it would otherwise require exactly that column. Retention is
 the mirror image: a DELETE rather than a column, so the depth stays changeable — it is the
 *index* that could not be added later.
 
@@ -347,7 +350,7 @@ browser the way Jupyter does. One flat event stream is the contract between agen
 | `src/web/src/components/FileBlock.tsx` | what a script wrote: images inline, everything else a download |
 | `src/web/src/components/Composer.tsx` | the question, and the files it arrives with |
 | `src/web/src/components/ResultChart.tsx` | line / bar / kpi as inline SVG, from a spec |
-| `src/web/src/components/Dashboard.tsx` | one board: the grid, the insight, and **the only Refresh** |
+| `src/web/src/components/Dashboard.tsx` | one board: the grid and **the only Refresh** |
 | `src/web/src/components/Tile.tsx` | one tile: its chart or table, its window, its delta |
 | `src/web/src/format.ts` | how a result value renders — cells, axis ticks, sort order |
 
@@ -594,10 +597,6 @@ branch, at a time).
   Hence two entry points: `tiles.validate` when a tile is written, `tiles.outgrown` on
   every refresh. A tile authored as twelve bars in January is four hundred by December and
   nobody re-authors it.
-- **A head slice of a time series is the *oldest* rows.** `tiles.insight_slice` samples
-  across the whole span and forces the final bucket in, because an insight model handed
-  head-thirty will confidently describe a trend that has since reversed — the `MAX_POINTS`
-  lesson one layer up, with the model as the victim instead of the chart.
 - **A view's members are the cube's members again, so flattening every entity in
   `/v1/meta` counts the model twice.** The Serving panel reported "48 measures, 104
   dimensions" for a model with 72 members. Counts are over cubes only; a view's size is
@@ -712,11 +711,12 @@ branch, at a time).
   `/api/results/{id}/csv` — the same lesson as `/sources/{name}/{action}`, one layer down.
 - **`ROWS` is a SQLite keyword**, so the `results` table stores its rows in a column named
   `data` — which is also what `events` calls its JSON blob.
-- **Editing `core.db.SCHEMA` changes new databases only.** `CREATE TABLE IF NOT EXISTS` does not
-  diff, so a new *table* appears on an existing `analyst.db` and a new *column* silently does
-  not. There is no migration mechanism; changing a column means recreating the file, which is
-  affordable precisely because this is one local install. Every INSERT still names its
-  columns, so that a schema edit is a loud error rather than values shifted one place left.
+- **Editing `core.db.SCHEMA` alone changes new databases only.** `CREATE TABLE IF NOT EXISTS`
+  does not diff, so a new *table* appears on an existing `analyst.db` and a new *column*
+  silently does not — and nothing at all is ever removed. Anything an existing file has to
+  lose is a `core.db.MIGRATIONS` entry as well as a `SCHEMA` edit. Every INSERT still names
+  its columns, so that a schema edit is a loud error rather than values shifted one place
+  left.
 - **New CSS goes on new class names — check `styles.css` first.** `.dot` is the rail's brand
   dot; reusing a taken name for the sources panel inherits `display: flex` and a monospace
   font, and every card lays out sideways. The trap is that a name may be claimed by markup

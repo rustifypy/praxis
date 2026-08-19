@@ -12,7 +12,7 @@ from typing import Literal, get_args
 from pydantic import validate_call
 
 from ..core.config import settings
-from ..core.db import SCHEMA, connect
+from ..core.db import apply, connect
 
 ROWS_KEPT = 2
 Status = Literal["validating", "running", "ok", "refused", "failed"]
@@ -46,7 +46,6 @@ class Run:
     dashboard_id: str
     status: str
     errors: list[dict] = field(default_factory=list)
-    insight: str = ""
     started_at: float = 0.0
     finished_at: float | None = None
 
@@ -62,7 +61,6 @@ class TileResult:
     row_count: int
     resolved_ranges: dict[str, list[str]]
     duration_ms: int | None
-    insight: str
     created_at: float
 
 
@@ -75,8 +73,7 @@ class DashboardStore:
 
     async def init(self) -> None:
         async with self._db() as db:
-            await db.executescript(SCHEMA)
-            await db.commit()
+            await apply(db)
 
     # --- dashboards ---------------------------------------------------------------
 
@@ -121,16 +118,6 @@ class DashboardStore:
         """The one hard delete here. Everything below it cascades."""
         async with self._db() as db:
             await db.execute("DELETE FROM dashboards WHERE id = ?", (dashboard_id,))
-            await db.commit()
-
-    # Written after the rows, because the captions come from a model call that runs once the
-    # refresh has already succeeded — one that hangs must cost captions and nothing else.
-    async def set_tile_insights(self, run_id: str, captions: dict[str, str]) -> None:
-        async with self._db() as db:
-            await db.executemany(
-                "UPDATE tile_results SET insight = ? WHERE run_id = ? AND tile_id = ?",
-                [(caption, run_id, tile_id) for tile_id, caption in captions.items()],
-            )
             await db.commit()
 
     # --- tiles --------------------------------------------------------------------
@@ -303,12 +290,11 @@ class DashboardStore:
         run_id: str,
         status: Status,
         errors: list[dict] | None = None,
-        insight: str = "",
     ) -> None:
         async with self._db() as db:
             await db.execute(
-                "UPDATE runs SET status = ?, errors = ?, insight = ?, finished_at = ? WHERE id = ?",
-                (status, json.dumps(errors or [], default=str), insight, time.time(), run_id),
+                "UPDATE runs SET status = ?, errors = ?, finished_at = ? WHERE id = ?",
+                (status, json.dumps(errors or [], default=str), time.time(), run_id),
             )
             await db.commit()
 
@@ -349,14 +335,13 @@ class DashboardStore:
         rows: list[dict],
         resolved_ranges: dict[str, list[str]] | None = None,
         duration_ms: int | None = None,
-        insight: str = "",
     ) -> str:
         result_id = uuid.uuid4().hex
         async with self._db() as db:
             await db.execute(
                 "INSERT INTO tile_results (id, run_id, tile_id, columns, data, row_count, "
-                "resolved_ranges, duration_ms, insight, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "resolved_ranges, duration_ms, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     result_id,
                     run_id,
@@ -366,7 +351,6 @@ class DashboardStore:
                     len(rows),
                     json.dumps(resolved_ranges or {}, default=str),
                     duration_ms,
-                    insight,
                     time.time(),
                 ),
             )
@@ -429,7 +413,6 @@ def _run(row) -> Run:
         dashboard_id=row["dashboard_id"],
         status=row["status"],
         errors=json.loads(row["errors"]),
-        insight=row["insight"],
         started_at=row["started_at"],
         finished_at=row["finished_at"],
     )
@@ -445,6 +428,5 @@ def _result(row) -> TileResult:
         row_count=row["row_count"],
         resolved_ranges=json.loads(row["resolved_ranges"]),
         duration_ms=row["duration_ms"],
-        insight=row["insight"],
         created_at=row["created_at"],
     )
