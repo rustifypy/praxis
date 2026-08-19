@@ -212,16 +212,12 @@ against the warehouse. A dashboard renders its last `ok` run, so neither blanks 
 cannot draw makes the tile misrepresent itself, so widening the tuple ahead of the branch
 is the one order that is wrong.
 
-`CREATE TABLE IF NOT EXISTS` does not diff: it adds a table to a live `analyst.db` and
-silently skips a new *column* on one that exists. So `core.db.SCHEMA` is what a database is
-created as, and `core.db.MIGRATIONS` is how one that already exists catches up —
-`core.db.apply` runs both, and is what every store calls instead of `executescript`, so a
-migration cannot run for one store and be skipped by another. `user_version` counts what has
-been applied; a database `apply` creates is stamped as current rather than migrated, because
-`SCHEMA` already builds it in its final shape and a migration dropping a column would raise
-on a table that never had one. Migrations are append-only — editing one already applied runs
-nowhere. `tiles.time_member` is written on every tile and read by nothing — it is there
-because the feature needing it would otherwise require exactly that column. Retention is
+`core.db.SCHEMA` will **never gain a column** — `CREATE TABLE IF NOT EXISTS` does not diff, so
+adding a table to a live `analyst.db` works and adding a column silently does not. There is
+no migration mechanism and deliberately so: this runs on one machine for one person, and
+recreating the database is a cheaper answer than a chain nobody else will ever run.
+`tiles.time_member` is written on every tile and read by nothing — it is there because the
+feature needing it would otherwise require exactly that column. Retention is
 the mirror image: a DELETE rather than a column, so the depth stays changeable — it is the
 *index* that could not be added later.
 
@@ -711,12 +707,11 @@ branch, at a time).
   `/api/results/{id}/csv` — the same lesson as `/sources/{name}/{action}`, one layer down.
 - **`ROWS` is a SQLite keyword**, so the `results` table stores its rows in a column named
   `data` — which is also what `events` calls its JSON blob.
-- **Editing `core.db.SCHEMA` alone changes new databases only.** `CREATE TABLE IF NOT EXISTS`
-  does not diff, so a new *table* appears on an existing `analyst.db` and a new *column*
-  silently does not — and nothing at all is ever removed. Anything an existing file has to
-  lose is a `core.db.MIGRATIONS` entry as well as a `SCHEMA` edit. Every INSERT still names
-  its columns, so that a schema edit is a loud error rather than values shifted one place
-  left.
+- **Editing `core.db.SCHEMA` changes new databases only.** `CREATE TABLE IF NOT EXISTS` does not
+  diff, so a new *table* appears on an existing `analyst.db` and a new *column* silently does
+  not. There is no migration mechanism; changing a column means recreating the file, which is
+  affordable precisely because this is one local install. Every INSERT still names its
+  columns, so that a schema edit is a loud error rather than values shifted one place left.
 - **New CSS goes on new class names — check `styles.css` first.** `.dot` is the rail's brand
   dot; reusing a taken name for the sources panel inherits `display: flex` and a monospace
   font, and every card lays out sideways. The trap is that a name may be claimed by markup

@@ -52,7 +52,7 @@ class Message(BaseModel):
 async def lifespan(app: FastAPI):
     store = ChatStore()
     await store.init()
-    # All three stores open the same file; each runs `db.apply`, whoever is first.
+    # All three stores open the same file; each runs the one SCHEMA, whoever is first.
     await dashboards.init_state(app)
     await state.init_state(app)
     # One Cube session for the life of the process; its catalog cache is what every query

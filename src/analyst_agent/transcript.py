@@ -15,7 +15,7 @@ from pathlib import Path
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from .core.config import settings
-from .core.db import apply, connect
+from .core.db import SCHEMA, connect
 from .core.events import Event
 
 
@@ -39,7 +39,8 @@ class ChatStore:
 
     async def init(self) -> None:
         async with self._db() as db:
-            await apply(db)
+            await db.executescript(SCHEMA)
+            await db.commit()
 
     async def create(
         self,

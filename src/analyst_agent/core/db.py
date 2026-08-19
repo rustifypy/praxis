@@ -144,43 +144,6 @@ CREATE TABLE IF NOT EXISTS source (
 """
 
 
-MIGRATIONS: list[tuple[str, ...]] = [
-    # 1 — what `CREATE TABLE IF NOT EXISTS` cannot take back. It adds a table or a column and
-    #     never removes one, so a dropped feature leaves its storage behind on every database
-    #     that already exists.
-    (
-        "DROP TABLE IF EXISTS windows",
-        "ALTER TABLE runs DROP COLUMN insight",
-        "ALTER TABLE tile_results DROP COLUMN insight",
-    ),
-]
-"""Applied in order, once each, oldest first. Append only — an edit to one already applied
-runs nowhere."""
-
-
-async def apply(db: aiosqlite.Connection) -> None:
-    """`SCHEMA`, then whatever migrations this file has not seen. Every store goes through
-    this rather than `executescript` so a migration cannot run for one and skip another.
-
-    `user_version` is how many have run. A database this call creates is stamped as current
-    without running any: `SCHEMA` already builds it in its final shape, and a migration
-    dropping a column would fail on a table that never carried it. `dashboards` is the
-    sentinel because everything migration 1 touches belongs to it.
-    """
-    rows = await db.execute_fetchall(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'dashboards'"
-    )
-    existed = bool(rows)
-    await db.executescript(SCHEMA)
-    if existed:
-        (version,) = await db.execute_fetchall("PRAGMA user_version")
-        for migration in MIGRATIONS[version[0] :]:
-            for statement in migration:
-                await db.execute(statement)
-    await db.execute(f"PRAGMA user_version = {len(MIGRATIONS)}")
-    await db.commit()
-
-
 @asynccontextmanager
 async def connect(path: Path):
     """One connection, rows as mappings, foreign keys enforced. Creates the parent directory,

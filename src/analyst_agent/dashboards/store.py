@@ -12,7 +12,7 @@ from typing import Literal, get_args
 from pydantic import validate_call
 
 from ..core.config import settings
-from ..core.db import apply, connect
+from ..core.db import SCHEMA, connect
 
 ROWS_KEPT = 2
 Status = Literal["validating", "running", "ok", "refused", "failed"]
@@ -73,7 +73,8 @@ class DashboardStore:
 
     async def init(self) -> None:
         async with self._db() as db:
-            await apply(db)
+            await db.executescript(SCHEMA)
+            await db.commit()
 
     # --- dashboards ---------------------------------------------------------------
 

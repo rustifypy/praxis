@@ -9,7 +9,7 @@ from typing import Literal, get_args
 from pydantic import validate_call
 
 from ..core.config import settings
-from ..core.db import apply, connect
+from ..core.db import SCHEMA, connect
 from .docker import CONTAINER
 from .registry import Source
 
@@ -40,7 +40,8 @@ class SourceStore:
 
     async def init(self) -> None:
         async with self._db() as db:
-            await apply(db)
+            await db.executescript(SCHEMA)
+            await db.commit()
         # Database passwords in plaintext, so owner-only: the file mode is the whole guard.
         self.path.chmod(0o600)
 
