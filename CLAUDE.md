@@ -195,7 +195,6 @@ three invariants; read it before changing anything here:
 | `layout.py` | placement only; a partial layout is *completed*, never treated as hiding |
 | `refresh.py` | `validate` (tiers 1-3) and `refresh` (+ tier 4), the atomic pass |
 | `delta.py` | change since the previous refresh, single-row results only |
-| `insights.py` | one model call per refresh for the whole board, never per tile |
 | `agent/tools/dashboards.py` | the eight agent tools — which do **not** include refreshing |
 | `web/dashboards.py` | the HTTP surface; refresh lives here and nowhere else |
 
@@ -347,7 +346,7 @@ browser the way Jupyter does. One flat event stream is the contract between agen
 | `src/web/src/components/FileBlock.tsx` | what a script wrote: images inline, everything else a download |
 | `src/web/src/components/Composer.tsx` | the question, and the files it arrives with |
 | `src/web/src/components/ResultChart.tsx` | line / bar / kpi as inline SVG, from a spec |
-| `src/web/src/components/Dashboard.tsx` | one board: the grid, the insight, and **the only Refresh** |
+| `src/web/src/components/Dashboard.tsx` | one board: the grid and **the only Refresh** |
 | `src/web/src/components/Tile.tsx` | one tile: its chart or table, its window, its delta |
 | `src/web/src/format.ts` | how a result value renders — cells, axis ticks, sort order |
 
@@ -594,10 +593,6 @@ branch, at a time).
   Hence two entry points: `tiles.validate` when a tile is written, `tiles.outgrown` on
   every refresh. A tile authored as twelve bars in January is four hundred by December and
   nobody re-authors it.
-- **A head slice of a time series is the *oldest* rows.** `tiles.insight_slice` samples
-  across the whole span and forces the final bucket in, because an insight model handed
-  head-thirty will confidently describe a trend that has since reversed — the `MAX_POINTS`
-  lesson one layer up, with the model as the victim instead of the chart.
 - **A view's members are the cube's members again, so flattening every entity in
   `/v1/meta` counts the model twice.** The Serving panel reported "48 measures, 104
   dimensions" for a model with 72 members. Counts are over cubes only; a view's size is

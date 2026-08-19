@@ -4124,18 +4124,6 @@ button.danger.solid {
   cursor: default;
 }
 
-/* Outranks `.dash-actions > button`. Pressed is a filled chip and not only a hue, so the
-   state survives being read without colour. */
-.dash-actions > button.dash-toggle[aria-pressed="true"] {
-  border-color: transparent;
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.dash-actions > button.dash-toggle[aria-pressed="false"] {
-  color: var(--faint);
-}
-
 .dash-banner {
   margin-bottom: 10px;
   padding: 9px 12px;
@@ -4161,48 +4149,6 @@ button.danger.solid {
 
 .dash-banner.muted {
   color: var(--faint);
-}
-
-/* The run's summary as a card rather than loose prose: unstyled, it was indistinguishable
-   from body text and read as chrome, which is the opposite of what it is. */
-.dash-insight {
-  margin: 0 0 18px;
-  padding: 11px 14px 13px;
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--accent);
-  border-radius: var(--radius);
-  background: var(--panel);
-}
-
-.dash-insight-head {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin-bottom: 6px;
-}
-
-.dash-insight-tag {
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.dash-insight p {
-  max-width: 74ch;
-  margin: 0;
-  color: var(--ink);
-  font-size: 13.5px;
-  line-height: 1.65;
-}
-
-.dash-insight-when {
-  color: var(--faint);
-  font-size: 11.5px;
 }
 
 /* Board-level and indeterminate on purpose: the refresh is atomic, so a bar per tile would
@@ -4440,17 +4386,6 @@ button.danger.solid {
   padding: 10px 12px 14px;
   color: var(--bad);
   font-size: 12px;
-  line-height: 1.5;
-}
-
-/* The tile's own one-liner. `margin-top: auto` pins it to the bottom of the tile, so captions
-   line up across a row instead of floating wherever each chart happens to end. */
-.dash-caption {
-  margin: auto 0 0;
-  padding: 8px 12px 10px;
-  border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
-  color: var(--muted);
-  font-size: 11.5px;
   line-height: 1.5;
 }
 

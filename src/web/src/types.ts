@@ -198,9 +198,6 @@ export interface TileResultRow {
    *  so a reload cannot resurrect a chart the shape outgrew. */
   degraded: string;
   columns: ResultColumn[];
-  /** This tile's caption from the run that produced these rows, or "" when the model had
-   *  nothing worth saying about it. Written by the same call as the board summary. */
-  insight: string;
   rows: Record<string, unknown>[];
   row_count: number;
   /** What Cube resolved each dateRange to. The only thing saying whether a refresh moved
@@ -230,7 +227,6 @@ export interface DashboardDetail {
   run: {
     id: string;
     status: string;
-    insight: string;
     started_at: number;
     finished_at: number | null;
   } | null;
@@ -245,7 +241,6 @@ export interface RefreshOutcome {
   status: string;
   run_id: string;
   error: string;
-  insight: string;
   tiles: {
     tile_id: string;
     title: string;

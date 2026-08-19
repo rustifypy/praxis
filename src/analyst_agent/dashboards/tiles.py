@@ -174,19 +174,3 @@ def outgrown(chart: dict, columns: list[Column], rows: list[dict]) -> str:
                 "repeating a colour"
             )
     return ""
-
-
-def insight_slice(columns: list[Column], rows: list[dict], budget: int = 30) -> list[dict]:
-    """The rows an insight model should read. Head-N is wrong for a time series — it is the
-    *oldest* buckets — so a series is sampled across its span with the last bucket forced in.
-    """
-    if len(rows) <= budget:
-        return rows
-    if not any(c.kind == "time" for c in columns):
-        return rows[:budget]
-    # Ceiling division: a stride that rounds down returns more rows than the budget.
-    step = -(-len(rows) // budget)
-    sampled = rows[::step]
-    if sampled[-1] is not rows[-1]:
-        sampled.append(rows[-1])
-    return sampled

@@ -9,7 +9,7 @@ from ..cube import gate
 from ..cube.catalog import Catalog
 from ..cube.client import CubeClient
 from ..cube.shape import columns_of
-from . import delta, insights
+from . import delta
 from . import tiles as tilecheck
 from .delta import Delta
 from .store import Dashboard, DashboardStore, Tile
@@ -38,7 +38,6 @@ class RunOutcome:
     tiles: list[TileOutcome] = field(default_factory=list)
     error: str = ""
     """Set when the refresh never reached the tiles — no dashboard, or no tiles."""
-    insight: str = ""
 
 
 async def _open(
@@ -115,7 +114,6 @@ async def refresh(
     loaded = await asyncio.gather(*(load(checked) for checked in checks))
 
     failures: list[dict] = []
-    briefing: list[tuple] = []
     for tile, payload, outcome, result in zip(live, payloads, outcomes, loaded, strict=True):
         if not result.ok:
             outcome.ok = False
@@ -142,21 +140,15 @@ async def refresh(
         )
         changes, since = delta.deltas(rows, earlier[0] if earlier else None, columns)
         outcome.deltas = changes
-        briefing.append((tile.id, tile.title, columns, rows, changes, since))
 
     if failures:
         await store.finish_run(run.id, "failed", errors=failures)
         return RunOutcome(ok=False, status="failed", run_id=run.id, tiles=outcomes)
 
-    # After the rows are stored, so a model call that hangs cannot cost the refresh its data.
-    # One call for the paragraph and every caption — the rows are already in that prompt.
-    note, captions = await insights.summarise(board.title, briefing)
-    if captions:
-        await store.set_tile_insights(run.id, captions)
     # Only on success: pruning a refused run would drop the rows a tile is still showing.
     await store.prune(dashboard_id)
-    await store.finish_run(run.id, "ok", insight=note)
-    return RunOutcome(ok=True, status="ok", run_id=run.id, tiles=outcomes, insight=note)
+    await store.finish_run(run.id, "ok")
+    return RunOutcome(ok=True, status="ok", run_id=run.id, tiles=outcomes)
 
 
 async def _compile_all(

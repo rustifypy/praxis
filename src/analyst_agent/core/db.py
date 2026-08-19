@@ -99,7 +99,6 @@ CREATE TABLE IF NOT EXISTS runs (
     dashboard_id TEXT NOT NULL REFERENCES dashboards(id) ON DELETE CASCADE,
     status       TEXT NOT NULL,
     errors       TEXT NOT NULL DEFAULT '[]',
-    insight      TEXT NOT NULL DEFAULT '',
     started_at   REAL NOT NULL,
     finished_at  REAL
 );
@@ -118,7 +117,6 @@ CREATE TABLE IF NOT EXISTS tile_results (
     -- moved a window.
     resolved_ranges TEXT NOT NULL DEFAULT '{}',
     duration_ms    INTEGER,
-    insight        TEXT NOT NULL DEFAULT '',
     created_at     REAL NOT NULL
 );
 

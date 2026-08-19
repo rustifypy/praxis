@@ -23,7 +23,6 @@ def result(rows, at: float = 100.0) -> TileResult:
         row_count=len(rows) if rows is not None else 0,
         resolved_ranges={},
         duration_ms=1,
-        insight="",
         created_at=at,
     )
 
