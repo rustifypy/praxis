@@ -41,46 +41,19 @@ class RunOutcome:
     insight: str = ""
 
 
-def windowed(tile: Tile, date_range: str | list[str] | None) -> dict:
-    """The tile's stored query with the board's window written into its primary time dimension.
-
-    A tile with no `time_member` has nothing to write into and runs unchanged — which is why
-    the browser is told how many tiles the window reaches rather than left to assume all of
-    them. The window overrides a fixed dateRange too: predictability beats preserving a pin
-    nothing in the UI can express, and `resolved_ranges` labels every tile with what it read.
-    """
-    if not date_range or not tile.time_member:
-        return tile.query
-    return {
-        **tile.query,
-        "timeDimensions": [
-            {**td, "dateRange": date_range} if td.get("dimension") == tile.time_member else td
-            for td in tile.query.get("timeDimensions", [])
-        ],
-    }
-
-
 async def _open(
     dashboard_id: str, store: DashboardStore
-) -> tuple[Dashboard | None, list[Tile], str | list[str] | None, RunOutcome | None]:
-    """The board, its live tiles, its window, and the outcome to return instead if it cannot
-    run. Shared so the window cannot apply to one entry point and not the other — a page-open
-    check compiling a different query than the refresh runs is a board that passes its checks
-    and then fails."""
+) -> tuple[Dashboard | None, list[Tile], RunOutcome | None]:
+    """The board, its live tiles, and the outcome to return instead if it cannot run. Shared
+    so the page-open check and the refresh cannot compile different queries than each other."""
     board = await store.get(dashboard_id)
     if board is None:
         return (
             None,
             [],
-            None,
             RunOutcome(ok=False, status="failed", error=f"no dashboard {dashboard_id!r}"),
         )
-    return (
-        board,
-        await store.tiles(dashboard_id),
-        await store.window(dashboard_id),
-        None,
-    )
+    return board, await store.tiles(dashboard_id), None
 
 
 async def validate(
@@ -91,13 +64,13 @@ async def validate(
     max_rows: int,
 ) -> RunOutcome:
     """Tiers 1-3 for every tile. Executes nothing and records no run."""
-    _, live, window, stop = await _open(dashboard_id, store)
+    _, live, stop = await _open(dashboard_id, store)
     if stop is not None:
         return stop
     if not live:
         return RunOutcome(ok=True, status="ok")
 
-    checks = await _compile_all([windowed(t, window) for t in live], catalog, client, max_rows)
+    checks = await _compile_all([t.query for t in live], catalog, client, max_rows)
     outcomes = [_outcome(tile, checked) for tile, checked in zip(live, checks, strict=True)]
     ok = all(o.ok for o in outcomes)
     return RunOutcome(ok=ok, status="ok" if ok else "refused", tiles=outcomes)
@@ -110,15 +83,14 @@ async def refresh(
     client: CubeClient,
     max_rows: int,
 ) -> RunOutcome:
-    """Re-execute every tile's stored query under the board's window and append the results as
-    one run."""
-    board, live, window, stop = await _open(dashboard_id, store)
+    """Re-execute every tile's stored query and append the results as one run."""
+    board, live, stop = await _open(dashboard_id, store)
     if stop is not None:
         return stop
     if not live:
         return RunOutcome(ok=False, status="refused", error="this dashboard has no tiles")
 
-    payloads = [windowed(tile, window) for tile in live]
+    payloads = [tile.query for tile in live]
     run = await store.start_run(dashboard_id)
     checks = await _compile_all(payloads, catalog, client, max_rows)
     outcomes = [_outcome(tile, checked) for tile, checked in zip(live, checks, strict=True)]

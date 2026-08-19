@@ -92,16 +92,6 @@ CREATE TABLE IF NOT EXISTS layouts (
     PRIMARY KEY (dashboard_id, version)
 );
 
--- The board's window, written into the primary timeDimension of every tile that has one.
--- Its own table because `dashboards` cannot gain a column, and not inside `layouts.spec`
--- because that is placement only — a window changes the numbers, not where they sit.
-CREATE TABLE IF NOT EXISTS windows (
-    dashboard_id TEXT PRIMARY KEY REFERENCES dashboards(id) ON DELETE CASCADE,
-    -- JSON, because Cube takes a relative string and an absolute [from, to] pair alike.
-    date_range   TEXT NOT NULL,
-    updated_at   REAL NOT NULL
-);
-
 -- A refresh is an object because it is atomic: it either happened or it did not, and
 -- "as of" is one timestamp for the board rather than one per tile.
 CREATE TABLE IF NOT EXISTS runs (
