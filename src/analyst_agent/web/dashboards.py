@@ -5,7 +5,7 @@ since the refresh is atomic and has no partial state to stream.
 from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from ..core.config import settings
 from ..cube.client import CubeClient, CubeError
@@ -25,15 +25,6 @@ class NewDashboard(BaseModel):
 
 class Rename(BaseModel):
     title: str
-
-
-class Window(BaseModel):
-    # The same shape as `TimeDimension.dateRange`: a relative string, an absolute [from, to],
-    # or None for no override. The value itself is validated where every other query value is
-    # — by the gate, when the refresh compiles.
-    model_config = ConfigDict(extra="forbid")
-
-    date_range: list[str] | str | None = None
 
 
 async def init_state(app) -> None:
@@ -124,7 +115,6 @@ async def read_dashboard(dashboard_id: str, request: Request) -> dict:
                 "title": t.title,
                 "query": t.query,
                 "chart": t.chart,
-                "time_member": t.time_member,
             }
             for t in tiles
         ],
@@ -132,11 +122,6 @@ async def read_dashboard(dashboard_id: str, request: Request) -> dict:
         # Shipped rather than mirrored in the browser: how wide a board may be is a layout
         # rule, and a second copy of it is one the column picker can drift from.
         "max_columns": layouts.MAX_COLUMNS,
-        "window": await store.window(dashboard_id),
-        # How many tiles the window actually reaches. A tile with no time member runs
-        # unchanged under it, and a board that did not say so would be quietly wrong about
-        # what its own control does.
-        "windowed_tiles": sum(1 for t in tiles if t.time_member),
         "layout_version": current["version"] if current else None,
         "history": await store.layout_history(dashboard_id),
         "run": (
@@ -219,15 +204,6 @@ async def refresh_dashboard(dashboard_id: str, request: Request) -> dict:
             for t in outcome.tiles
         ],
     }
-
-
-@router.post("/{dashboard_id}/window")
-async def set_window(dashboard_id: str, body: Window, request: Request) -> dict:
-    """Set the board's window. Applied on the next refresh — which the page runs straight
-    after, so the picker never describes a window the numbers on screen were not read under.
-    """
-    await request.app.state.dashboards.set_window(dashboard_id, body.date_range)
-    return {"window": body.date_range}
 
 
 @router.post("/{dashboard_id}/layout")

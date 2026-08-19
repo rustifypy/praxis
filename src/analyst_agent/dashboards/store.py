@@ -133,30 +133,6 @@ class DashboardStore:
             )
             await db.commit()
 
-    # --- the board's window -------------------------------------------------------
-
-    async def window(self, dashboard_id: str) -> str | list[str] | None:
-        async with self._db() as db:
-            rows = await db.execute_fetchall(
-                "SELECT date_range FROM windows WHERE dashboard_id = ?", (dashboard_id,)
-            )
-        return json.loads(rows[0]["date_range"]) if rows else None
-
-    async def set_window(self, dashboard_id: str, date_range: str | list[str] | None) -> None:
-        """`None` removes the override, which is not the same as an empty one — every tile
-        goes back to the range its own stored query carries."""
-        async with self._db() as db:
-            if date_range is None:
-                await db.execute("DELETE FROM windows WHERE dashboard_id = ?", (dashboard_id,))
-            else:
-                await db.execute(
-                    "INSERT INTO windows (dashboard_id, date_range, updated_at) "
-                    "VALUES (?, ?, ?) ON CONFLICT(dashboard_id) DO UPDATE SET "
-                    "date_range = excluded.date_range, updated_at = excluded.updated_at",
-                    (dashboard_id, json.dumps(date_range), time.time()),
-                )
-            await db.commit()
-
     # --- tiles --------------------------------------------------------------------
 
     async def add_tile(

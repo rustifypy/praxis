@@ -172,7 +172,6 @@ export interface TileRow {
   title: string;
   query: unknown;
   chart: TileChart;
-  time_member: string;
 }
 
 /** `table` has no axes — it draws whatever columns the query returned. */
@@ -226,12 +225,6 @@ export interface DashboardDetail {
   layout: { columns: number; items: LayoutItem[] };
   /** From `layout.MAX_COLUMNS`, so the column picker cannot offer a width the server refuses. */
   max_columns: number;
-  /** The board's window, written into each tile's primary time dimension at refresh. Null is
-   *  no override — every tile runs the range its own stored query carries. */
-  window: string | string[] | null;
-  /** How many tiles the window reaches. The rest have no time dimension to write into, and a
-   *  board that did not say so would be wrong about what its own control does. */
-  windowed_tiles: number;
   layout_version: number | null;
   history: { version: number; note: string; created_at: number }[];
   run: {

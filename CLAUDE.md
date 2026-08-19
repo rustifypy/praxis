@@ -208,26 +208,21 @@ Two failure states, kept apart because only one is fixable by editing a tile: `r
 tiles that did not compile and nothing ran; `failed` is tiles that compiled and then broke
 against the warehouse. A dashboard renders its last `ok` run, so neither blanks the tiles.
 
-`tiles.CHART_TYPES` is `line|bar|kpi|table` — exactly what `ResultChart` draws. `area`,
-`stacked_bar` and `hbar` are absent on purpose: a validator that accepts a chart the
-renderer cannot draw makes the tile misrepresent itself. **Renderer branch first, tuple
-second.** (`tools.add_tile`'s docstring still advertises the wider list to the model; the
-validator refuses it, so the failure is a rejection rather than a wrong picture.)
+`tiles.CHART_TYPES` is exactly what `ResultChart` draws, and the two move together:
+**renderer branch first, tuple second.** A validator that accepts a chart the renderer
+cannot draw makes the tile misrepresent itself, so widening the tuple ahead of the branch
+is the one order that is wrong.
 
 `core.db.SCHEMA` will **never gain a column** — `CREATE TABLE IF NOT EXISTS` does not diff, so
 adding a table to a live `analyst.db` works and adding a column silently does not. There is
 no migration mechanism and deliberately so: this runs on one machine for one person, and
-recreating the database is a cheaper answer than a chain nobody else will ever run. Every
-column nothing reads yet (`tiles.time_member`, `tiles.deleted_at`, `tile_results.insight`)
-is there because the feature needing it would otherwise require exactly that. Retention is
+recreating the database is a cheaper answer than a chain nobody else will ever run.
+`tiles.time_member` is written on every tile and read by nothing — it is there because the
+feature needing it would otherwise require exactly that column. Retention is
 the mirror image: a DELETE rather than a column, so the depth stays changeable — it is the
 *index* that could not be added later.
 
-Not built, each gated so nothing can author one prematurely: the three missing chart types
-above; **dragging tiles** (`POST /{id}/layout` exists and validates, no UI calls it, so
-rearranging is chat-only); per-tile insights (`tile_results.insight`, rejected as twelve
-model calls for a weaker result than the one cross-tile paragraph); promoting a tile to a
-`certified_queries/` file.
+Not built: promoting a tile to a `certified_queries/` file.
 
 **Code execution** (`sandbox/`, `agent/tools/code.py`) — a Python sandbox on the *query* agent,
 not an agent of its own. `sandbox/__init__.py` holds the three invariants; read it before changing
@@ -461,7 +456,7 @@ rather than from `steps`; the browser iterates the rail it ships on `SourceRow.s
 
 **One file, one schema.** `core.db.SCHEMA` is every table this process creates, and
 `~/.analyst/analyst.db` holds all of them: `chats` and `events` (the transcript),
-`results`, `dashboards`/`tiles`/`layouts`/`windows`/`runs`/`tile_results`, `source`, and
+`results`, `dashboards`/`tiles`/`layouts`/`runs`/`tile_results`, `source`, and
 LangGraph's `checkpoints`/`writes` — those last two created by `AsyncSqliteSaver` rather
 than here. `core.db.connect` is how it is opened, so `PRAGMA foreign_keys` cannot drift between
 the three stores that open it.

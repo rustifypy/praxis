@@ -18,22 +18,6 @@ import { Tile } from "./Tile";
  * Rearranging goes through `POST /layout`, the same validator the agent's `set_layout` uses,
  * and each drop is its own version — `layouts` is append-only, so the history is the undo.
  */
-/**
- * Windows offered by the picker. Relative strings on purpose — Cube resolves them at
- * execution time, so a board set to "last 30 days" follows the calendar and an absolute pair
- * never moves. "" is no override at all.
- */
-const WINDOWS: [string, string][] = [
-  ["", "Window: as saved"],
-  ["last 7 days", "Last 7 days"],
-  ["last 30 days", "Last 30 days"],
-  ["last 90 days", "Last 90 days"],
-  ["this month", "This month"],
-  ["last month", "Last month"],
-  ["this quarter", "This quarter"],
-  ["this year", "This year"],
-  ["last year", "Last year"],
-];
 
 export function Dashboard({
   id,
@@ -109,9 +93,6 @@ export function Dashboard({
   const brokenBy = new Map(detail.checks.broken.map((b) => [b.tile_id, b.errors]));
   const byId = new Map(detail.tiles.map((t) => [t.id, t]));
   const name = (tile: string) => byId.get(tile)?.title ?? "a tile";
-  const custom = Array.isArray(detail.window)
-    ? `${detail.window[0]} → ${detail.window[1]}`
-    : "";
 
   async function save(next: LayoutItem[], width: number, note: string, remember = true) {
     const before = { columns, items };
@@ -128,20 +109,6 @@ export function Dashboard({
     }
   }
 
-  // Saved and then refreshed, in that order. A refused refresh leaves the new window stored
-  // and the old numbers on screen — the red banner is what says so, the same as any other
-  // refusal, and each tile's chip still reads the window it was actually loaded under.
-  async function pickWindow(value: string) {
-    if (value === "custom") return;
-    setRefused("");
-    try {
-      await api.setWindow(id, value || null);
-    } catch (err) {
-      setRefused(`Window not saved — ${err}`);
-      return;
-    }
-    await refresh();
-  }
 
   /** Dragging down lands after the target, dragging up lands before it — the asymmetry falls
    *  out of splicing at an index taken before the removal, and is what a list reorder does. */
@@ -189,14 +156,6 @@ export function Dashboard({
           <span className="dash-meta">
             {detail.tiles.length} tiles ·{" "}
             {detail.run ? `refreshed ${ago(detail.run.started_at)}` : "never refreshed"}
-            {detail.window && (
-              <>
-                {" · "}
-                <span className={detail.windowed_tiles === 0 ? "dash-window-none" : undefined}>
-                  {detail.windowed_tiles} of {detail.tiles.length} follow this window
-                </span>
-              </>
-            )}
           </span>
         </div>
         <div className="dash-actions">
@@ -218,25 +177,6 @@ export function Dashboard({
               {Array.from({ length: detail.max_columns }, (_, i) => i + 1).map((n) => (
                 <option key={n} value={n}>
                   {n} column{n === 1 ? "" : "s"}
-                </option>
-              ))}
-            </select>
-          )}
-          {/* Disabled under the same conditions as Refresh, because picking one runs it. */}
-          {detail.tiles.length > 0 && (
-            <select
-              className="dash-select"
-              value={custom ? "custom" : (typeof detail.window === "string" ? detail.window : "")}
-              aria-label="Window"
-              disabled={busy}
-              onChange={(e) => void pickWindow(e.target.value)}
-            >
-              {/* An absolute window can only arrive through the API today. Offered as an inert
-                  row rather than left out, so the picker cannot show "as saved" over one. */}
-              {custom && <option value="custom">{custom}</option>}
-              {WINDOWS.map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
                 </option>
               ))}
             </select>

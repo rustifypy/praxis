@@ -4107,8 +4107,6 @@ button.danger.solid {
   color: var(--accent);
 }
 
-/* Both header pickers — columns and window. One rule rather than two near-identical ones,
-   which is how they start to drift. */
 .dash-select {
   min-height: var(--control);
   padding: 0 6px;
@@ -4124,12 +4122,6 @@ button.danger.solid {
 .dash-select:disabled {
   opacity: 0.5;
   cursor: default;
-}
-
-/* A window reaching no tile at all is the one case worth colouring: the control is on and
-   doing nothing. */
-.dash-window-none {
-  color: var(--warn);
 }
 
 /* Outranks `.dash-actions > button`. Pressed is a filled chip and not only a hue, so the

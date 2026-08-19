@@ -8,7 +8,7 @@ them (`outgrown`, `deltas`, `layout.validate`) were covered and their only calle
 import pytest
 
 from analyst_agent.dashboards import refresh as runner
-from analyst_agent.dashboards.store import DashboardStore, Tile
+from analyst_agent.dashboards.store import DashboardStore
 
 QUERY = {"measures": ["orders.net_revenue"], "dimensions": ["orders.status"]}
 BAR = {"type": "bar", "x": "orders.status", "y": ["orders.net_revenue"]}
@@ -129,94 +129,6 @@ async def test_every_tile_gets_its_caption_from_the_run_that_produced_its_rows(b
 
     stored = {r.tile_id: r.insight for r in await boards.results_for_run(outcome.run_id)}
     assert sorted(stored.values()) == ["tile 0 caption", "tile 1 caption"]
-
-
-# --- the board's window ------------------------------------------------------
-
-
-def _timed(**kwargs) -> Tile:
-    return Tile(
-        id="t",
-        dashboard_id="d",
-        title="t",
-        chart=BAR,
-        created_at=0.0,
-        updated_at=0.0,
-        **kwargs,
-    )
-
-
-def test_the_window_is_written_into_the_primary_time_member_and_nothing_else():
-    """A tile can filter on more than one date. Only the member `time_member` names is the one
-    a board-level window means."""
-    tile = _timed(
-        query={
-            "measures": ["orders.net_revenue"],
-            "timeDimensions": [
-                {"dimension": "orders.created_at", "granularity": "month"},
-                {"dimension": "orders.shipped_at", "dateRange": ["2020-01-01", "2020-02-01"]},
-            ],
-        },
-        time_member="orders.created_at",
-    )
-
-    out = runner.windowed(tile, "last 30 days")
-
-    assert out["timeDimensions"][0]["dateRange"] == "last 30 days"
-    assert out["timeDimensions"][1]["dateRange"] == ["2020-01-01", "2020-02-01"]
-    # The stored query is what a tile is; a window is only ever applied to the copy that runs.
-    assert "dateRange" not in tile.query["timeDimensions"][0]
-
-
-def test_a_tile_with_no_time_member_runs_unchanged_under_a_window():
-    """Which is why the browser is told how many tiles a window reaches, rather than assuming
-    it reaches all of them."""
-    tile = _timed(query={"measures": ["orders.net_revenue"]}, time_member="")
-    assert runner.windowed(tile, "last 30 days") is tile.query
-
-
-async def test_the_board_window_reaches_the_query_that_executes(boards, cube):
-    cube.rows = ROWS
-    board = (await boards.create("Revenue")).id
-    await boards.add_tile(
-        board,
-        "timed",
-        {
-            "measures": ["orders.net_revenue"],
-            "timeDimensions": [{"dimension": "orders.created_at"}],
-        },
-        BAR,
-        time_member="orders.created_at",
-    )
-    await boards.set_window(board, "last 30 days")
-
-    await runner.refresh(board, boards, cube.served, cube, 5_000)
-
-    # Compiled as well as loaded: a window the page-open check does not see is a board that
-    # passes its checks and then fails on refresh.
-    assert cube.compiled[0]["timeDimensions"][0]["dateRange"] == "last 30 days"
-    assert cube.loaded[0]["timeDimensions"][0]["dateRange"] == "last 30 days"
-
-
-async def test_clearing_the_window_puts_every_tile_back_on_its_own_range(boards, cube):
-    cube.rows = ROWS
-    board = (await boards.create("Revenue")).id
-    await boards.add_tile(
-        board,
-        "timed",
-        {
-            "measures": ["orders.net_revenue"],
-            "timeDimensions": [{"dimension": "orders.created_at"}],
-        },
-        BAR,
-        time_member="orders.created_at",
-    )
-    await boards.set_window(board, "last 30 days")
-    await boards.set_window(board, None)
-
-    await runner.refresh(board, boards, cube.served, cube, 5_000)
-
-    assert "dateRange" not in cube.loaded[0]["timeDimensions"][0]
 
 
 async def test_the_second_refresh_reports_change_against_the_first(boards, cube):
