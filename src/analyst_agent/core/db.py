@@ -125,6 +125,22 @@ CREATE INDEX IF NOT EXISTS runs_by_dashboard  ON runs(dashboard_id, started_at D
 CREATE INDEX IF NOT EXISTS results_by_run     ON tile_results(run_id);
 CREATE INDEX IF NOT EXISTS results_by_tile    ON tile_results(tile_id, created_at DESC);
 
+-- --- agent access -----------------------------------------------------------------
+-- The MCP endpoint's own state, in one row for the same reason `source` is: there is one
+-- portal. A table rather than columns on `source`, because CREATE TABLE IF NOT EXISTS adds a
+-- table to a live database and silently does not add a column.
+--
+-- The token is stored rather than minted per launch so that a config pasted into an agent
+-- keeps working across restarts — which is the whole difference between this being usable and
+-- being re-pasted every time the portal starts.
+CREATE TABLE IF NOT EXISTS mcp (
+    id         INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled    INTEGER NOT NULL DEFAULT 1,
+    token      TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+
 -- --- the data source --------------------------------------------------------------
 -- One Cube deployment, so one row: `id = 1` is a CHECK rather than a convention, and
 -- credentials are in it because `docker run -e` is built from it and nothing else on disk

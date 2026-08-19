@@ -3,6 +3,7 @@ import type {
   Chat,
   DashboardDetail,
   DashboardRow,
+  McpAccess,
   RefreshOutcome,
   ResultColumn,
 } from "./types";
@@ -196,3 +197,16 @@ export const saveLayout = (id: string, spec: unknown, note: string) =>
     method: "POST",
     body: JSON.stringify({ spec, note }),
   });
+
+export const mcpAccess = () => json<McpAccess>("/api/mcp");
+
+export const setMcpEnabled = (enabled: boolean) =>
+  json<{ enabled: boolean }>("/api/mcp/enabled", {
+    method: "POST",
+    body: JSON.stringify({ enabled }),
+  });
+
+/** Returns the rebuilt configs alongside the token, so the panel never shows a new token
+ *  beside a block still quoting the old one. */
+export const rotateMcpToken = () =>
+  json<Pick<McpAccess, "token" | "url" | "desktop" | "cli">>("/api/mcp/rotate", { method: "POST" });

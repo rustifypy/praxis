@@ -21,6 +21,7 @@ dependencies = [
     # What FastAPI parses an upload with. Absent, `UploadFile` fails at request time rather
     # than at import, so the upload route would look like a working route until first use.
     "python-multipart>=0.0.20",
+    "mcp>=2.0.0",
 ]
 
 [project.scripts]

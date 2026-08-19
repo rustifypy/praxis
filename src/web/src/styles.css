@@ -90,6 +90,7 @@ textarea {
 .stage-cta button,
 .modal footer button,
 .drawer footer button,
+.mcp-actions button,
 .job-head button {
   display: inline-flex;
   align-items: center;
@@ -2650,6 +2651,14 @@ textarea {
   font-size: 12.5px;
 }
 
+/* The word to type. Italic and in ink, because it is the one thing on the dialog that has to
+   be transcribed exactly, and at 12.5px it inherited the label's muted grey. */
+.modal label code {
+  font-family: var(--mono);
+  font-style: italic;
+  color: var(--ink);
+}
+
 .modal input {
   width: 100%;
   margin-top: 5px;
@@ -2766,7 +2775,8 @@ textarea {
 .picker-bulk button,
 .stage-cta button,
 .modal footer button,
-.drawer footer button {
+.drawer footer button,
+.mcp-actions button {
   padding: 5px 11px;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -2782,7 +2792,8 @@ textarea {
 
 .detail-primary > button:hover:not(:disabled),
 .picker-bulk button:hover:not(:disabled),
-.stage-cta button:hover:not(:disabled) {
+.stage-cta button:hover:not(:disabled),
+.mcp-actions button:hover:not(:disabled) {
   border-color: var(--muted);
 }
 
@@ -4836,4 +4847,134 @@ button.danger.solid {
 .editor-assist .edchat {
   border-top: 0;
   padding-top: 4px;
+}
+
+/* ---------- agent access (MCP) ---------- */
+/* The page reuses `.detail` and `.detail-panel`, so padding, width and section rules are the
+   data page's. Only the rows below are new, and the buttons are styled by adding
+   `.mcp-actions button` to the shared control lists rather than by a private look — which is
+   also why Copy needs no exception here: it is a button in that row like the others. */
+
+/* `.detail-panel` draws a divider above itself to separate it from the panel before. The
+   first one on a page has nothing to separate from. Scoped to a direct first child, so the
+   data page — whose first child is its header — is untouched. */
+.detail > .detail-panel:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.mcp-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* A switch rather than a checkbox: the browser default is the one control on the page the
+   platform draws, so it read as foreign next to everything else. The on state borrows the
+   stage rail's language — accent border over `--accent-soft` — so "this is on" looks the same
+   here as it does there. */
+.mcp-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 12px 5px 7px;
+  min-height: var(--control);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.2;
+  cursor: pointer;
+  transition:
+    border-color 0.15s var(--ease),
+    background 0.15s var(--ease),
+    color 0.15s var(--ease);
+}
+
+.mcp-toggle:hover:not(:disabled) {
+  border-color: var(--muted);
+  color: var(--ink);
+}
+
+.mcp-toggle.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.mcp-toggle:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.mcp-track {
+  position: relative;
+  width: 30px;
+  height: 17px;
+  border-radius: 999px;
+  background: var(--line);
+  transition: background 0.15s var(--ease);
+}
+
+.mcp-toggle.on .mcp-track {
+  background: var(--accent);
+}
+
+.mcp-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--bg);
+  transition: transform 0.15s var(--ease);
+}
+
+.mcp-toggle.on .mcp-knob {
+  transform: translateX(13px);
+}
+
+.mcp-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.mcp-field {
+  margin-top: 16px;
+}
+
+.mcp-field-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* Same treatment as a grounding fence: the config is wide, and it must scroll in its own box
+   rather than widen the page. */
+.mcp-field pre,
+.mcp-field code {
+  display: block;
+  background: var(--code-bg);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  padding: 10px 12px;
+  margin: 0;
+  overflow-x: auto;
+}
+
+/* A token is one unbroken word, so it wraps rather than scrolls — there is nothing to scan. */
+.mcp-field code {
+  overflow-wrap: anywhere;
 }

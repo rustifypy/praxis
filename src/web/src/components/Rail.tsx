@@ -8,7 +8,9 @@
  * entirely to whichever one you are in.
  *
  * Dashboards sit between them: made in chat, read against the model, so the rail is in the
- * order the work happens.
+ * order the work happens. Agents is last and separate from data, because it is not about what
+ * this install is connected to — it is about handing these tools to something that is not
+ * this app.
  */
 
 const CHAT = (
@@ -34,15 +36,28 @@ const BOARD = (
   </svg>
 );
 
+/** The modes, defined beside the switch that owns them so App reads one list rather than
+ *  repeating the union at every callback. */
+export type Mode = "chat" | "dashboards" | "data" | "agents";
+
+/** A plug: this is the socket other agents connect into. */
+const AGENTS = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 2.8v5.4M15 2.8v5.4" />
+    <path d="M6.4 8.2h11.2v3a5.6 5.6 0 0 1-5.6 5.6 5.6 5.6 0 0 1-5.6-5.6Z" />
+    <path d="M12 16.8v4.4" />
+  </svg>
+);
+
 export function Rail({
   view,
   jobRunning,
   onSelect,
 }: {
-  view: "chat" | "dashboards" | "data";
+  view: Mode;
   /** Dotted onto the data icon, so a three-minute describe is visible from a chat. */
   jobRunning: boolean;
-  onSelect: (view: "chat" | "dashboards" | "data") => void;
+  onSelect: (view: Mode) => void;
 }) {
   return (
     <nav className="rail">
@@ -82,6 +97,17 @@ export function Rail({
         {DATA}
         {jobRunning && <span className="rail-badge" aria-label="a job is running" />}
         <span className="rail-label">Data</span>
+      </button>
+
+      <button
+        className={`rail-tab ${view === "agents" ? "active" : ""}`}
+        onClick={() => onSelect("agents")}
+        title="Agents"
+        aria-label="Agents"
+        aria-current={view === "agents"}
+      >
+        {AGENTS}
+        <span className="rail-label">Agents</span>
       </button>
     </nav>
   );
