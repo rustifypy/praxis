@@ -1,33 +1,38 @@
+import asyncio
+
 import httpx
 import pytest
 import respx
 
 from analyst_agent.cube import gate
-from analyst_agent.cube.client import CubeClient, CubeError, mint_token
+from analyst_agent.cube.client import REF_HEADER, CubeClient, CubeError
 
-ROOT = "http://cube.test/cubejs-api"
-SECRET = "s" * 32
+ROOT = "http://store.test/cube/cubejs-api"
+"""Cube is reached through the store, so this is the store's address plus Cube's own path."""
+TOKEN = "w" * 40
 META = {"cubes": [{"name": "orders", "type": "cube", "measures": [{"name": "orders.count"}]}]}
 
 
-def client() -> CubeClient:
-    return CubeClient(ROOT, SECRET)
+def client(ref: str = "main") -> CubeClient:
+    return CubeClient(ROOT, TOKEN, ref=ref)
 
 
 # --- the session ------------------------------------------------------------
 
 
 @respx.mock
-async def test_every_request_carries_a_token():
+async def test_every_request_carries_the_token_and_the_ref():
     """The whole reason this module exists: six call sites reached Cube with no Authorization
-    header at all, and only dev mode made that work."""
+    header at all. The ref rides alongside it — the store signs that into the Cube token, so a
+    request without it would silently be answered from `main`."""
     meta = respx.get(f"{ROOT}/v1/meta").mock(return_value=httpx.Response(200, json=META))
     load = respx.post(f"{ROOT}/v1/load").mock(return_value=httpx.Response(200, json={"data": []}))
-    async with client() as cube:
+    async with client(ref="edit-sales") as cube:
         await cube.catalog()
         await cube.load(gate.parse({"measures": ["orders.count"]})[0])
     for route in (meta, load):
-        assert route.calls[0].request.headers["authorization"].startswith("ey")
+        assert route.calls[0].request.headers["authorization"] == f"Bearer {TOKEN}"
+        assert route.calls[0].request.headers[REF_HEADER] == "edit-sales"
 
 
 @respx.mock
@@ -39,12 +44,16 @@ async def test_no_secret_is_the_only_unauthenticated_path():
     assert "authorization" not in route.calls[0].request.headers
 
 
-def test_a_short_secret_is_refused_at_construction():
-    """Rather than per request, where it raised out of whichever query happened to be first."""
-    with pytest.raises(ValueError, match="at least 32"):
-        CubeClient(ROOT, "too-short")
-    with pytest.raises(ValueError, match="at least 32"):
-        mint_token({"user_id": "local"}, "too-short")
+def test_no_token_is_a_first_run_rather_than_a_mistake():
+    """Nothing is minted here any more — the store signs Cube's token, so a short secret is its
+    error to raise and this side only carries a bearer token."""
+
+    async def unauthenticated():
+        async with CubeClient(ROOT, None) as cube:
+            assert "authorization" not in cube._headers()
+            assert cube._headers()[REF_HEADER] == "main"
+
+    asyncio.run(unauthenticated())
 
 
 @respx.mock

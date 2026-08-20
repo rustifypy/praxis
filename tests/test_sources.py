@@ -1,8 +1,9 @@
 import httpx
 import respx
 
-from analyst_agent.sources import health, registry
-from analyst_agent.sources.drivers import get
+from analyst_agent.core.deployment import Deployment
+from analyst_agent.datamodel import health, registry
+from analyst_agent.datamodel.drivers import get
 
 
 def test_scaffold_creates_the_dirs_cube_mounts(tmp_path):
@@ -11,41 +12,43 @@ def test_scaffold_creates_the_dirs_cube_mounts(tmp_path):
 
 
 @respx.mock
-async def test_health_ok():
-    respx.get("http://localhost:4000/readyz").mock(
+async def test_health_ok(deployment):
+    respx.get("http://localhost:8500/cube/readyz").mock(
         return_value=httpx.Response(200, json={"health": "HEALTH"})
     )
-    result = await health.check()
+    result = await health.check(deployment)
     assert result.ok and result.status == "HEALTH"
 
 
 @respx.mock
-async def test_health_reports_down_with_detail():
-    respx.get("http://localhost:4000/readyz").mock(
+async def test_health_reports_down_with_detail(deployment):
+    respx.get("http://localhost:8500/cube/readyz").mock(
         return_value=httpx.Response(500, json={"health": "DOWN"})
     )
-    result = await health.check()
+    result = await health.check(deployment)
     assert not result.ok
     assert result.status == "DOWN"
     assert "connection is down" in result.detail
 
 
 @respx.mock
-async def test_health_survives_a_connection_reset_while_booting():
+async def test_health_survives_a_connection_reset_while_booting(deployment):
     """A container that accepts then resets raises ReadError, not ConnectError."""
-    respx.get("http://localhost:4000/readyz").mock(side_effect=httpx.ReadError("reset"))
-    result = await health.check()
+    respx.get("http://localhost:8500/cube/readyz").mock(side_effect=httpx.ReadError("reset"))
+    result = await health.check(deployment)
     assert not result.ok
     assert result.status == "unreachable"
     assert "ReadError" in result.detail
 
 
 @respx.mock
-async def test_wait_until_ready_gives_up_after_repeated_down():
-    respx.get("http://localhost:4000/readyz").mock(
+async def test_wait_until_ready_gives_up_after_repeated_down(deployment):
+    respx.get("http://localhost:8500/cube/readyz").mock(
         return_value=httpx.Response(500, json={"health": "DOWN"})
     )
-    result, attempts = await health.wait_until_ready(attempts=8, every=0, down_tolerance=1)
+    result, attempts = await health.wait_until_ready(
+        deployment, attempts=8, every=0, down_tolerance=1
+    )
     assert not result.ok and attempts == 2
 
 
@@ -88,3 +91,10 @@ def test_every_driver_exposes_a_cube_db_type():
         spec = get(key)
         assert spec.key == key
         assert spec.fields
+
+
+async def test_an_unconfigured_deployment_is_its_own_health_state():
+    """Nothing to probe is not the same as something that will not answer, and a URL is only
+    set once someone has been through onboarding."""
+    result = await health.check(Deployment())
+    assert not result.ok and result.status == "unconfigured"

@@ -141,15 +141,28 @@ CREATE TABLE IF NOT EXISTS mcp (
     updated_at REAL NOT NULL
 );
 
--- --- the data source --------------------------------------------------------------
--- One Cube deployment, so one row: `id = 1` is a CHECK rather than a convention, and
--- credentials are in it because `docker run -e` is built from it and nothing else on disk
--- could then drift from it. `--data-dir` scopes this along with the history, which is the
--- point — a scratch directory is a whole scratch install.
-CREATE TABLE IF NOT EXISTS source (
+-- --- the deployment ---------------------------------------------------------------
+-- One Cube deployment, so one row: `id = 1` is a CHECK rather than a convention.
+-- Every address is empty until the deployment is running somewhere: the row is written when
+-- the credentials are, and the addresses arrive once whoever ran the compose file has them.
+-- Credentials are here because the environment file handed over to run Cube with is rendered
+-- from this row and nothing else on disk could then drift from it. `--data-dir` scopes this
+-- along with the history, which is the point — a scratch directory is a whole scratch install.
+-- Two addresses, because there are two deployments: the semantic layer (reached at its model
+-- store, which proxies Cube) and the sandbox. There is no Cube address — Cube is not published,
+-- and where it is, is the store's business. Two store tokens: the read one is Cube's own, the
+-- write one is this portal's and is what queries. Every secret has to survive a page reload,
+-- because the environment files are re-rendered from here on demand rather than kept anywhere.
+CREATE TABLE IF NOT EXISTS deployment (
     id          INTEGER PRIMARY KEY CHECK (id = 1),
-    description TEXT NOT NULL DEFAULT '',
+    store_url   TEXT NOT NULL DEFAULT '',
+    store_token TEXT NOT NULL DEFAULT '',
+    store_read_token TEXT NOT NULL DEFAULT '',
+    api_secret  TEXT NOT NULL DEFAULT '',
+    sandbox_url TEXT NOT NULL DEFAULT '',
+    sandbox_token TEXT NOT NULL DEFAULT '',
     driver      TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
     credentials TEXT NOT NULL DEFAULT '{}',
     mounts      TEXT NOT NULL DEFAULT '{}',
     steps       TEXT NOT NULL DEFAULT '{}',

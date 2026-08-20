@@ -15,6 +15,7 @@ from ..dashboards import layout as layouts
 from ..dashboards import refresh as runner
 from ..dashboards import tiles as tilecheck
 from ..dashboards.store import DashboardStore
+from . import state
 
 router = APIRouter(prefix="/api/dashboards")
 
@@ -134,7 +135,7 @@ async def read_dashboard(dashboard_id: str, request: Request) -> dict:
             }
         ),
         "results": results,
-        "checks": await _checks(dashboard_id, store, request.app.state.cube),
+        "checks": await _checks(dashboard_id, store, await state.cube(request.app)),
     }
 
 
@@ -175,7 +176,7 @@ async def delete_dashboard(dashboard_id: str, request: Request) -> dict:
 async def refresh_dashboard(dashboard_id: str, request: Request) -> dict:
     """Execute every tile's stored query. Atomic: all of them compile, or none of them run."""
     store = request.app.state.dashboards
-    cube = request.app.state.cube
+    cube = await state.cube(request.app)
     try:
         catalog = await cube.catalog()
         outcome = await runner.refresh(dashboard_id, store, catalog, cube, settings.max_rows)

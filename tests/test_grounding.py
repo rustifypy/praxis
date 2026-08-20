@@ -1,13 +1,18 @@
-"""Grounding lives beside the cubes it names, so most of what can go wrong is path
-resolution. None of it needs a container or a model: a directory and some markdown.
+"""Grounding comes out of the model store beside the cubes it names, so what can go wrong is
+path filtering and a ref that is not there. No store: respx answers.
 """
 
+import httpx
 import pytest
+import respx
 
-from analyst_agent.sources import grounding as loader
-from analyst_agent.sources import registry
-from analyst_agent.sources.grounding import Grounding
-from analyst_agent.sources.registry import ARTEFACT_DIRS
+from analyst_agent.core.deployment import Deployment
+from analyst_agent.datamodel import grounding as loader
+from analyst_agent.datamodel.grounding import Grounding
+from analyst_agent.datamodel.registry import ARTEFACT_DIRS, GROUNDING_ROOT
+from analyst_agent.modelstore import StoreError
+
+URL = "http://store:8500"
 
 RULE = """---
 name: metric-definitions
@@ -46,17 +51,30 @@ description: Net revenue by month.
 ```
 """
 
+FILES = {
+    "cubes/orders.yml": "cubes: []\n",
+    "views/sales.yml": "views: []\n",
+    "grounding/rules/metric-definitions.md": RULE,
+    "grounding/rules/period-comparison.md": ASKED_FOR,
+    "grounding/skills/channel-mix.md": SKILL,
+    "grounding/certified_queries/monthly.md": CERTIFIED,
+}
+
 
 @pytest.fixture
-def grounded(tmp_path):
-    """A populated grounding directory, one artefact of each kind."""
-    for artefact in ARTEFACT_DIRS:
-        (tmp_path / artefact).mkdir()
-    (tmp_path / "rules" / "metric-definitions.md").write_text(RULE)
-    (tmp_path / "rules" / "period-comparison.md").write_text(ASKED_FOR)
-    (tmp_path / "skills" / "channel-mix.md").write_text(SKILL)
-    (tmp_path / "certified_queries" / "monthly.md").write_text(CERTIFIED)
-    return Grounding(tmp_path)
+def grounded() -> Grounding:
+    """A whole model as the store hands it over, one artefact of each kind."""
+    return Grounding(FILES)
+
+
+@pytest.fixture
+def configured(monkeypatch):
+    """A deployment with a store, so `open_store` builds a client rather than refusing."""
+
+    async def deployment():
+        return Deployment(store_url=URL, store_token="writetok")
+
+    monkeypatch.setattr("analyst_agent.modelstore.client.current", deployment)
 
 
 # --- loading ----------------------------------------------------------------
@@ -68,6 +86,17 @@ def test_frontmatter_splits_off_the_body(grounded):
     assert rule.description == "Canonical definitions."
     assert rule.body.startswith('"Revenue" means')
     assert "---" not in rule.body
+
+
+def test_the_file_is_named_relative_to_the_grounding_directory(grounded):
+    """What the panel offers to go and edit, so it is a path under `grounding/` rather than
+    the store path or a bare name."""
+    assert {a.file for a in grounded.skills} == {"skills/channel-mix.md"}
+
+
+def test_the_model_around_it_is_not_grounding(grounded):
+    """The store hands over the whole model, cubes and views included."""
+    assert len(grounded.rules + grounded.skills + grounded.certified) == 4
 
 
 def test_only_always_rules_reach_the_system_prompt(grounded):
@@ -84,60 +113,86 @@ def test_certified_queries_match_on_the_request_they_were_written_for(grounded):
     assert not grounded.certified_for("which employee has the longest tenure")
 
 
-def test_yaml_in_the_grounding_directory_is_never_loaded(tmp_path):
-    """The directory sits inside Cube's bind-mounted model tree, and Cube compiles any
-    `*.yml` under it — one there takes the whole model to zero cubes. Nothing should
+def test_yaml_under_grounding_is_never_loaded():
+    """The store refuses to store one, and this is the other half of that: Cube compiles any
+    `*.yml` under the model, and one here takes the whole thing to zero cubes. Nothing should
     ever make writing one look useful."""
-    (tmp_path / "certified_queries").mkdir()
-    (tmp_path / "certified_queries" / "monthly.yml").write_text("name: monthly\nquery: {}\n")
-    assert Grounding(tmp_path).certified == []
+    files = {"grounding/certified_queries/monthly.yml": "name: monthly\nquery: {}\n"}
+    assert Grounding(files).certified == []
+
+
+def test_every_artefact_directory_is_read():
+    """The end-to-end pin: an artefact in each directory the scaffolding names has to come back
+    out. Reading a different set would leave rules that silently never load."""
+    files = {
+        f"{GROUNDING_ROOT}/{artefact}/x.md": f"---\nname: {artefact}\n---\n\nbody\n"
+        for artefact in ARTEFACT_DIRS
+    }
+    grounding = Grounding(files)
+    found = {a.name for a in grounding.rules + grounding.skills + grounding.certified}
+    assert found == set(ARTEFACT_DIRS)
 
 
 # --- the absence of grounding ------------------------------------------------
 
 
-def test_a_freshly_scaffolded_model_is_empty(tmp_path):
-    registry.scaffold_dirs(root=tmp_path)
-    assert Grounding(registry.grounding_dir(tmp_path)).is_empty
-
-
-def test_a_missing_directory_is_empty_rather_than_an_error(tmp_path):
-    assert Grounding(tmp_path / "never-created").is_empty
+def test_a_model_with_no_grounding_is_empty():
+    assert Grounding({}).is_empty
+    assert Grounding({"cubes/orders.yml": "cubes: []\n"}).is_empty
 
 
 def test_populated_grounding_is_not_empty(grounded):
     assert not grounded.is_empty
 
 
-# --- what scaffolding leaves behind -----------------------------------------
+# --- reading it from the store -----------------------------------------------
 
 
-def test_scaffolding_creates_every_directory_grounding_reads(tmp_path):
-    """The end-to-end pin: an artefact dropped into each scaffolded directory has to
-    come back out. Scaffolding a set the loader does not read would create folders
-    that silently swallow rules."""
-    registry.scaffold_dirs(root=tmp_path)
-    root = registry.grounding_dir(tmp_path)
-    for artefact in ARTEFACT_DIRS:
-        (root / artefact / "x.md").write_text(f"---\nname: {artefact}\n---\n\nbody\n")
-
-    grounding = Grounding(root)
-    found = {a.name for a in grounding.rules + grounding.skills + grounding.certified}
-    assert found == set(ARTEFACT_DIRS)
+@respx.mock
+async def test_load_reads_the_ref_it_is_asked_for(configured):
+    route = respx.get(f"{URL}/files", params={"ref": "edit-sales"}).mock(
+        return_value=httpx.Response(200, json={"sha": "abc", "files": FILES})
+    )
+    assert not (await loader.load("edit-sales")).is_empty
+    assert route.called
 
 
-def test_grounding_lives_inside_the_directory_cube_mounts(tmp_path):
-    """Not an accident worth losing: `publish.write` unlinks `*.yml` under this same
-    tree on every `cubes` run, and leaves the markdown alone."""
-    assert registry.grounding_dir(tmp_path).parent == registry.model_dir(tmp_path)
+@respx.mock
+async def test_load_defaults_to_main(configured):
+    """Pinned, because a question chat and a dashboard must never silently read a branch."""
+    route = respx.get(f"{URL}/files", params={"ref": "main"}).mock(
+        return_value=httpx.Response(200, json={"sha": "abc", "files": {}})
+    )
+    assert (await loader.load()).is_empty
+    assert route.called
 
 
-def test_load_reads_the_directory_beside_the_model(tmp_path, monkeypatch):
-    """The one agent input resolved from the working directory rather than over HTTP, so
-    a portal launched elsewhere grounds on nothing rather than erroring."""
-    monkeypatch.setattr(registry, "project_root", lambda: tmp_path)
-    registry.scaffold_dirs(root=tmp_path)
-    assert loader.load().is_empty
+@respx.mock
+async def test_a_ref_that_is_not_there_grounds_on_nothing(configured):
+    """A candidate that was cleaned up, or a branch this store never had — the same answer a
+    directory nobody had created used to give."""
+    respx.get(f"{URL}/files", params={"ref": "gone"}).mock(
+        return_value=httpx.Response(404, json={"detail": "no such ref: 'gone'"})
+    )
+    assert (await loader.load("gone")).is_empty
 
-    (registry.grounding_dir(tmp_path) / "rules" / "metrics.md").write_text(RULE)
-    assert not loader.load().is_empty
+
+async def test_a_deployment_with_no_store_grounds_on_nothing(monkeypatch):
+    """Every deployment until one is configured, and `load` runs on every chat turn — so
+    raising here took out chat, MCP and the sources page at once."""
+
+    async def storeless():
+        return Deployment()
+
+    monkeypatch.setattr("analyst_agent.modelstore.client.current", storeless)
+    assert (await loader.load()).is_empty
+
+
+@respx.mock
+async def test_a_store_that_does_not_answer_raises(configured):
+    """Not the same thing as empty grounding: an agent quietly dropping the rules it is bound
+    by is worse than a turn that says the store is down."""
+    respx.get(f"{URL}/files", params={"ref": "main"}).mock(side_effect=httpx.ConnectError("x"))
+    with pytest.raises(StoreError) as caught:
+        await loader.load()
+    assert not caught.value.missing

@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 
 from ..cube.catalog import Catalog
 from ..cube.client import CubeClient
-from ..sources.grounding import Grounding
+from ..datamodel.grounding import Grounding
 from ..transcript import ChatStore
 
 

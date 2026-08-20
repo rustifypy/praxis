@@ -1,34 +1,42 @@
-"""Machine-wide state: docker, the shared Cube Store, and the driver specs the connection
-form is built from. Nothing here is about what is connected."""
+"""What this install can reach, and the driver specs the connection form is built from.
 
-import asyncio
+**This process runs nothing.** Cube, the model store and the sandbox are all services someone
+else started, so there is no docker here to report on and nothing here is fatal — a machine
+without docker runs the portal perfectly well, because the deployment is not on it.
+"""
 
 from fastapi import APIRouter
 
-from ..core.config import settings
-from ..sources import docker, modelgen
-from ..sources.drivers import DRIVERS, LOCAL_HOSTS, LOCALHOST_NOTE, required_envs
+from ..core.deployment import current
+from ..datamodel import modelgen
+from ..datamodel.drivers import DRIVERS, LOCAL_HOSTS, LOCALHOST_NOTE, required_envs
+from ..datamodel.registry import semantic_dir
+from ..sandbox import SandboxError, open_sandbox
 
 router = APIRouter(prefix="/api")
 
 
 @router.get("/system")
 async def system() -> dict:
-    """Whether this feature can work at all, in one call."""
-    if not docker.installed():
-        return {"ok": False, "reason": "docker is not installed on this machine"}
-    info = await docker.daemon()
-    if not info.ok:
-        return {"ok": False, "reason": "Docker is not running — start Docker Desktop"}
+    """The two addresses and whether the optional one answers, in one call. There is no Cube
+    address: it is reached through the store, which is the only door in."""
+    deployment = await current()
+    sandbox_reason = ""
+    try:
+        async with await open_sandbox(timeout=5.0) as sandbox:
+            await sandbox._send("GET", "/health")
+    except SandboxError as exc:
+        # Its own field rather than a failed request: code execution is the only thing that
+        # needs it, and everything else on the page works without one.
+        sandbox_reason = str(exc)
 
-    container, cubestore = await asyncio.gather(docker.state(), docker.cubestore_running())
     return {
-        "ok": True,
-        "docker": info.out.strip(),
-        "cubestore": cubestore,
-        "container_state": container or "missing",
-        "cube_url": settings.cube_url,
-        "dev_mode": settings.cubejs_dev_mode,
+        "store_url": deployment.store_url if deployment else "",
+        "sandbox_url": deployment.sandbox_url if deployment else "",
+        "sandbox_reason": sandbox_reason,
+        # Where the compose file the deployment is run from lives, so the panel can say
+        # *which* directory the environment file goes in.
+        "semantic_dir": str(semantic_dir()),
     }
 
 

@@ -1,24 +1,32 @@
 """The data source: what it is, what it is serving, and editing its connection."""
 
-import shutil
+import secrets
 from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from ..core.deployment import Deployment
 from ..cube.client import CubeError, served_catalog
-from ..sources import docker, grounding, modelgen, vcs
-from ..sources.drivers import credentials_for, get, missing_fields, split_mounts
-from ..sources.editing import edits, workspace
-from ..sources.modelgen import selection
-from ..sources.registry import Source, grounding_dir, model_dir, scaffold_dirs
-from ..sources.store import merge_credentials
+from ..datamodel import definitions, grounding, modelgen, vcs
+from ..datamodel.deployenv import render as deployment_env
+from ..datamodel.deployenv import render_sandbox as sandbox_env
+from ..datamodel.drivers import (
+    credentials_for,
+    get,
+    merge_credentials,
+    missing_fields,
+    split_mounts,
+)
+from ..datamodel.modelgen import selection
+from ..datamodel.registry import model_dir, sandbox_dir, semantic_dir
+from ..modelstore import StoreError, model_files
 from .state import find, read, view
 
 router = APIRouter(prefix="/api")
 
-CONTAINER_ACTIONS = ("start", "stop", "restart")
+COMPOSE_FILE = "docker-compose.yml"
 
 
 class NewSource(BaseModel):
@@ -29,6 +37,11 @@ class NewSource(BaseModel):
 
 class EditSource(BaseModel):
     description: str | None = None
+    store_url: str | None = None
+    sandbox_url: str | None = None
+    """Where each deployment ended up. Arriving here rather than at connect time is what makes
+    "run it wherever you like" the same flow as "it moved". There is no Cube address: Cube is
+    reached through the store, and where it is, is the store's own configuration."""
     values: dict[str, str] = Field(default_factory=dict)
     """A key with an empty value keeps what is stored — the form is never sent the
     password it would otherwise overwrite with blank."""
@@ -46,15 +59,42 @@ class TableSelection(BaseModel):
 async def get_source(request: Request) -> dict | None:
     """The connection, or null before one has been made."""
     store = request.app.state.sources
-    source = await store.get()
-    if source is None:
+    deployment = await store.get()
+    if deployment is None:
         return None
-    return await view(request, source, await docker.state(), await store.steps())
+    return await view(request, deployment, await store.steps())
 
 
-@router.get("/source/logs")
-async def source_logs(request: Request, tail: int = 200) -> dict:
-    return {"container": docker.CONTAINER, "logs": await docker.logs(tail)}
+@router.get("/source/env")
+async def source_env(request: Request) -> dict:
+    """The environment file the deployment is run with, and where to put it.
+
+    **The one route that returns credential values.** Everywhere else the rule is names only —
+    but handing these over is the entire purpose of this one, since nothing can run Cube
+    without them. It is behind the same token as the rest of the portal, and the alternative is
+    retyping a password into a file.
+    """
+    deployment = await find(request)
+    return {
+        # Two deployments, so two files. The sandbox is separate on purpose — its own
+        # directory, its own compose file, no shared network or secret.
+        "env": deployment_env(deployment),
+        "directory": str(semantic_dir()),
+        "sandbox_env": sandbox_env(deployment),
+        "sandbox_directory": str(sandbox_dir()),
+        "compose": COMPOSE_FILE,
+        "deployed": deployment.deployed,
+    }
+
+
+@router.get("/source/compose")
+async def source_compose() -> dict:
+    """`semantic/docker-compose.yml`, verbatim. Served rather than generated: a generated copy
+    is a second deployment that can drift from the one that was tested."""
+    path = semantic_dir() / COMPOSE_FILE
+    if not path.is_file():
+        raise HTTPException(404, f"{path} is missing")
+    return {"name": COMPOSE_FILE, "text": path.read_text()}
 
 
 @router.get("/source/catalog")
@@ -82,10 +122,17 @@ async def source_catalog(request: Request) -> dict:
 async def source_model(request: Request) -> dict:
     """What Cube has compiled, read live from its own `/v1/meta`."""
     # Which file defines each entity, so the panel that lists what Cube serves is also the
-    # panel that edits it. Keyed by name and read from the working tree rather than assumed
-    # from `cubes/<name>.yml`: a hand-edited model may put a cube anywhere.
+    # panel that edits it. Keyed by name and read from the store rather than assumed from
+    # `cubes/<name>.yml`: a hand-edited model may put a cube anywhere.
     repo = model_dir()
-    on_disk, _ = edits.read(workspace.files())
+    try:
+        stored = await model_files()
+    except StoreError:
+        # The same reason a stopped Cube does not empty this panel: one of the two halves being
+        # unreachable must not hide the other. Without the store nothing names the file an
+        # entity came from, and Cube can still say what it is serving.
+        stored = {}
+    on_disk, _ = definitions.read(stored)
     branch = await vcs.current(repo) if vcs.is_repo(repo) else ""
     editing_state = {
         "branch": branch,
@@ -153,16 +200,24 @@ async def source_model(request: Request) -> dict:
 
 @router.get("/source/grounding")
 async def source_grounding(request: Request) -> dict:
-    """The markdown the agent is grounded with, exactly as it loads it."""
-    loaded = grounding.load()
+    """The markdown the agent is grounded with, exactly as it loads it — main, since that is
+    the ref a question chat is pinned to."""
+    deployment = await request.app.state.sources.get()
+    root = deployment.store_url if deployment else ""
+    try:
+        loaded = await grounding.load()
+    except StoreError:
+        # A store that is not answering is the one case where this panel is worth reading, so it
+        # reports empty against the address rather than 500ing the data page.
+        return {"root": root, "exists": False, "artefacts": []}
     kinds = (
         ("rule", loaded.rules),
         ("skill", loaded.skills),
         ("certified", loaded.certified),
     )
     return {
-        "root": str(grounding_dir()),
-        "exists": grounding_dir().is_dir(),
+        "root": root,
+        "exists": True,
         "artefacts": [
             {
                 "kind": kind,
@@ -223,8 +278,12 @@ def _paths(spec, values: dict[str, str]) -> tuple[dict[str, str], dict[str, str]
 
 @router.post("/source")
 async def connect(body: NewSource, request: Request) -> dict:
-    """Replace the connection. Steps and cached state go with it: they describe a database,
-    and this is a different one."""
+    """Store the credentials and mint the secrets. **Nothing is running after this.**
+
+    The addresses arrive later, from whoever ran the compose file — which is the whole reason
+    this is two steps rather than one. Steps and cached state reset with the row: they describe
+    a database, and this is a different one.
+    """
     if request.app.state.jobs.busy:
         raise HTTPException(409, "a job is running — wait for it to finish")
     try:
@@ -237,60 +296,59 @@ async def connect(body: NewSource, request: Request) -> dict:
         raise HTTPException(400, f"missing required fields: {', '.join(missing)}")
     values, mounts = _paths(spec, body.values)
 
-    source = Source(
+    # Minted here and never again: they go into the environment file, and the deployment that
+    # reads it has to keep matching the row. Rotating one means recreating the deployment.
+    deployment = Deployment(
+        api_secret=secrets.token_urlsafe(36),
+        store_token=secrets.token_urlsafe(32),
+        store_read_token=secrets.token_urlsafe(32),
         driver=body.driver,
         description=body.description,
         mounts=mounts,
         credentials=credentials_for(spec, values),
     )
-    await request.app.state.sources.save(source)
-    scaffold_dirs()
+    await request.app.state.sources.save(deployment)
     request.app.state.health = None
-    return await view(request, source, await docker.state(), steps={})
+    return await view(request, deployment, steps={})
 
 
 @router.patch("/source")
 async def edit(body: EditSource, request: Request) -> dict:
-    """Change the description or the credentials."""
+    """Change the description, the credentials, or either address.
+
+    This is also step two of connecting: `url` and `store_url` arrive here once the deployment
+    is up. Editing credentials afterwards changes only the environment file — a container's
+    environment cannot be edited, so a warehouse password change means re-running the compose
+    with the new file, and the panel says so rather than this pretending to have applied it.
+    """
     store = request.app.state.sources
-    source = await find(request)
+    deployment = await find(request)
     merged = mounts = None
     if body.values:
-        values, supplied = _paths(source.spec, body.values)
-        merged = merge_credentials(source.credentials, values)
+        values, supplied = _paths(get(deployment.driver), body.values)
+        merged = merge_credentials(deployment.credentials, values)
         # Only the paths actually retyped: blank means "unchanged" here too, and
         # replacing the map wholesale would drop a key file the form did not ask about.
-        mounts = {**source.mounts, **supplied}
-    await store.update(description=body.description, credentials=merged, mounts=mounts)
+        mounts = {**deployment.mounts, **supplied}
+    await store.update(
+        description=body.description,
+        credentials=merged,
+        mounts=mounts,
+        store_url=body.store_url,
+        sandbox_url=body.sandbox_url,
+    )
     request.app.state.health = None
     return await read(request)
 
 
 @router.delete("/source")
-async def remove(request: Request, keep_model: bool = False) -> dict:
-    """Remove the row, the container, and unless kept the model files."""
+async def remove(request: Request) -> dict:
+    """Forget the connection. Nothing is stopped, because nothing here was started — the
+    deployment and its model outlive this, which is the point of it running elsewhere."""
     await find(request)
     if request.app.state.jobs.busy:
         raise HTTPException(409, "a job is running — wait for it to finish")
 
-    await docker.remove()
-    if not keep_model:
-        shutil.rmtree(model_dir(), ignore_errors=True)
     await request.app.state.sources.remove()
     request.app.state.health = None
     return {"removed": True}
-
-
-@router.post("/source/container/{action}")
-async def control(action: str, request: Request) -> dict:
-    """start / stop / restart the container, without touching the model."""
-    if action not in CONTAINER_ACTIONS:
-        raise HTTPException(
-            404, f"no such action {action!r} — one of {', '.join(CONTAINER_ACTIONS)}"
-        )
-    await find(request)
-    result = await getattr(docker, action)()
-    request.app.state.health = None
-    if not result.ok:
-        raise HTTPException(400, result.message or f"could not {action} {docker.CONTAINER}")
-    return await read(request)

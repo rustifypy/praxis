@@ -9,8 +9,10 @@ make install                  # uv sync --all-groups
 make test                     # uv run pytest -q — no containers, no model calls
 make lint                     # ruff check + ruff format --check
 make fmt                      # ruff format + ruff check --fix
-make up / make down           # the shared Cube Store (Cube itself is its own container)
-make logs                     # follow the Cube container
+
+make store-test               # the model store's own suite (31 tests)
+make sandbox-test             # the sandbox service's own suite (19 tests)
+make store-check              # live: the store against a real Cube — two refs, fail-soft
 
 uv run pytest tests/test_gate.py::test_valid_query_passes    # a single test
 uv run pytest tests/test_model_generation.py -q              # one file
@@ -21,12 +23,19 @@ make web                      # web-build, then serve
 make serve                    # analyst — opens the portal in a browser
 ```
 
+**Nothing in the Makefile runs a service.** `services/semantic/` and `services/sandbox/` are brought up by
+whoever owns them, with `docker compose up -d`. There is deliberately no target that starts or
+builds either: a second way to manage a deployment is a second thing that can disagree with its
+compose file, and the whole point of them being services is that this repo does not run them.
+`make store-check` is the exception that isn't one — it stands up a throwaway world of its own,
+builds the store image itself if it is missing, and touches nothing of yours.
+
 **`__main__.py` is a launcher** — a printed URL and `uvicorn.run`, and **it takes no
 arguments**: host, port and data directory come from settings, so `WEB_PORT=8481 uv run
 analyst` is how you move it and `.env` is where it lives. `analyst`
 starts the portal and nothing else. **The portal is the only surface**: add capability to
 `web/sources.py` and the panel, never a second entry point beside it. Two of them means the
-connection form and the four steps' confirmations get written twice. Anything headless
+connection form and the pipeline's confirmations get written twice. Anything headless
 belongs behind the portal's token guard, not beside it.
 
 `typer` and `rich` are deliberately absent from the dependency list — nothing here needs
@@ -46,10 +55,10 @@ Packages are tiered, and **a package may import only its own tier or below**.
 | tier | package | may reach |
 |---|---|---|
 | 0 | `core/` | nothing in this project |
-| 1 | `cube/`, `transcript.py`, `sandbox/` | core |
+| 1 | `cube/`, `modelstore/`, `transcript.py`, `sandbox/` | core |
 | 2 | `dashboards/` | core, cube |
-| 3 | `sources/` | core, cube, dashboards |
-| 4 | `agent/` | core, cube, transcript, dashboards, sources |
+| 3 | `datamodel/` | core, cube, dashboards |
+| 4 | `agent/` | core, cube, transcript, dashboards, datamodel |
 | 5 | `web/` | anything |
 
 `core/` is settings, the database file, the event format, the chat model, the job runner and
@@ -60,23 +69,32 @@ membership test is exactly "imports nothing from this project except its sibling
 nearly everything needs them, so whichever package holds them is one every other package
 must depend on. Put either in a feature package and that feature is imported by its peers.
 
+**`cube/` and `modelstore/` are one tier because they are one deployment.** A deployment is two
+addresses — `url` for queries and `store_url` for the model — and these are the clients for
+them, each importing nothing but `core.deployment`. Neither belongs inside `datamodel/`, however
+much "the model store holds the data model" suggests it: `datamodel/` reaches `cube` and
+`dashboards`, so a client living there could import the semantic layer it is only supposed to
+carry bytes for. Both are also used from tiers 3, 4 and 5, and a thing three tiers reach for
+sits at the lowest tier that satisfies it or the lowest of them imports upward.
+
 Three rules keep the tiers honest when a feature wants to cross one:
 
 - **A tool is agent vocabulary wherever the state it edits lives.** All three toolsets are in
   `agent/tools/`, importing the stores they write through.
 - **What a lower tier cannot look up, it takes as an argument.** `dashboards.refresh` is
-  handed a `CubeClient` and a `Catalog`; it never opens the source row. That is the whole
-  reason `dashboards` and `sources` are orderable at all.
+  handed a `CubeClient` and a `Catalog`; it never opens the deployment row. That is the whole
+  reason `dashboards` and `datamodel` are orderable at all.
 - **An import inside `if TYPE_CHECKING:` is a cycle that has not failed yet**, not a
   solution. Move the thing down a tier, or pass it in.
 
 ## Six subsystems
 
-**Query time** (`cube/`, `agent/`, `sources/grounding.py`) — the agent answers questions
-about the one connected database: `CUBE_URL` is where Cube answers and `CubeClient.local`
-is the only thing that reads it. It never writes SQL. It emits Cube JSON queries that pass
-a four-tier gate
-(pydantic schema → local semantic checks against the cached catalog → `POST /v1/sql`
+**Query time** (`cube/`, `agent/`, `datamodel/grounding.py`) — the agent answers questions
+about the one connected database. Cube is reached **through the model store**, which proxies it
+at `/cube/...` and mints its JWT — so `deployment.store_url` is the only address and
+`CubeClient.for_deployment` is the only thing that builds a session on it; `open_client` reads
+the row fresh for the callers too deep to be handed one. It never writes SQL. It emits
+Cube JSON queries that pass a four-tier gate (pydantic schema → local semantic checks against the cached catalog → `POST /v1/sql`
 which compiles without executing → `POST /v1/load`). Failures return as text the agent
 can act on, never exceptions. See README for the tier table.
 
@@ -96,76 +114,101 @@ is closed the way it should be: post-processing over rows that already passed th
 sandbox, rather than by widening what the gate inspects. See **Code execution** below.
 
 Grounding lives **beside the cubes it names**, at
-`cube/model/grounding/{rules,skills,certified_queries}` — so it is versioned with the model
-it describes and a branch carries its own. A directory that does not exist yet grounds on
-nothing rather than erroring, which is what `Grounding.is_empty` is for.
+`grounding/{rules,skills,certified_queries}/*.md` **in the model store** — so it is versioned
+with the model it describes and a ref carries its own. `grounding.load` reads it through
+`modelstore.model_files`, so a ref that does not exist grounds on nothing rather than erroring,
+which is what `Grounding.is_empty` is for.
 
-**Model generation** (`sources/modelgen/`) — builds the Cube data model a source exposes.
+**Model generation** (`datamodel/modelgen/`) — builds the Cube data model a source exposes.
 `modelgen` and not `model`, because "model" in this codebase is also the LLM:
 
 | module | stage |
 |---|---|
 | `warehouse.py` | the vocabulary: `Column`, `Table`, `Schema` |
-| `read.py` | probe container → `Introspection` (every schema: keys, columns, statistics). Not `Catalog` — that name is `cube.catalog.Catalog`, the *served* model, which is close to the opposite thing |
+| `read.py` | probe ref → `Introspection` (every schema: keys, columns, statistics). Not `Catalog` — that name is `cube.catalog.Catalog`, the *served* model, which is close to the opposite thing |
 | `selection.py` | which tables to model, as a filter on one `Schema` |
 | `build.py` | `Schema` → cube bodies + the menu of choices (pure, no LLM) |
 | `decide.py` | LLM descriptions/measures/views, and the guards on them |
-| `publish.py` | decisions → YAML, then write/restart/validate |
+| `publish.py` | decisions → YAML, then commit to a candidate ref and ask Cube about it |
 | `state.py` | what one step leaves for the next, as JSON |
-| `steps.py` | the four steps, and `generate()` for all of them in order |
+| `steps.py` | the three steps plus `read`, and `generate()` for all of them in order |
 
 Three invariants hold throughout: **the LLM returns decisions, never YAML** (pydantic
 objects via `with_structured_output`, then checked against a derived menu); **Cube is the
-validator** — a candidate model goes to the real container and Cube says what is wrong,
-so do not write a YAML checker; and **nothing survives only in memory** — the steps run
-minutes or days apart, so each writes what the next needs into the `source` row.
+validator** — a candidate model goes to the real Cube and it says what is wrong, so do not
+write a YAML checker; and **nothing survives only in memory** — the steps run minutes or days
+apart, so each writes what the next needs into the `deployment` row.
 
-`publish.install` is the only way a model reaches a container: write → restart → ask.
+**`publish.install` is the only way a model reaches Cube, and it is non-destructive.** Delete
+the leftover candidate → create `candidate` from the target ref → `replace` the whole model on
+it → `check` at `ref=candidate` → merge, or leave it. One Cube compiles every ref independently,
+so a candidate is validated with **no restart** and nothing that answers a query moves until it
+has compiled. A model Cube refuses stays readable at `candidate`, which `Validation.candidate`
+carries so `steps._rejected` can say where. This is what replaced unlinking every `*.yml` in the
+served model and writing the new one over it.
 
-**Four steps, not one pass.** `connect` → `cubes` → `describe` → `views`, each runnable
-on its own and re-runnable. **`steps.action` is the only way to run one** — a caller
-chooses *which* actions and in what order, never how, so nothing can drift on the order
-rule (a step needs the previous one done) or on what a failed step records.
-`read` is a fifth action with no step row: it produces the catalog the picker needs, so
-it must be triggerable alone, and `cubes` runs it itself when nothing is cached.
+The candidate is deleted and recreated rather than committed onto, because one that has diverged
+would make the merge a real three-way one — which is how a stale side comes quietly back. The
+cleanup delete after a successful merge is best-effort: the model has landed, and raising there
+would report a rebuild that worked as a step that failed.
+
+**Four stages, three steps.** `read` → `cubes` → `describe` → `views`, each runnable on its own
+and re-runnable. **`steps.action` is the only way to run one** — a caller chooses *which*
+actions and in what order, never how, so nothing can drift on the order rule (a step needs the
+previous one done) or on what a failed step records. `read` is the odd one: it caches a catalog
+rather than writing model files, so it records no step row, has to be triggerable alone, and
+`cubes` runs it itself when nothing is cached. There is **no `connect` step** — connecting is a
+form, and a step records that something once succeeded while a connection is a condition.
+
+Nothing in `action` commits or rolls back. `publish.install` commits either way, so a step that
+fails leaves the served model exactly as it was and there is nothing to arrange.
 
 `selection` is why nothing downstream knows selection happened: `build` already tolerates
 a foreign key whose target is absent (it was written that way for keys into another
 schema), and a deselected table is indistinguishable from that.
 
-**Editing & branching** (`sources/editing/{edits,impact,workspace}.py`,
-`sources/vcs.py`, `agent/tools/editor.py`, `web/model_edit.py`,
-`src/web/src/components/{ModelEditor,EditorChat}.tsx`) — `cube/model/` is a git repo, and the
-checked-out branch is what the container serves, because the directory is a bind mount rather
-than something copied in. There is no per-branch endpoint the way Cube Cloud has one:
-`git checkout` on the host *is* the deploy, so this subsystem is a gate in front of that one
-mount rather than a sandbox beside it.
+**Editing & branching** (`datamodel/editing/{edits,impact,workspace}.py`,
+`datamodel/vcs.py`, `agent/tools/editor.py`, `web/model_edit.py`,
+`src/web/src/components/{ModelEditor,EditorChat}.tsx`) — **this subsystem is mid-migration and
+currently non-functional. Read this before touching it.**
+
+It was built when `cube/model/` was a bind mount and `git checkout` on the host *was* the
+deploy. Cube now pulls its model from the store per ref, so the local directory these modules
+write to is served by nothing: an edit saves, and no Cube ever sees it. That is not a bug to
+patch around — it is the unfinished half of the move, and the fix is to point `workspace` at
+`ModelStore.edit` and replace branches with refs.
+
+What that costs, and why it is not mechanical: **a bare repo has no working tree**, so
+`vcs.status`, `commit`, `discard` and the whole dirty-files concept have no counterpart. Every
+write to a ref is already a commit. The UI changes shape with it.
 
 | module | role |
 |---|---|
-| `sources/vcs.py` | git as a subprocess against the model directory — branches, diff, merge, and `files_at` for reading main's blobs out of `.git` without checking main out. Beside `modelgen/` and `editing/` rather than inside either: generation commits what it writes and editing branches off it |
-| `edits.py` | tiers 1-2: valid YAML, then append-only cubes vs. freely-rewritable views, diffed against **main**, never against the branch's own previous state |
-| `workspace.py` | the directory as a working tree: `write` and `delete`, which both the HTTP routes and the editor agent's tools go through — one path, so the two cannot disagree on what a valid edit is |
+| `datamodel/vcs.py` | git as a subprocess against the local model directory. **To be deleted** — the store does branches, diff and merge over HTTP, and `ModelStore` is the client |
+| `edits.py` | tiers 1-2: valid YAML, then append-only cubes vs. freely-rewritable views, diffed against **main**, never against the branch's own previous state. Keep — this is the gate, and it is independent of where the files live |
+| `workspace.py` | the directory as a working tree: `write` and `delete`, which both the HTTP routes and the editor agent's tools go through — one path, so the two cannot disagree on what a valid edit is. **The one path is what to preserve** while the destination changes |
 | `impact.py` | every dashboard tile and certified query, checked against the *served* catalog — not a member-diff of main against the branch, because "is what this tile reads still here" is the question that survives whatever caused the breakage |
-| `agent/tools/editor.py` | the editor agent's six tools — no merge, checkout or branch-create; those restart the container and land work, so they stay buttons on the page |
+| `agent/tools/editor.py` | the editor agent's six tools — no merge, checkout or branch-create; those land work, so they stay buttons on the page |
 | `web/model_edit.py` | the HTTP surface: branches, files, validate (tier 3), commit, merge, and the editor chat |
 
-Two invariants:
+Two invariants that survive the move:
 
-1. **The gate runs before the write, because the write is live.** In dev mode Cube watches the
-   mount and reloads in under a second, so `edits.check` is what keeps a file that will not
-   compile off disk in the first place — `write_model_file` and `PUT /files/{path}` both run
-   the identical two-tier check before `write_text`, and neither has another way to refuse.
-2. **Impact is only ever measured against the branch actually checked out.** Only one catalog
-   is served at a time, so a report computed for any other branch would describe a model
-   nothing is running. `branch_diff` and `merge` both refuse to compute impact for a branch
-   that is not checked out — there is no isolated endpoint to ask that question against.
+1. **The gate runs before the write, because the write is live.** Cube polls the store for the
+   version of the ref it serves, so a commit is picked up on its own within seconds —
+   `edits.check` is what keeps a file that will not compile from ever being committed.
+   `write_model_file` and `PUT /files/{path}` both run the identical two-tier check first, and
+   neither has another way to refuse. **There is nothing to restart**: `_reloaded` only clears
+   the portal's cached health probe, because that is the only stale thing left.
+2. **Impact is only ever measured against the ref actually being served.** A report computed
+   for any other ref would describe a model nothing is running, and reporting a number from the
+   wrong model is worse than reporting none.
 
 Main is generated, never edited directly — `_guard`/`_on_a_branch` refuse a write there. A
 branch only ever moves forward from main: no pull, no rebase, no remote at all
-(`GIT_TERMINAL_PROMPT=0`), because there is nothing to sync with. A merge conflict aborts
-immediately rather than leaving markers in the tree, for the same reason a stray
-`grounding/*.yml` is fatal: conflict markers in the live mount are "zero cubes," arrived at
+(`GIT_TERMINAL_PROMPT=0` locally; the store has no remote either), because there is nothing to
+sync with. A merge conflict aborts rather than leaving markers: the store's `merge-tree
+--write-tree` has no working tree to leave them in, which is the same reason a stray
+`grounding/*.yml` is fatal — conflict markers in a compiled model are "zero cubes", arrived at
 from a different direction.
 
 **Dashboards** (`dashboards/`, `web/dashboards.py`, `src/web/src/components/{Dashboard,
@@ -223,110 +266,80 @@ the mirror image: a DELETE rather than a column, so the depth stays changeable �
 
 Not built: promoting a tile to a `certified_queries/` file.
 
-**Code execution** (`sandbox/`, `agent/tools/code.py`) — a Python sandbox on the *query* agent,
-not an agent of its own. `sandbox/__init__.py` holds the three invariants; read it before changing
-anything here.
+**Code execution** (`sandbox/` the client, `services/sandbox/` the service, `agent/tools/code.py`)
+— a Python sandbox on the *query* agent, not an agent of its own. `sandbox/__init__.py` holds
+the three invariants; read it before changing anything here.
 
 | module | role |
 |---|---|
-| `sandbox/container.py` | one `docker run` and one `docker exec`, as pure argv plus lifecycle |
-| `sandbox/scratch.py` | one chat's directory, the only place a model-supplied path may land, and where saved scripts, uploads and trimmed output go |
-| `sandbox/profile.py` | what an uploaded file *is*, read once on arrival and kept beside it |
-| `sandbox/profiler.py` | that reading, as it runs inside the container. Never imported here |
-| `sandbox/image/Dockerfile` | the analysis stack, built on demand and tagged by its own digest |
+| `services/sandbox/` | the service: a workspace per chat, scripts over HTTP, one token (19 tests) |
+| `sandbox_service/runner.py` | one script as a subprocess, streamed, killable, timed out |
+| `sandbox_service/workspace.py` | one chat's directory, and the only path guard there is |
+| `sandbox_service/profiler.py` | what an uploaded file *is*, read once on arrival by duckdb |
+| `sandbox/client.py` | the portal's client — `run`, `kill`, upload, download, profile |
+| `sandbox/profile.py` | the `Profile` shape and what it says in a prompt |
 | `agent/tools/code.py` | two tools: `export_result` and `run_python` |
 | `web/files.py` | the HTTP surface: a file in, a file out, and taking one back |
 
-**`--network none` is what keeps the gate load-bearing, not a second agent.** `run_query` and a
-Python interpreter are in the same hands, and that is safe because the sandbox cannot reach Cube or
-the warehouse — there is no route to a number that did not come through the four tiers.
-`export_result` is the only way rows cross over. What this buys is the arithmetic a `CubeQuery`
-cannot express — a ratio, a period delta, a share of a total — which CLAUDE.md listed as an open
-gap and the agent was doing in prose.
+**What keeps the gate load-bearing is that the sandbox holds no credential**, not a second agent
+and no longer `--network none`. `run_query` and a Python interpreter are in the same hands, and
+that is safe because the sandbox cannot sign a Cube token and has no warehouse password — there
+is no route through it to a number that did not come through the four tiers. `export_result` is
+the only way rows cross over. What this buys is the arithmetic a `CubeQuery` cannot express — a
+ratio, a period delta, a share of a total — which the agent was otherwise doing in prose.
+
+**`--network none` is gone, deliberately, and it is the one real loss.** A service that answers
+HTTP has a port, so a script can reach the network and could send data it was already handed
+somewhere else. Docker's `internal: true` networks would prevent exactly that but cannot have
+published ports, and blocking egress inside the container needs `NET_ADMIN`. Accepted as the
+price of the portal running nothing — and the reason `SANDBOX_TOKEN` is required rather than
+optional, and the port is bound to loopback.
 
 **Two tools and not a filesystem.** The arithmetic is a dozen lines, so a script arrives whole and
-its output comes back; `scratch.save_script` keeps it anyway, which is what leaves a computed
-figure's provenance on disk and lets a second attempt not overwrite the first. Filtering, grouping
-and totalling stay in `run_query`, where the gate checks them and pre-aggregations serve them.
+its output comes back. The service saves it anyway, which is what leaves a computed figure's
+provenance on disk and lets a second attempt not overwrite the first. Filtering, grouping and
+totalling stay in `run_query`, where the gate checks them and pre-aggregations serve them.
 
-**One container for the machine, not one per chat** — a deliberate choice, measured rather than
-assumed: an idle container is under a megabyte (`--memory` is a cap, not a reservation), a
-`docker exec` is ~65ms against ~150ms for a whole ephemeral `docker run`. The costs are that
-`--memory` and `--pids-limit` are shared, so a script exhausting either kills the container for
-every chat, and that a script sees the whole `workspaces` root while `export_result` is confined to
-one chat's directory. Both are survivable rather than silent: the workspace is the state, so
-`ensure_up` rebuilds and `run_python` says that is what happened.
+**The workspace is the state, and it is on the far side.** A script's files, an upload and its
+profile all live in the service's volume; there is no table for any of them, because a row could
+only ever be a second copy of `ls`. Deleting a chat asks the service to drop it — best-effort, so
+a sandbox that is down cannot leave a chat undeletable.
 
-**The container is disposable precisely because the workspace is the state.** Every `run_python` is
-a fresh interpreter, so nothing is lost by removing the container mid-conversation — which makes
-recovery from a reboot, a restart, an OOM kill or a stale mount a 150ms retry rather than a lost
-session.
+**A script is shown before it runs, and that is not a safety gate.** `approve_scripts` exists
+because the moment before a run is the only one where the script is readable. `run_python` emits
+an `approval` event carrying the script — **the one event that carries a body**, and it is not
+stored, because the file is at `scripts/run-NNN.py` and the outcome is on `tool_end`. The answer
+comes back on a queue (`POST /chats/{id}/approve`), the same shape as the cancel flag rather than
+a LangGraph interrupt: a confirm should not close the stream and resume a thread. Two consequences
+worth keeping: **"always" is what makes it usable** — without it a write-run-fix loop is fifteen
+clicks and the setting gets turned off — and **stopping the turn answers the question with no**.
 
-**`container.rebuild` runs at startup and is never awaited.** The portal warms the sandbox as a
-background task, because the first ever run *builds the image* — ninety seconds, and a portal that
-will not answer until an image compiles is a portal that looks broken. Measured: healthz at ~1s,
-sandbox up at ~500ms, and with docker absent the portal starts anyway and logs `sandbox is not
-available: docker not found on PATH`. `ensure_up` still runs before every script and an
-`asyncio.Lock` serialises it, so a script arriving mid-build waits rather than racing — two callers
-both finding no container is how the loser's `remove` kills the winner's.
+**Stopping asks the service; it does not cancel the request.** Cancelling the stream would leave
+the script running with nobody reading it. So `run_python` races the run against `session.cancel`
+and calls `POST /kill`, which signals the process *group* — a script that spawned children leaves
+them holding the workspace otherwise. The service holds the process object, so there is no pid
+file and no `kill` inside an image with no `ps`; both of those traps went with the container.
 
-**A file the user sends is the same workspace, and there is no `files` table.** `POST
-/api/chats/{id}/files` writes into `uploads/`, `GET .../files/{path}` reads anything in the
-workspace back out, and that directory *is* the record — a row could only ever describe what `ls`
-already answers. Three rules hold it together:
+**Output is streamed as `output` events — the one event type that is never stored**, because
+`tool_end` already carries the whole of it trimmed and storing deltas as well would put an
+untrimmed second copy in the event log. `agent/turn.py` holds that exemption. The service sends
+JSON lines and the client re-frames them, so the `on_output` seam is the one `core.proc.run`
+offered when this was a subprocess — nothing above it changed shape.
 
-1. **`uploads/` is what makes an upload distinguishable** from something a script wrote, so no
-   state has to say which is which. `profile.saved` reads that directory and the prompt is built
-   from it every turn — which is why the composer's ✕ deletes the file rather than only the chip.
-2. **An upload writes no event of its own.** It happens *between* turns and would have no
-   `turn_id` to belong to, and an event authored by an HTTP route would be the first. What records
-   it is the **user event** of the turn it is attached to (`POST /messages` takes the paths), so a
-   replayed transcript shows the file above the question that used it.
-3. **A script's own files are named back to it.** `run_python` snapshots the workspace either side
-   of the run and reports what changed, on the event as `wrote` and in what the model reads —
-   otherwise a chart it drew is a file nobody knows exists.
-
-**A running script can be watched and stopped, and neither goes through the container.** Output is
-streamed as `output` events — **the one event type that is never stored**, because `tool_end`
-already carries the whole of it trimmed to `OUTPUT_LIMIT` and storing deltas as well would put an
-untrimmed second copy in the event log; `agent/turn.py` holds that exemption. Stopping is the same
-shape: the flag `run_turn` watches is only tested between stream chunks, and an exec is one `await`
-that no chunk interrupts, so `run_python` races the run against `session.cancel` itself. The kill
-reaches *inside* — `echo $$` records the pid, the host reads it out of the bind mount, and
-`container.kill` sends the TERM — because killing the `docker exec` client leaves the command
-running. Measured live: dead 0.1s after the button, container still up, next script normal.
-
-**A script is shown before it runs, and that is not a safety gate.** The sandbox is what makes a
-script safe; `approve_scripts` exists because the moment before a run is the only one where the
-script is readable. So `run_python` emits an `approval` event carrying the script — **the one event
-that carries a body**, and it is not stored, because the file is already at `scripts/run-NNN.py`
-and the outcome is on `tool_end`. The answer comes back on a queue (`POST /chats/{id}/approve`),
-the same shape as the cancel flag rather than a LangGraph interrupt: a confirm should not close the
-stream and resume a thread. Two consequences worth keeping: **"always" is what makes it usable** —
-without it a write-run-fix loop is fifteen clicks and the setting gets turned off — and **stopping
-the turn answers the question with no**, which is what stops a closed tab leaving a script waiting
-on a queue nobody will put anything on.
-
-**Three caps, and the one that was missing.** `EXEC_TIMEOUT_S` bounds a call and `OUTPUT_LIMIT`
-bounds what it says, but forty model calls of each is eighty minutes and 160,000 characters — so
-`TURN_SECONDS`/`TURN_OUTPUT` bound the turn, and `ToolCallLimitMiddleware` bounds the count with
-`exit_behavior="continue"` so the agent answers from what it has rather than stopping dead. The
-turn's numbers are provisional: no long write-run-fix loop has been measured yet.
+**Three caps, and the one that was missing.** The service bounds a call (`EXEC_TIMEOUT_S`) and
+what it says (`OUTPUT_LIMIT`), but forty model calls of each is eighty minutes and 160,000
+characters — so `TURN_SECONDS`/`TURN_OUTPUT` bound the turn, and `ToolCallLimitMiddleware` bounds
+the count with `exit_behavior="continue"` so the agent answers from what it has rather than
+stopping dead. The turn's numbers are provisional: no long write-run-fix loop has been measured.
 
 **The profile is what makes an upload usable rather than merely present.** Without it the first
 move after every upload is a `run_python` to discover the columns: it works, costs a round trip,
-and comes out differently each time — and a 200 MB CSV cannot go into a context at all, so a
-summary is the only safe thing to hand over whole. It is read by duckdb *in the sandbox* (`SUMMARIZE`
-plus one exact `count(DISTINCT)` pass, so "this column is unique" is a fact rather than an
-approximation), never raises, and a file it cannot read is a note the agent can act on rather than
-a failed upload.
-
-**`make sandbox-check` is the other half of `make test`.** The suite covers the argv, the path
-resolution, the CSV export, the trimming and both file routes; what a container actually *does* —
-no egress, no capabilities, a read-only root, a kill at the timeout, a script that dies on the stop
-button, output that arrives before the exit, and what the profiler makes of a real CSV — is
-asserted against a live one by `scripts/sandbox_check.py`, with `--stale` for the mount recovery,
-`--ask` for a real turn and `--file` to attach something to it.
+and comes out differently each time — and a 200 MB CSV cannot go into a context at all. The
+service profiles on arrival and keeps the answer beside the file, so an upload is one round trip
+and `GET /profiles/{chat}` is one small request per turn rather than one profiling run per file.
+It is read by duckdb *in the sandbox* (`SUMMARIZE` plus one exact `count(DISTINCT)` pass, so
+"this column is unique" is a fact rather than an approximation), never raises, and a file it
+cannot read is a note the agent can act on rather than a failed upload.
 
 **The web portal** (`web/`, `src/web/`, and the transcript beneath it) — `analyst` opens a
 browser the way Jupyter does. One flat event stream is the contract between agent and browser:
@@ -448,27 +461,28 @@ instead — a Cube problem must not hide grounding, which has nothing to do with
 The default selection stays on the model when there is one — an artefact only opens when
 nothing else survives the filter, or when there is no model at all.
 
-`SourceDetail` shows **five** stages where `store.STEPS` has four: `read` writes no step
-row, but hiding it inside "Build cubes" meant expanding the second of four steps offered
-a button that did something else. `store.STAGES` is the one definition of the sequence and
-`store.stages` is the one place that knows `read`'s state comes from the cached catalog
+`SourceDetail` shows **four** stages where `evidence.STEPS` has three: `read` writes no step
+row, but hiding it inside "Build cubes" meant expanding the first of three steps offered
+a button that did something else. `evidence.STAGES` is the one definition of the sequence and
+`evidence.stages` is the one place that knows `read`'s state comes from the cached catalog
 rather than from `steps`; the browser iterates the rail it ships on `SourceRow.stages`.
 
 ## Storage
 
 **One file, one schema.** `core.db.SCHEMA` is every table this process creates, and
 `~/.analyst/analyst.db` holds all of them: `chats` and `events` (the transcript),
-`results`, `dashboards`/`tiles`/`layouts`/`runs`/`tile_results`, `source`, and
+`results`, `dashboards`/`tiles`/`layouts`/`runs`/`tile_results`, `deployment`, and
 LangGraph's `checkpoints`/`writes` — those last two created by `AsyncSqliteSaver` rather
 than here. `core.db.connect` is how it is opened, so `PRAGMA foreign_keys` cannot drift between
 the three stores that open it.
 
 The schema lives in `core/db.py` rather than beside each store because **the unit is the file,
-not the store**: `ChatStore`, `DashboardStore` and `SourceStore` all write it and none owns
+not the store**: `ChatStore`, `DashboardStore` and `DeploymentStore` all write it and none owns
 it, and a schema split across three modules reads as three databases.
 
-The file is **chmod 600** — `SourceStore.init` sets it, because `source.credentials` is
-plaintext JSON and the file mode is the whole guard.
+The file is **chmod 600** — `DeploymentStore.init` sets it, because `deployment.credentials` is
+plaintext JSON and holds the warehouse password, and the file mode is the whole guard. The one
+other place those values leave the process is `GET /api/source/env`, deliberately.
 
 One person on one machine: the token guard is the whole access story, and
 `cube/client.py`'s `LOCAL_CLAIMS` is the single literal signed into the Cube JWT.
@@ -478,47 +492,75 @@ One person on one machine: the token guard is the whole access story, and
 the sandbox, so a row describing it could only ever be a second copy of `ls` — and the copy is
 what would go stale. Deleting a chat takes the workspace with it (`scratch.remove`).
 
-## The data source
+## The deployment
 
-**One Cube deployment.** One container, one model directory, and **one row in `source`** —
-credentials included, with `id = 1` enforced by a CHECK rather than by convention.
-`sources/docker.py` starts the container with `docker run -e` built from that row, so there
-is nothing on disk that can drift from it: no registry file, no credential file, no
-generated compose file, and do not add one. `docker-compose.yml` is hand-written and holds
-only the shared Cube Store, on an explicitly named `analyst-net` network the container joins.
+**The portal runs nothing.** Not Cube, not the model store, not a probe — the only container it
+starts is the sandbox. It holds the credentials, mints the secrets, renders an environment file,
+and is told where things are. **There are two deployments**, each with its own compose file,
+`.env` and address, sharing nothing:
 
-That row is a table in `analyst.db` like everything else — chats, dashboards, the source and
+- `services/semantic/` — `model-store`, `cube`, `cubestore`. Reached at the store: **Cube's port is not
+  published**, and the store proxies it at `/cube/{path}`, minting Cube's JWT from the ref in
+  `X-Model-Ref`. One authenticated door, and `CUBEJS_API_SECRET` never leaves that compose file.
+- `services/sandbox/` — where the agent runs Python. **Optional**: without it there are no
+  ratios, period deltas or script-drawn charts, and everything else works.
+
+**One deployment, so one row in `deployment`** — credentials and secrets included, with
+`id = 1` enforced by a CHECK rather than by convention. `datamodel/deployenv.render` is the one
+place that decides what a deployment needs; the compose file is **served verbatim** and never
+generated, because a generated copy is a second deployment that can drift from the tested one.
+`GET /api/source/env` is the only route in the codebase that returns credential *values* —
+handing them over is its entire purpose, since nothing can start Cube without them.
+
+That row is a table in `analyst.db` like everything else — chats, dashboards, the deployment and
 the checkpointer in one file under `DATA_DIR`. So `DATA_DIR` scopes the whole install rather
 than just the history: a scratch directory is a scratch *everything*, connection included.
 
-**There is one address, and it is `CUBE_URL`.** `settings.api_root` builds it, `CubeClient.local`
-is the only thing that reads it, and `settings.cube_port` derives the published port from it so
-docker and the query path cannot name different numbers. Nothing stores a second copy — a chat,
-a dashboard and a tile all query wherever `CUBE_URL` points, because there is nowhere else.
+**Two addresses on the row, and neither of them is Cube's.** `store_url` is the semantic layer
+— model *and* queries — and `sandbox_url` is the sandbox. Where Cube actually runs is the store's
+`CUBE_URL`, its business rather than this row's. `CubeClient`, `ModelStore` and `SandboxClient`
+each read one address, and `open_client`/`open_store`/`open_sandbox` re-read the row per use so
+an edited address leaves no stale copy anywhere.
 
-The container name and the model path are **constants, not stored values** —
-`docker.CONTAINER` is `cube-analyst` and `registry.MODEL_ROOT` is `cube/model`. Nothing
-selects them, so nothing can disagree about which container or which directory is meant.
+**The store's write token is what queries.** The read token is Cube's own and the proxy refuses
+it — letting it query back through would make the credential handed out as capable as the one
+kept. `api_secret` is still on the row, but only as a value the portal *mints and hands over* in
+the environment file: nothing here signs with it, and the store is what does.
 
-**Connecting is a replacement, not an addition.** `SourceStore.save` is `INSERT OR REPLACE`
-and resets `steps` and `state` with it: those describe the tables of a database that is no
-longer connected, and keeping them would offer a "Build cubes" that rewrites the model from
-a catalog nothing read.
+**Connecting is two steps, because the portal cannot do the middle one.** `POST /source` stores
+the credentials and mints the secrets with **no addresses**; someone runs the compose file;
+`PATCH /source` receives `url` and `store_url`. `deployment.deployed` is those two being set,
+and it is deliberately *not* a health state — "nothing has been run yet" is the normal condition
+between the steps, so it is neutral rather than red. The same PATCH is how a deployment that
+moved is followed, so there is one path rather than two.
+
+**Connecting is also a replacement, not an addition.** `DeploymentStore.save` is
+`INSERT OR REPLACE` and resets `steps` and `state` with it: those describe the tables of a
+database that is no longer connected, and keeping them would offer a "Build cubes" that
+rewrites the model from a catalog nothing read.
+
+**The catalog probe is a ref, not a container.** `read_catalog` commits its introspection cubes
+to a `probe` ref, asks the connected Cube about that ref, and deletes it — deleting it again on
+the way in, since a crashed read would otherwise leave one in the ref list that nobody created.
+Tables and columns come from `information_schema.columns` (`read.COLUMNS_SQL`, every driver
+rather than per-dialect) because `/playground/db-schema` **is served only in dev mode**, and a
+deployment on a server is not in dev mode. Keys and statistics stay per-dialect in `DIALECTS`.
+Losing columns or keys is fatal; losing statistics is a note.
+
+**Docker is the sandbox's requirement alone, and never fatal.** A machine with no docker can
+connect a database, build a model and answer questions — it just cannot run Python.
+`sandbox.container.installed`/`daemon` is the only thing here that knows what docker is, and
+`web/system.py` reports it as a capability rather than a precondition.
 
 **A chat has a `kind`.** `'question'` runs the query agent, `'model'` the editor agent;
 both share this table and the transcript format and differ only there. `list_chats`
 filters on it, so the sidebar shows question chats and the model editor shows its own.
 
-`core/jobs.py` runs **one job at a time, machine-wide**, guarded by a `flock` — the
-probe container has one name, so a second portal process must wait rather than delete it
-underneath the first. A job is not stored: it lives in memory, streams to whoever is watching, and
-writes its outcome onto the source row's `steps` as it goes. Refreshing the browser
-re-attaches (the buffer replays); restarting the server loses the narration, not the
-result.
-
-`registry.model_dir()` is also a git repo once `vcs.ensure` has touched it — see **Editing &
-branching** above for what that buys and what it costs (one container, so one checked-out
-branch, at a time).
+`core/jobs.py` runs **one job at a time, machine-wide**, guarded by a `flock`: two portal
+processes rebuilding one model store would race on the same ref. A job is not stored — it lives
+in memory, streams to whoever is watching, and writes its outcome onto the deployment row's
+`steps` as it goes. Refreshing the browser re-attaches (the buffer replays); restarting the
+server loses the narration, not the result.
 
 ## Things that will cost you an hour
 
@@ -546,27 +588,19 @@ branch, at a time).
   missed it because the ones that assert on events **monkeypatch `emit`**, so the real
   no-op path had no coverage until a script drove `add_tile` directly. When a fixture
   replaces the thing under test, add one case without the fixture.
-- **The sandbox image has no `ps`, `pkill`, `pgrep` or `/bin/kill`** — `python:3.12-slim` carries
-  no procps, and `kill` exists only as a bash builtin. So `docker exec <name> kill …` fails, and
-  fails *expensively*: docker reports a missing executable as `OCI runtime exec failed`, which is
-  the string `EXEC_START_FAILED` matches, so `execute` would read it as a stale mount and rebuild
-  the shared container — taking every other chat's running script with it. `kill_argv` goes through
-  `bash -c`, and the pid comes from a file the run writes rather than from a process search.
-  Adding procps instead would change the Dockerfile's digest, and `image_tag()` is that digest, so
-  every install rebuilds the image on next start.
 - **`StreamReader.readline` raises past 64 KiB**, so a streaming reader has to take chunks: one
-  `print` of a wide dataframe has no newline in it and would fail rather than stream.
-- **`docker exec` reports "OCI runtime exec failed" on *stdout*, with exit 127.** Not stderr.
-  A recovery branch keyed on `result.err` matches nothing and silently never runs — which is
-  how `container.execute`'s stale-mount retry passed review and did nothing until it was driven
-  against a real container. Check `result.out + result.err` for anything docker says about the
-  exec itself, as opposed to what the command printed.
-- **A running container's bind mount survives the host directory being deleted, and points at
-  the dead inode.** `DATA_DIR/workspaces` removed and recreated leaves the container up and
-  healthy by every check `docker inspect` can answer, while every `exec` into it fails to
-  `chdir`. So `ensure_up` returning early on "running" is not sufficient, and the recovery has
-  to `remove()` before calling it — `ensure_up` would otherwise find the broken container
-  healthy and hand back the same mount.
+  `print` of a wide dataframe has no newline in it and would fail rather than stream. True on both
+  sides of the wire — the service reads the subprocess in chunks and the client reads the response
+  in lines, which is why the service frames its own output as JSON lines.
+- **`timeout` and `ps` are coreutils and procps, and neither is a given.** The sandbox service
+  enforces its own limit with `asyncio.wait_for` and kills with `os.killpg`, rather than wrapping
+  the script in `timeout` — which does not exist on macOS at all, so the service's suite could not
+  run outside a container. This is only possible because the service holds the process object;
+  when this was a `docker exec` there was nothing to reach around, which is what the pid-file trick
+  and `kill -TERM` through `bash -c` existed for. Both are gone.
+- **Signal the process *group*, not the process.** A script that spawned children leaves them
+  running and holding the workspace if only the interpreter is signalled. `start_new_session=True`
+  is what makes `killpg` available to do it.
 - **`httpx` transport errors do not subclass `OSError`.** An `except OSError` around a Cube
   call catches nothing useful — a plain `ConnectError` went straight through and 500'd the
   whole dashboard page for a stopped container, which is the exact failure that branch
@@ -620,13 +654,15 @@ branch, at a time).
   "Cube-compliant" YAML can hold one; the only free-form slot is `meta:`, which
   `publish.write` regenerates. If grounding ever needs a structured format, that is a
   decision to make grounding *generated* — not a way to keep hand-written files.
-- **Cube Core *does* hot-reload model files when `CUBEJS_DEV_MODE=true`** — which is how every
-  container here runs. A new `views/x.yml` was served in under a second with no restart,
-  and a file with a bad `join_path` took the whole model to a compile error just as fast, then
-  recovered the moment it was deleted. Two consequences: a save is **live**, so the edit gate refusing bad YAML *before* the
-  write is what keeps Cube up, not the restart afterwards; and a restart is still what
-  `publish.install` and a branch checkout use, because a whole model changing at once should be
-  compiled from a known state rather than from whatever the watcher saw mid-write.
+- **A model change is live without a restart, and nothing here restarts Cube any more.**
+  `cube.js` gives Cube a `schemaVersion` that is called on *every request* and returns the ref's
+  sha, so a commit is picked up within the 5s version cache. Measured both ways: a new
+  `views/x.yml` served in under a second, and a bad `join_path` taking the whole ref to a compile
+  error just as fast, then recovering the moment it went. The consequence is that the edit gate
+  refusing bad YAML *before* the commit is what keeps Cube up — there is no restart afterwards to
+  hide behind. A whole model changing at once is safe for a different reason: it lands on a
+  candidate ref, which has its own compiler cache entry (`contextToAppId`), so it is compiled
+  from a known state rather than from a half-written one.
 - **Cube qualifies a single-identifier `sql:` but passes an expression through verbatim.**
   `sql: unit_price` becomes `"invoice_line".unit_price`; `sql: quantity * unit_price`
   reaches the database unqualified and dies with `column reference "unit_price" is
@@ -634,38 +670,42 @@ branch, at a time).
   written bare (matching Cube's own generator); multi-column expressions are qualified
   with `{CUBE}` by `decide.qualify_expression`.
 - **`CUBEJS_DEV_MODE=true` disables JWT verification** and is what serves
-  `/playground/db-schema`. Fine locally; never for anything real.
+  `/playground/db-schema` — which is why nothing here reads that endpoint any more. Fine
+  locally; never for anything real.
 - **A database on this machine is `host.docker.internal` from inside a container**, not
   `localhost`.
 - **Escape model/Cube/database text before `console.print`.** Rich reads `[...]` as
   markup and silently swallowed the gate's `[rule-id]` prefixes. Use `rich.markup.escape`.
-- **`cube/model/` is the only thing written into the working directory.** That
-  directory belongs to whoever installed this — it is a dependency, and their `cube/` is
-  theirs to version. Everything else goes under `DATA_DIR`
-  (`~/.analyst`): `analyst.db`, the job lock, and `probe-model/` (the catalog probe's
-  throwaway cubes, cleared on every read). Do not put scratch — a probe directory, a model
-  backup — into the project. Note the probe directory is **bind-mounted**, which is why it is
-  under `~/.analyst` rather than a system tempdir — Docker Desktop's default file sharing
-  covers `/Users` reliably and `/var/folders` not always.
-- **`publish.write` unlinks every `*.yml` before writing, so re-running `cubes` destroys
-  the views and descriptions.** There is no undo in the code: **the model directory is
-  the user's, and version control is the only way back.** Do not add a snapshot/restore
-  pair: one-deep, silently overwritten, and strictly worse than a `git diff` that shows what
-  the rebuild actually changed. The picker warns before a run
-  that discards later steps; committing first is on whoever runs it. This also means a
-  `cubes` build Cube rejects leaves the rejected YAML on disk rather than rolling
-  back, which is the right trade only because the directory is versioned — if you ever
-  point this at an untracked model directory, there is nothing to recover with.
-- **A container's environment cannot be changed.** Editing credentials means `docker rm`
-  plus `docker run`, which is what the `connect` step does; `restart` would keep the old
-  password. The same applies to `CUBEJS_DEV_MODE` and `CUBEJS_API_SECRET`.
-- **`docker run --network` needs a network that already exists.** Nothing else creates one,
-  so `docker.ensure_network` runs before every create. Compose
-  prefixes container names with its project (`analyst-ds-cubestore-router-1`) but the
-  service name is the alias on the network, which is what the container resolves — so a
-  `--filter name=^...$` anchored on the service name matches nothing.
-- **Cube's port is published on `127.0.0.1` only.** `CUBEJS_DEV_MODE=true` disables JWT
-  verification, and a `0.0.0.0` bind would answer the whole network unauthenticated.
+- **Nothing is written into the working directory, and `services/semantic/` is only read from it.**
+  `registry.semantic_dir()` resolves it against `project_root()` because `services/semantic/store` is a
+  second Python project with its own lock file and tests, which has no business inside this
+  package. Everything written goes under `DATA_DIR` (`~/.analyst`): `analyst.db`, the job lock
+  and `workspaces/`. Do not put scratch into the project. `workspaces/` is the last bind mount
+  left, which is why it is under `~/.analyst` rather than a system tempdir — Docker Desktop's
+  default file sharing covers `/Users` reliably and `/var/folders` not always.
+- **Re-running `cubes` still discards the views and descriptions — it just cannot lose them.**
+  `publish.install` replaces the whole model in one commit on a ref, so what was there is the
+  parent commit and `GET /diff` shows exactly what the rebuild changed. Do not add a
+  snapshot/restore pair: one-deep, silently overwritten, and strictly worse than the history
+  that is already there. The picker still warns before a run that discards later steps, because
+  recoverable is not the same as intended. (This used to be the worst trap in the codebase:
+  `publish.write` unlinked every `*.yml` in the *served* model before writing, so a model Cube
+  then refused left nothing running and nothing to recover from.)
+- **A container's environment cannot be changed, which is why editing credentials cannot
+  apply them.** `PATCH /source` updates the row and re-renders the environment file; the running
+  Cube keeps the old password until whoever owns it re-runs the compose file. The form says so
+  rather than reporting success. The same applies to `CUBEJS_DEV_MODE` and `CUBEJS_API_SECRET`.
+- **`cubejs/cubestore:latest` is amd64 only.** The pull fails outright with "no matching manifest
+  for linux/arm64/v8" rather than emulating, so an Apple Silicon host needs
+  `CUBESTORE_TAG=arm64v8`. The generated `.env` carries it as a commented line and
+  `services/semantic/tests/store_check.sh` picks it from `uname -m`.
+- **Production-mode Cube refuses to run a query without Cube Store.** `/v1/meta` answers fine and
+  every `/v1/load` dies with "Cube Store was specified as queue/cache driver", so the compose
+  file ships three services. Only `CUBEJS_DEV_MODE=true` embeds one — and it also disables JWT
+  verification entirely, which is why the generated file defaults to production mode.
+- **Dev mode still populates `securityContext` from the token.** Verified live: with
+  verification off, `ref=candidate` compiled separately from `ref=main`. So per-ref serving works
+  in either mode, and dev mode is a JWT decision rather than a functional one.
 - **A progress sink may return a value.** The web's sink returns the `Event` it emitted, so
   `steps.Report` is `Callable[[str, dict], object]` and `_say` calls it without reading the
   result. Awaiting that result kills the job on its first progress call.
@@ -720,15 +760,15 @@ branch, at a time).
   font, and every card lays out sideways. The trap is that a name may be claimed by markup
   rather than by CSS, so grepping the stylesheet alone will not find it.
 - **A FastAPI path parameter as broad as `/sources/{name}/{action}` swallows its
-  siblings**, so `/sources/{name}/read` never matched. Container actions live under
-  `/container/{action}`.
+  siblings**, so `/sources/{name}/read` never matched. Pipeline actions live under
+  `/source/actions/{action}`, where the literal segment cannot be eaten.
 - **`CUBE_API_SECRET` and `CUBEJS_API_SECRET` are one secret with two names**, and HS256
   needs at least 32 bytes. `mint_token` refuses to sign below that rather than let pyjwt
-  print `InsecureKeyLengthWarning` on every request. Rotating it means editing both keys
-  in `.env` *and* `make down && make up` — compose interpolates `CUBEJS_API_SECRET` from
-  `.env` at container start, so the container keeps the old key until it is recreated.
-  `CUBEJS_DEV_MODE=true` skips JWT verification, so a mismatch will not surface locally;
-  it fails the moment dev mode goes off.
+  print `InsecureKeyLengthWarning` on every request. It is minted once at connect and written
+  into the deployment's environment file, so rotating it means a new row and a re-run of the
+  compose file — a container keeps the old key until it is recreated. `CUBEJS_DEV_MODE=true`
+  skips JWT verification, so a mismatch will not surface in dev mode; it fails the moment
+  dev mode goes off, which is the default the generated file carries.
 - **Reasoning summaries need Azure api-version `2025-03-01-preview` or later.** Below it
   the same deployment returns plain string content, zero reasoning tokens, and a 400 on
   `use_responses_api` — so a wrong `AZURE_OPENAI_API_VERSION` shows up as a failed model

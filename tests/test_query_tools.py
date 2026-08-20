@@ -14,7 +14,7 @@ import pytest
 from analyst_agent.agent.session import Session
 from analyst_agent.agent.tools.query import build_tools
 from analyst_agent.core.events import Event, emit
-from analyst_agent.sources.grounding import Grounding
+from analyst_agent.datamodel.grounding import Grounding
 
 QUERY = {
     "measures": ["orders.net_revenue"],
@@ -26,8 +26,8 @@ ROWS = [{"orders.status": "paid", "orders.net_revenue": 100}]
 
 
 @pytest.fixture
-def tools(cube, catalog, tmp_path):
-    session = Session(catalog=catalog, client=cube, grounding=Grounding(tmp_path))
+def tools(cube, catalog):
+    session = Session(catalog=catalog, client=cube, grounding=Grounding({}))
     return {t.name: t for t in build_tools(session)}, session
 
 

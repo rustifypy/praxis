@@ -188,12 +188,11 @@ export function AddSource({
           </div>
         )}
 
-        {!editing && (
-          <p className="drawer-blurb">
-            Cube answers on the address in <code>CUBE_URL</code>, and the container publishes
-            that port on localhost only.
-          </p>
-        )}
+        <p className="drawer-blurb">
+          {editing
+            ? "Cube reads these from its own environment file, so a change here is applied by re-running the compose file with the new one — a container's environment cannot be edited in place."
+            : "These go into an environment file you run Cube with, here or on a server. Nothing starts yet."}
+        </p>
 
         {error && <p className="drawer-error">{error}</p>}
 
@@ -205,7 +204,7 @@ export function AddSource({
             onClick={() => void submit()}
             title={missing.length ? `Still needed: ${missing.join(", ")}` : undefined}
           >
-            {saving ? "Saving…" : editing ? "Save and reconnect" : "Connect"}
+            {saving ? "Saving…" : editing ? "Save" : "Store the connection"}
           </button>
         </footer>
       </aside>

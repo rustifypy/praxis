@@ -1,28 +1,21 @@
 import type { System } from "../sources";
 
 /**
- * What is wrong machine-wide: docker, dev mode, the shared Cube Store.
+ * What is unavailable machine-wide. Docker is the only one left, and it is not fatal.
  *
- * Its own component because both states of the data page show the same three — before a
- * database is connected and after — and a second copy is one that would drift.
+ * Nothing here is about the deployment: it runs wherever its owner put it, so whether it is
+ * up is a health probe on the page below rather than a fact about this machine. Its own
+ * component because both states of the data page show it — before a database is connected and
+ * after — and a second copy is one that would drift.
  */
 export function SystemBanners({ system }: { system: System }) {
+  if (!system.sandbox_reason) return null;
   return (
-    <>
-      {!system.ok && <p className="banner bad">{system.reason}</p>}
-      {system.ok && system.dev_mode && (
-        <p className="banner warn">
-          Cube dev mode is on, so the container serves its playground and skips JWT
-          verification. Fine locally; set <code>CUBEJS_DEV_MODE=false</code> and re-run Connect
-          for anything else. The port is bound to localhost either way.
-        </p>
-      )}
-      {system.ok && !system.cubestore && (
-        <p className="banner warn">
-          Cube Store is not running — queries still work, pre-aggregations will not. Start it
-          with <code>make up</code>.
-        </p>
-      )}
-    </>
+    <p className="banner warn">
+      The sandbox is unavailable, so the agent cannot run Python — no ratios,
+      period deltas or charts drawn from a script. Everything else works:
+      connecting, building the model and asking questions all go over HTTP. (
+      {system.sandbox_reason})
+    </p>
   );
 }

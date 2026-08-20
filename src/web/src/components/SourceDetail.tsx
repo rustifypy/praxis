@@ -20,6 +20,7 @@ import {
   summarise,
 } from "../sources";
 import { Confirm } from "./Confirm";
+import { Deploy } from "./Deploy";
 import { Info } from "./Info";
 import { JobProgress } from "./JobProgress";
 import { Menu } from "./Menu";
@@ -59,7 +60,6 @@ export function SourceDetail({
   const [checking, setChecking] = useState(false);
   const [checkedAt, setCheckedAt] = useState(0);
   const [stage, setStage] = useState<StageName | null>(null);
-  const [logs, setLogs] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
   // Two slots, so a failed Restart reports itself next to Restart and not 400px above
   // the stage panel that had nothing to do with it.
@@ -69,7 +69,11 @@ export function SourceDetail({
   // The actions row counts as part of the pipeline: its primary button is what opens the
   // stage panel, so a click there must not be read as a click outside it.
   const actions = useRef<HTMLSpanElement>(null);
-  const pipeline = useDismiss<HTMLElement>(stage !== null, () => setStage(null), actions);
+  const pipeline = useDismiss<HTMLElement>(
+    stage !== null,
+    () => setStage(null),
+    actions,
+  );
 
   const health = healthOf(source);
   const catalogRead = Boolean(catalog?.read);
@@ -125,9 +129,9 @@ export function SourceDetail({
   }, [loadGrounding]);
 
   useEffect(() => {
-    if (source.running) loadModel();
+    if (source.deployed) loadModel();
     else setModel(null);
-  }, [source.running, job?.done, loadModel]);
+  }, [source.deployed, job?.done, loadModel]);
 
   // The exception to nothing being open on arrival: a failure must not hide behind a closed
   // panel. Deliberately keyed on the job rather than on `source`, which is a new object after
@@ -140,7 +144,10 @@ export function SourceDetail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.id, job?.done, job?.error]);
 
-  const guard = async (work: () => Promise<unknown>, where: "top" | "stage" = "top") => {
+  const guard = async (
+    work: () => Promise<unknown>,
+    where: "top" | "stage" = "top",
+  ) => {
     setTopError("");
     setStageError("");
     try {
@@ -162,33 +169,33 @@ export function SourceDetail({
     }
   };
 
-  const showLogs = () => {
-    if (logs !== null) {
-      setLogs(null);
-      return;
-    }
-    setLogs("Loading…");
-    void api.logs().then((r) => setLogs(r.logs || "(no output)"));
-  };
-
-  const runStage = (name: StageName) => void guard(() => api.runAction(name), "stage");
+  const runStage = (name: StageName) =>
+    void guard(() => api.runAction(name), "stage");
 
   const selected = stage;
   // The server's rail, not a second reading of `steps` — `steps.action` enforces the same
   // ordering rule and ships its answer, so this cannot explain a different one.
   const current = source.stages.find((s) => s.name === selected);
-  const blocker = current?.blocked_by ? `Run ${STAGE_LABEL[current.blocked_by]} first` : "";
-  const record = selected && selected !== "read" ? source.steps[selected] : undefined;
+  const blocker = current?.blocked_by
+    ? `Run ${STAGE_LABEL[current.blocked_by]} first`
+    : "";
+  const record =
+    selected && selected !== "read" ? source.steps[selected] : undefined;
   // Server-computed: the same rule that performs the deletion, so a warning cannot
   // promise something different from what happens.
   const discards = (
-    selected && selected !== "read" ? (source.invalidates?.[selected] ?? []) : []
+    selected && selected !== "read"
+      ? (source.invalidates?.[selected] ?? [])
+      : []
   ).map((later) => STEP_LABEL[later]);
 
   return (
     <div className="detail">
       <header className="detail-head">
-        <span className={`health-dot ${health.tone}`} title={source.health.status} />
+        <span
+          className={`health-dot ${health.tone}`}
+          title={source.health.status}
+        />
         <h1>{source.label}</h1>
         <span className="detail-what">
           {source.driver}
@@ -200,13 +207,21 @@ export function SourceDetail({
           {upcoming ? (
             <button
               className="primary"
-              disabled={busy || Boolean(source.stages.find((s) => s.name === upcoming)?.blocked_by)}
+              disabled={
+                busy ||
+                Boolean(
+                  source.stages.find((s) => s.name === upcoming)?.blocked_by,
+                )
+              }
               onClick={() => {
                 setStage(upcoming);
                 // Cubes is the one stage a button cannot start: a person picks the tables
                 // first. Send them to the picker rather than firing a job.
                 if (upcoming === "cubes") {
-                  panel.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  panel.current?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "center",
+                  });
                 } else {
                   runStage(upcoming);
                 }
@@ -215,50 +230,27 @@ export function SourceDetail({
               {upcoming === "cubes" ? "Choose tables ↓" : STAGE_LABEL[upcoming]}
             </button>
           ) : (
-            <button className="primary" disabled={checking} onClick={() => void test()}>
+            <button
+              className="primary"
+              disabled={checking}
+              onClick={() => void test()}
+            >
               {checking ? "Testing…" : "Test connection"}
             </button>
           )}
 
-          {/* Cube itself. In dev mode this is the playground; otherwise it is the API root.
-              Rendered only while it is up — a link to a stopped container is a browser error
-              page, not an answer. */}
-          {source.running && (
-            <a
-              className="cube-link"
-              href={source.url}
-              target="_blank"
-              rel="noreferrer"
-              title={`Open Cube at ${source.url}`}
-            >
-              Cube <span aria-hidden>↗</span>
-            </a>
-          )}
-
+          {/* No link to Cube. Its port is not published — every call goes through the store,
+              which is what makes that the one authenticated door — so a link would be a browser
+              error page rather than an answer. */}
+          {/* No lifecycle verbs. A Cube may be running anywhere — this portal's own container
+              is one case of that, not the shape of the feature — so starting and stopping it
+              belongs to whoever runs it, and everything here works through its URL. */}
           <Menu
             items={[
               {
                 label: checking ? "Testing…" : "Test connection",
                 onSelect: () => void test(),
-                disabled: source.running ? undefined : "the container is not running",
               },
-              source.running
-                ? { label: "Restart", onSelect: () => void guard(() => api.control("restart")) }
-                : {
-                    label: source.container_state === "missing" ? "Create container" : "Start",
-                    onSelect: () =>
-                      void guard(() =>
-                        source.container_state === "missing"
-                          ? api.runAction("connect")
-                          : api.control("start"),
-                      ),
-                  },
-              {
-                label: "Stop",
-                onSelect: () => void guard(() => api.control("stop")),
-                disabled: source.running ? undefined : "already stopped",
-              },
-              { label: logs === null ? "Container output" : "Hide output", onSelect: showLogs },
               {
                 label: "Edit connection",
                 onSelect: onEdit,
@@ -275,54 +267,87 @@ export function SourceDetail({
         </span>
       </header>
 
-      {source.description && <p className="detail-desc">{source.description}</p>}
+      {source.description && (
+        <p className="detail-desc">{source.description}</p>
+      )}
 
       <SystemBanners system={system} />
 
       {topError && <p className="banner bad">{topError}</p>}
       {health.tone === "bad" && (
         <p className="banner bad">
-          The container is up but the database is unreachable: {health.label}.{" "}
+          Cube is answering but the database is not reachable from it:{" "}
+          {health.label}. The credentials are in the deployment's own
+          environment file, so fixing them means{" "}
           <button className="link" onClick={onEdit}>
-            Edit the credentials
+            editing the connection
           </button>{" "}
-          or read the container output.
+          here and re-running the compose file with the new one — a container's
+          environment cannot be changed in place.
         </p>
       )}
-      {source.serving && source.serving.views.length > 0 && !source.steps.views?.status && (
-        <p className="banner">
-          Cube is serving {source.serving.views.join(", ")}, but this portal did not build
-          them — the stages below only record what it ran, and re-running one rewrites every
-          model file.
+      {/* Before the rail, because the rail is what it invalidates: every stage reads "todo"
+          when the model cannot be read, and that is not the same as nothing being built. */}
+      {source.store_error && (
+        <p className="banner bad">
+          The model store at{" "}
+          <code>{source.store_url || "(none configured)"}</code> is not
+          answering, so the stages below cannot say what has been built:{" "}
+          {source.store_error}
         </p>
       )}
 
-      {logs !== null && <pre className="source-logs">{logs}</pre>}
+      {/* Server-computed, from the model store rather than from `steps`: an adopted model has
+          no recorded runs at all, so a banner derived from what this portal did would say
+          nothing about a Cube serving a dozen working cubes. */}
+      {source.adopted && (
+        <p className="banner">
+          Cube is serving a model this portal did not build, so every stage
+          below reads as not run. Re-running one replaces the whole model — the
+          store keeps what is there now as a commit, and nothing is served until
+          Cube has compiled the replacement.
+        </p>
+      )}
 
       {job && <JobProgress job={job} onCancel={() => void api.cancelJob()} />}
+
+      <Deploy source={source} onSaved={onRefresh} />
 
       <section className="detail-panel" ref={pipeline}>
         <div className="panel-head">
           <h3>Pipeline</h3>
           <Info label="About the pipeline">
-            Five stages, each runnable and re-runnable on its own — what one needs from the
-            last is stored rather than held in memory, so they can run minutes or days apart.
-            Click a stage to see what it produced and to run it again.
+            Four stages, each runnable and re-runnable on its own — what one
+            needs from the last is stored rather than held in memory, so they
+            can run minutes or days apart. Click a stage to see what it produced
+            and to run it again. A stage that rebuilds the model commits it to a
+            candidate first and asks Cube about it there, so a model Cube
+            refuses never replaces the one being served.
           </Info>
         </div>
 
         <ol className="stepper">
-          {source.stages.map(({ name, state }, index) => {
+          {source.stages.map(({ name, state, note }, index) => {
             return (
-              <li key={name} className={`step ${state} ${selected === name ? "on" : ""}`}>
+              <li
+                key={name}
+                className={`step ${state} ${selected === name ? "on" : ""}`}
+              >
                 <button
                   onClick={() => setStage(selected === name ? null : name)}
                   aria-expanded={selected === name}
                 >
                   <span className={`step-tick ${state}`} aria-hidden>
-                    {state === "done" ? "✓" : state === "error" ? "✕" : index + 1}
+                    {state === "done"
+                      ? "✓"
+                      : state === "error"
+                        ? "✕"
+                        : index + 1}
                   </span>
                   <span className="step-name">{STAGE_LABEL[name]}</span>
+                  {/* "9 of 11 described" — a tick alone would claim the whole model is
+                      described, and nobody re-describes all of it to finish the last two. */}
+                  {note && <span className="step-note">{note}</span>}
                 </button>
               </li>
             );
@@ -330,95 +355,109 @@ export function SourceDetail({
         </ol>
 
         {selected && (
-        <div className="stage-panel" ref={panel}>
-          <div className="stage-panel-head">
-            <h4>{STAGE_LABEL[selected]}</h4>
-            {record?.finished_at && <span className="stage-when">{ago(record.finished_at)}</span>}
-            <Info label={`About ${STAGE_LABEL[selected]}`}>{STAGE_BLURB[selected]}</Info>
-            <button className="stage-close" onClick={() => setStage(null)} aria-label="Close">
-              ×
-            </button>
-          </div>
-
-          {record?.status === "error" ? (
-            <p className="banner bad">{record.error || "failed"}</p>
-          ) : (
-            <p className="stage-says">
-              {selected === "read"
-                ? catalogRead
-                  ? `${catalog?.schemas.length ?? 0} schema${catalog?.schemas.length === 1 ? "" : "s"}, ${catalog?.schemas.reduce((n, s) => n + s.tables.length, 0) ?? 0} tables`
-                  : "Not read yet."
-                : summarise(selected, record) || "Not run yet."}
-            </p>
-          )}
-
-          {stageError && <p className="banner bad">{stageError}</p>}
-          {blocker && <p className="stage-hint">{blocker}.</p>}
-
-          {selected === "cubes" && catalog?.truncated && (
-            <p className="banner warn">
-              The catalog read hit Cube's row limit, so some keys or statistics are missing —
-              check the joins before trusting a wide schema.
-            </p>
-          )}
-          {selected === "read" &&
-            catalog?.notes.map((note) => (
-              <p key={note} className="banner">
-                {note}
-              </p>
-            ))}
-
-          {selected === "cubes" && catalogRead && catalog ? (
-            <TablePicker
-              catalog={catalog}
-              busy={busy || Boolean(blocker)}
-              discards={discards}
-              onRun={(schema, tables) =>
-                void guard(
-                  () => api.runAction("cubes", { schema_name: schema, tables }),
-                  "stage",
-                )
-              }
-              onReread={() => void guard(() => api.runAction("read"), "stage")}
-            />
-          ) : (
-            <div className="stage-cta">
-              <button
-                className="primary"
-                disabled={busy || Boolean(blocker)}
-                title={blocker || undefined}
-                onClick={() => runStage(selected)}
-              >
-                {current?.state === "done"
-                  ? `Run ${STAGE_LABEL[selected]} again`
-                  : STAGE_LABEL[selected]}
-              </button>
-              {discards.length > 0 && (
-                <span className="stage-hint">
-                  Re-running this rewrites the model files, discarding {discards.join(" and ")}.
-                </span>
+          <div className="stage-panel" ref={panel}>
+            <div className="stage-panel-head">
+              <h4>{STAGE_LABEL[selected]}</h4>
+              {record?.finished_at && (
+                <span className="stage-when">{ago(record.finished_at)}</span>
               )}
+              <Info label={`About ${STAGE_LABEL[selected]}`}>
+                {STAGE_BLURB[selected]}
+              </Info>
+              <button
+                className="stage-close"
+                onClick={() => setStage(null)}
+                aria-label="Close"
+              >
+                ×
+              </button>
             </div>
-          )}
 
-          {record?.notes?.length ? (
-            <ul className="stage-notes">
-              {record.notes.map((note, i) => (
-                <li key={i}>{note}</li>
-              ))}
-            </ul>
-          ) : null}
+            {record?.status === "error" ? (
+              <p className="banner bad">{record.error || "failed"}</p>
+            ) : (
+              <p className="stage-says">
+                {selected === "read"
+                  ? catalogRead
+                    ? `${catalog?.schemas.length ?? 0} schema${catalog?.schemas.length === 1 ? "" : "s"}, ${catalog?.schemas.reduce((n, s) => n + s.tables.length, 0) ?? 0} tables`
+                    : "Not read yet."
+                  : summarise(selected, record) || "Not run yet."}
+              </p>
+            )}
 
-          {record?.errors && Object.keys(record.errors).length > 0 && (
-            <ul className="stage-notes bad">
-              {Object.entries(record.errors).map(([member, message]) => (
-                <li key={member}>
-                  <code>{member}</code> {message}
-                </li>
+            {stageError && <p className="banner bad">{stageError}</p>}
+            {blocker && <p className="stage-hint">{blocker}.</p>}
+
+            {selected === "cubes" && catalog?.truncated && (
+              <p className="banner warn">
+                The catalog read hit Cube's row limit, so some keys or
+                statistics are missing — check the joins before trusting a wide
+                schema.
+              </p>
+            )}
+            {selected === "read" &&
+              catalog?.notes.map((note) => (
+                <p key={note} className="banner">
+                  {note}
+                </p>
               ))}
-            </ul>
-          )}
-        </div>
+
+            {selected === "cubes" && catalogRead && catalog ? (
+              <TablePicker
+                catalog={catalog}
+                busy={busy || Boolean(blocker)}
+                discards={discards}
+                onRun={(schema, tables) =>
+                  void guard(
+                    () =>
+                      api.runAction("cubes", { schema_name: schema, tables }),
+                    "stage",
+                  )
+                }
+                onReread={() =>
+                  void guard(() => api.runAction("read"), "stage")
+                }
+              />
+            ) : (
+              <div className="stage-cta">
+                <button
+                  className="primary"
+                  disabled={busy || Boolean(blocker)}
+                  title={blocker || undefined}
+                  onClick={() => runStage(selected)}
+                >
+                  {current?.state === "done"
+                    ? `Run ${STAGE_LABEL[selected]} again`
+                    : STAGE_LABEL[selected]}
+                </button>
+                {discards.length > 0 && (
+                  <span className="stage-hint">
+                    Re-running this replaces the whole model, discarding{" "}
+                    {discards.join(" and ")}. What is there now stays in the
+                    store as a commit.
+                  </span>
+                )}
+              </div>
+            )}
+
+            {record?.notes?.length ? (
+              <ul className="stage-notes">
+                {record.notes.map((note, i) => (
+                  <li key={i}>{note}</li>
+                ))}
+              </ul>
+            ) : null}
+
+            {record?.errors && Object.keys(record.errors).length > 0 && (
+              <ul className="stage-notes bad">
+                {Object.entries(record.errors).map(([member, message]) => (
+                  <li key={member}>
+                    <code>{member}</code> {message}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
       </section>
 
@@ -426,18 +465,20 @@ export function SourceDetail({
         <div className="panel-head">
           <h3>Model</h3>
           <Info label="About the model panel">
-            Everything the agent brings to a question, and — on a branch — where you change
-            it. The list is read live from Cube's <code>/v1/meta</code> and parsed by the same
-            code the agent queries through, so it is what a question can actually reach rather
-            than what the YAML on disk says. In dev mode Cube watches these files, so a save is
-            live at once — which is why what you may save is gated rather than what you may
-            load, and why a file that will not compile is refused before it is written.
-            Grounding is the markdown handed to the agent <em>before</em> a question is, and it
-            is re-read every turn.
+            Everything the agent brings to a question, and — on a branch — where
+            you change it. The list is read live from Cube's{" "}
+            <code>/v1/meta</code> and parsed by the same code the agent queries
+            through, so it is what a question can actually reach rather than
+            what the YAML on disk says. In dev mode Cube watches these files, so
+            a save is live at once — which is why what you may save is gated
+            rather than what you may load, and why a file that will not compile
+            is refused before it is written. Grounding is the markdown handed to
+            the agent <em>before</em> a question is, and it is re-read every
+            turn.
           </Info>
         </div>
         <ModelEditor
-          running={source.running}
+          running={source.deployed}
           model={model}
           grounding={grounding}
           loading={loadingModel || loadingGrounding}
@@ -460,12 +501,13 @@ export function SourceDetail({
           }}
         >
           <p>
-            This stops and deletes <code>{source.container}</code>, removes the stored
-            credentials, and deletes the model directory <code>cube/model/</code>.
+            This removes the stored credentials and the two addresses.{" "}
+            <strong>Nothing is stopped</strong> — the deployment is not run from
+            here, so it keeps running until you stop it yourself.
           </p>
           <p>
-            Rebuilding it costs one model call per table. If that directory is not committed,
-            there is no way back.
+            The model stays in the store, commits and all. This forgets how to
+            reach the database, not what was built on it.
           </p>
         </Confirm>
       )}

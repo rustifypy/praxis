@@ -586,7 +586,9 @@ textarea {
   cursor: pointer;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
   animation: rise 0.16s var(--ease);
-  transition: color 0.12s, border-color 0.12s;
+  transition:
+    color 0.12s,
+    border-color 0.12s;
 }
 
 .jump:hover {
@@ -1097,7 +1099,12 @@ textarea {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(90deg, transparent, var(--accent-soft), transparent);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--accent-soft),
+    transparent
+  );
   animation: sweep 1.6s ease-in-out infinite;
 }
 
@@ -1430,7 +1437,9 @@ textarea {
   font-size: 12px;
   cursor: pointer;
   text-decoration: none;
-  transition: color 0.12s, border-color 0.12s;
+  transition:
+    color 0.12s,
+    border-color 0.12s;
 }
 
 .res-more:hover:not(:disabled),
@@ -1659,7 +1668,9 @@ textarea {
   color: var(--muted);
   font-size: 12px;
   text-decoration: none;
-  transition: color 0.12s, border-color 0.12s;
+  transition:
+    color 0.12s,
+    border-color 0.12s;
 }
 
 .wrote-get:hover {
@@ -2435,8 +2446,15 @@ textarea {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.35; transform: scale(0.7); }
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.7);
+  }
 }
 
 .sources {
@@ -2691,9 +2709,15 @@ textarea {
   background: var(--faint);
 }
 
-.health-dot.ok { background: var(--ok); }
-.health-dot.warn { background: var(--warn); }
-.health-dot.bad { background: var(--bad); }
+.health-dot.ok {
+  background: var(--ok);
+}
+.health-dot.warn {
+  background: var(--warn);
+}
+.health-dot.bad {
+  background: var(--bad);
+}
 
 .banner {
   margin: 0 0 14px;
@@ -2706,8 +2730,13 @@ textarea {
   font-size: 13px;
 }
 
-.banner.warn { border-left-color: var(--warn); }
-.banner.bad { border-left-color: var(--bad); color: var(--ink); }
+.banner.warn {
+  border-left-color: var(--warn);
+}
+.banner.bad {
+  border-left-color: var(--bad);
+  color: var(--ink);
+}
 
 .link {
   border: none;
@@ -2811,7 +2840,6 @@ button.primary:disabled,
   cursor: not-allowed;
 }
 
-
 /* Cube's own UI for this container, between the primary action and the overflow. Styled
    as a control rather than as body-text link so the row keeps one baseline. */
 .cube-link {
@@ -2844,7 +2872,6 @@ button.danger.solid {
   font-size: 13px;
 }
 
-.source-logs,
 .job-logs {
   margin: 12px 16px;
   padding: 10px 12px;
@@ -2940,6 +2967,17 @@ button.danger.solid {
 .step-name {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* "9 of 11 described". `margin-left: auto` rather than a gap: the tick and the name stay put
+   whether or not a stage has one, so a rail where only Describe carries a count does not
+   shift the other three. */
+.step-note {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--muted);
   white-space: nowrap;
 }
 
@@ -3124,8 +3162,12 @@ button.danger.solid {
   text-transform: uppercase;
 }
 
-.tag.warn { color: var(--warn); }
-.tag.soft { color: var(--accent); }
+.tag.warn {
+  color: var(--warn);
+}
+.tag.soft {
+  color: var(--accent);
+}
 
 .picker-meta {
   margin-left: auto;
@@ -3224,10 +3266,18 @@ button.danger.solid {
   font-size: 12px;
 }
 
-.job-steps li.done { color: var(--muted); }
-.job-steps li.done .tick { color: var(--ok); }
-.job-steps li.failed { color: var(--bad); }
-.job-steps li.running { color: var(--ink); }
+.job-steps li.done {
+  color: var(--muted);
+}
+.job-steps li.done .tick {
+  color: var(--ok);
+}
+.job-steps li.failed {
+  color: var(--bad);
+}
+.job-steps li.running {
+  color: var(--ink);
+}
 .job-steps li.running .tick {
   color: var(--accent);
   animation: pulse 1.4s ease-in-out infinite;
@@ -3258,7 +3308,9 @@ button.danger.solid {
 }
 
 @keyframes fade {
-  from { opacity: 0; }
+  from {
+    opacity: 0;
+  }
 }
 
 .drawer {
@@ -3278,7 +3330,10 @@ button.danger.solid {
 }
 
 @keyframes slide {
-  from { transform: translateX(16px); opacity: 0.4; }
+  from {
+    transform: translateX(16px);
+    opacity: 0.4;
+  }
 }
 
 .drawer header {
@@ -3366,12 +3421,18 @@ button.danger.solid {
 /* A local single-user tool on a desktop, so this only keeps the three-column shell from
    crushing the content — it is not a phone layout. */
 @media (max-width: 980px) {
-  .app { grid-template-columns: 52px 204px minmax(0, 1fr); }
-  .src-panel { width: min(460px, calc(100vw - 300px)); }
+  .app {
+    grid-template-columns: 52px 204px minmax(0, 1fr);
+  }
+  .src-panel {
+    width: min(460px, calc(100vw - 300px));
+  }
 
   /* Below this the detail box would be narrower than a member row, so the split stacks
      and the list goes back to sitting above what it opens. */
-  .served-split { grid-template-columns: 1fr; }
+  .served-split {
+    grid-template-columns: 1fr;
+  }
   .served-detail {
     position: static;
     max-height: none;
@@ -3379,9 +3440,15 @@ button.danger.solid {
 }
 
 @media (max-width: 720px) {
-  .sources { padding: 20px 16px 48px; }
-  .detail { padding: 18px 16px 40px; }
-  .step { min-width: 96px; }
+  .sources {
+    padding: 20px 16px 48px;
+  }
+  .detail {
+    padding: 18px 16px 40px;
+  }
+  .step {
+    min-width: 96px;
+  }
 }
 
 /* ============================ one source per page ============================ */
@@ -3510,11 +3577,6 @@ button.danger.solid {
   margin: 12px 0 0;
 }
 
-.detail .source-logs {
-  margin-left: 0;
-  margin-right: 0;
-}
-
 .detail-panel {
   margin-top: 26px;
   padding-top: 18px;
@@ -3533,11 +3595,6 @@ button.danger.solid {
   font-size: 15px;
   font-weight: 600;
 }
-
-
-
-
-
 
 /* ---------- what Cube is serving ---------- */
 
@@ -4977,4 +5034,105 @@ button.danger.solid {
 /* A token is one unbroken word, so it wraps rather than scrolls — there is nothing to scan. */
 .mcp-field code {
   overflow-wrap: anywhere;
+}
+
+/* --- the deployment hand-over ------------------------------------------------
+   New class names throughout: `.panel-head` and `.stage-hint` are shared with the pipeline
+   panel deliberately, so the two read as the same kind of section, and nothing else here
+   reuses a name markup has already claimed. */
+.deploy-lead {
+  margin: 10px 0 0;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.deploy-steps {
+  margin: 14px 0 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  font-size: 13px;
+}
+
+.deploy-steps p {
+  margin: 0 0 8px;
+}
+
+.deploy-steps .stage-hint {
+  display: block;
+  margin-top: 6px;
+}
+
+.deploy-file {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--code-bg);
+}
+
+.deploy-file-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px 5px 10px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* The file can be forty lines, and it is meant to be copied rather than read line by line. */
+.deploy-file pre {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 300px;
+  overflow: auto;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+.deploy-where {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.deploy-where h4 {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+
+.deploy-where label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.deploy-where label > span {
+  flex: 0 0 96px;
+  color: var(--muted);
+}
+
+.deploy-where input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--control);
+  line-height: 1.2;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--raised);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.deploy-where button.primary {
+  margin-top: 14px;
 }

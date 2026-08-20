@@ -42,7 +42,9 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [turnStart, setTurnStart] = useState<number | undefined>();
   const [cubeUrl, setCubeUrl] = useState("");
-  const [entities, setEntities] = useState<{ name: string; view: boolean; members: number }[]>([]);
+  const [entities, setEntities] = useState<
+    { name: string; view: boolean; members: number }[]
+  >([]);
   const [fatal, setFatal] = useState<string | null>(null);
 
   // Which mode the rail is on. A hash rather than a router: four views do not justify
@@ -61,10 +63,18 @@ export default function App() {
     ? decodeURIComponent(hash.slice("#boards/".length))
     : null;
   const [dashboards, setDashboards] = useState<DashboardRow[]>([]);
-  const [system, setSystem] = useState<System>({ ok: true });
+  const [system, setSystem] = useState<System>({
+    sandbox_reason: "",
+    store_url: "",
+    sandbox_url: "",
+    semantic_dir: "",
+  });
   const [source, setSource] = useState<SourceRow | null>(null);
   const [drivers, setDrivers] = useState<DriverSpec[]>([]);
-  const [driverMeta, setDriverMeta] = useState({ local_hosts: [] as string[], localhost_note: "" });
+  const [driverMeta, setDriverMeta] = useState({
+    local_hosts: [] as string[],
+    localhost_note: "",
+  });
   const [job, setJob] = useState<JobState | null>(null);
   // The connection drawer: "new" to connect one, "edit" to change its credentials.
   const [drawer, setDrawer] = useState<"new" | "edit" | null>(null);
@@ -104,7 +114,9 @@ export default function App() {
 
   const showBoards = useCallback(
     (id?: string) => {
-      window.location.hash = id ? `#boards/${encodeURIComponent(id)}` : "#boards";
+      window.location.hash = id
+        ? `#boards/${encodeURIComponent(id)}`
+        : "#boards";
       void refreshDashboards();
     },
     [refreshDashboards],
@@ -123,7 +135,11 @@ export default function App() {
     // The stream is the sole carrier of events; this only refreshes the header, so an
     // in-flight job keeps the events it has already received.
     setJob((prev) =>
-      current.id === null ? null : prev?.id === current.id ? { ...prev, ...current } : current,
+      current.id === null
+        ? null
+        : prev?.id === current.id
+          ? { ...prev, ...current }
+          : current,
     );
   }, []);
 
@@ -131,7 +147,10 @@ export default function App() {
     (async () => {
       try {
         await api.claimToken();
-        const [loaded, catalog] = await Promise.all([api.listChats(), api.catalog()]);
+        const [loaded, catalog] = await Promise.all([
+          api.listChats(),
+          api.catalog(),
+        ]);
         setChats(loaded);
         setCubeUrl(catalog.cube_url ?? "");
         setEntities(catalog.entities ?? []);
@@ -143,9 +162,15 @@ export default function App() {
       // The data page is independent of the chat: a broken Cube must not hide the panel
       // that is how you fix it.
       try {
-        const [meta] = await Promise.all([sourcesApi.drivers(), refreshSource()]);
+        const [meta] = await Promise.all([
+          sourcesApi.drivers(),
+          refreshSource(),
+        ]);
         setDrivers(meta.drivers);
-        setDriverMeta({ local_hosts: meta.local_hosts, localhost_note: meta.localhost_note });
+        setDriverMeta({
+          local_hosts: meta.local_hosts,
+          localhost_note: meta.localhost_note,
+        });
       } catch {
         /* /api/system reports why; the panel says so itself. */
       }
@@ -160,7 +185,8 @@ export default function App() {
       setJob((prev) => {
         if (!prev) return prev;
         // The buffer replay can repeat an event the snapshot already carried.
-        if ((prev.events ?? []).some((seen) => seen.seq === event.seq)) return prev;
+        if ((prev.events ?? []).some((seen) => seen.seq === event.seq))
+          return prev;
         const next = { ...prev, events: [...(prev.events ?? []), event] };
         if (event.type === "job_end") {
           next.done = true;
@@ -214,7 +240,12 @@ export default function App() {
     follow();
 
     try {
-      for await (const event of api.sendMessage(activeId, question, files, controller.signal)) {
+      for await (const event of api.sendMessage(
+        activeId,
+        question,
+        files,
+        controller.signal,
+      )) {
         setItems((prev) => applyEvent(prev, event));
       }
     } catch (err) {
@@ -267,7 +298,9 @@ export default function App() {
   // Data and agents have no list beside their page — one connection, one endpoint — so the
   // middle column is absent there rather than empty.
   return (
-    <div className={`app ${view === "data" || view === "agents" ? "no-nav" : ""}`}>
+    <div
+      className={`app ${view === "data" || view === "agents" ? "no-nav" : ""}`}
+    >
       <Rail
         view={view}
         jobRunning={Boolean(job && !job.done)}
@@ -315,18 +348,14 @@ export default function App() {
           onConnect={async (body) => {
             await sourcesApi.connect(body);
             setDrawer(null);
-            // Onto the data page — connecting is about to narrate progress there.
+            // Onto the data page, where the pipeline is. POST /api/source has already made
+            // the connection usable — there is no Connect action to fire after it.
             showData();
-            // Straight into connecting: a stored connection nobody starts is a dead end.
-            await sourcesApi.runAction("connect");
             await refreshSource();
           }}
           onSave={async (body) => {
             await sourcesApi.edit(body);
             setDrawer(null);
-            await refreshSource();
-            // Credentials only take effect on a fresh container, so reconnect for them.
-            await sourcesApi.runAction("connect");
             await refreshSource();
           }}
         />
@@ -371,145 +400,157 @@ export default function App() {
           )}
         </main>
       ) : (
-      <main className="main chat-main">
-        <ChatHeader source={source} cubeUrl={cubeUrl} onShowData={showData} />
+        <main className="main chat-main">
+          <ChatHeader source={source} cubeUrl={cubeUrl} onShowData={showData} />
 
-        <div
-          className="transcript"
-          ref={scroller}
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-            if (near !== pinned.current) {
-              pinned.current = near;
-              setTailing(near);
-            }
-          }}
-        >
-          {items.length === 0 && (
-            <Welcome
-              entities={entities}
-              onPick={(q) => {
-                if (!activeId) void create().then(() => composer.current?.fill(q));
-                else composer.current?.fill(q);
-              }}
-            />
+          <div
+            className="transcript"
+            ref={scroller}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              const near =
+                el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+              if (near !== pinned.current) {
+                pinned.current = near;
+                setTailing(near);
+              }
+            }}
+          >
+            {items.length === 0 && (
+              <Welcome
+                entities={entities}
+                onPick={(q) => {
+                  if (!activeId)
+                    void create().then(() => composer.current?.fill(q));
+                  else composer.current?.fill(q);
+                }}
+              />
+            )}
+
+            {items.map((item, i) => {
+              switch (item.kind) {
+                case "user":
+                  return (
+                    <div key={i} className="row user">
+                      {item.text}
+                      {item.files.length > 0 && (
+                        <div className="attached sent">
+                          {item.files.map((path) => (
+                            <a
+                              key={path}
+                              className="attach"
+                              href={
+                                activeId
+                                  ? api.chatFileUrl(activeId, path)
+                                  : undefined
+                              }
+                              download
+                            >
+                              <span className="attach-name">
+                                {path.replace(/^uploads\//, "")}
+                              </span>
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                case "thinking":
+                  return (
+                    <div key={i} className="row">
+                      <Thinking
+                        text={item.text}
+                        open={item.open}
+                        live={item.live}
+                        startedAt={item.startedAt}
+                        ms={item.ms}
+                      />
+                    </div>
+                  );
+                case "tool":
+                  return (
+                    <div key={i} className="row">
+                      <ToolCall
+                        chatId={activeId ?? ""}
+                        tool={item.tool}
+                        label={item.label}
+                        query={item.query}
+                        script={item.script}
+                        awaiting={item.awaiting}
+                        end={item.end}
+                        startedAt={item.startedAt}
+                        ms={item.ms}
+                        live={item.live}
+                      />
+                    </div>
+                  );
+                case "answer":
+                  return (
+                    <div key={i} className="row">
+                      <Answer text={item.text} live={item.live} />
+                    </div>
+                  );
+                case "result":
+                  return (
+                    <div key={i} className="row">
+                      <ResultBlock
+                        resultId={item.resultId}
+                        label={item.label}
+                        columns={item.columns}
+                        rows={item.rows}
+                        rowCount={item.rowCount}
+                        chart={item.chart}
+                      />
+                    </div>
+                  );
+                case "files":
+                  return (
+                    <div key={i} className="row">
+                      <FileBlock
+                        chatId={activeId ?? ""}
+                        label={item.label}
+                        paths={item.paths}
+                      />
+                    </div>
+                  );
+                case "compacted":
+                  return (
+                    <div key={i} className="row compacted">
+                      <span>
+                        Earlier messages were summarized to fit the context —{" "}
+                        {item.before} became {item.after}
+                      </span>
+                    </div>
+                  );
+                case "error":
+                  return (
+                    <div key={i} className="row error">
+                      {item.message}
+                    </div>
+                  );
+              }
+            })}
+          </div>
+
+          {/* Scrolling up to re-read something stops the transcript following the stream, and
+            without this nothing says so — an answer arriving off-screen looks like no answer. */}
+          {!tailing && items.length > 0 && (
+            <button className="jump" onClick={follow}>
+              ↓ {busy ? "Jump to what it is writing" : "Jump to the end"}
+            </button>
           )}
 
-          {items.map((item, i) => {
-            switch (item.kind) {
-              case "user":
-                return (
-                  <div key={i} className="row user">
-                    {item.text}
-                    {item.files.length > 0 && (
-                      <div className="attached sent">
-                        {item.files.map((path) => (
-                          <a
-                            key={path}
-                            className="attach"
-                            href={activeId ? api.chatFileUrl(activeId, path) : undefined}
-                            download
-                          >
-                            <span className="attach-name">{path.replace(/^uploads\//, "")}</span>
-                          </a>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              case "thinking":
-                return (
-                  <div key={i} className="row">
-                    <Thinking
-                      text={item.text}
-                      open={item.open}
-                      live={item.live}
-                      startedAt={item.startedAt}
-                      ms={item.ms}
-                    />
-                  </div>
-                );
-              case "tool":
-                return (
-                  <div key={i} className="row">
-                    <ToolCall
-                      chatId={activeId ?? ""}
-                      tool={item.tool}
-                      label={item.label}
-                      query={item.query}
-                      script={item.script}
-                      awaiting={item.awaiting}
-                      end={item.end}
-                      startedAt={item.startedAt}
-                      ms={item.ms}
-                      live={item.live}
-                    />
-                  </div>
-                );
-              case "answer":
-                return (
-                  <div key={i} className="row">
-                    <Answer text={item.text} live={item.live} />
-                  </div>
-                );
-              case "result":
-                return (
-                  <div key={i} className="row">
-                    <ResultBlock
-                      resultId={item.resultId}
-                      label={item.label}
-                      columns={item.columns}
-                      rows={item.rows}
-                      rowCount={item.rowCount}
-                      chart={item.chart}
-                    />
-                  </div>
-                );
-              case "files":
-                return (
-                  <div key={i} className="row">
-                    <FileBlock chatId={activeId ?? ""} label={item.label} paths={item.paths} />
-                  </div>
-                );
-              case "compacted":
-                return (
-                  <div key={i} className="row compacted">
-                    <span>
-                      Earlier messages were summarized to fit the context — {item.before} became{" "}
-                      {item.after}
-                    </span>
-                  </div>
-                );
-              case "error":
-                return (
-                  <div key={i} className="row error">
-                    {item.message}
-                  </div>
-                );
-            }
-          })}
-        </div>
-
-        {/* Scrolling up to re-read something stops the transcript following the stream, and
-            without this nothing says so — an answer arriving off-screen looks like no answer. */}
-        {!tailing && items.length > 0 && (
-          <button className="jump" onClick={follow}>
-            ↓ {busy ? "Jump to what it is writing" : "Jump to the end"}
-          </button>
-        )}
-
-        <Composer
-          ref={composer}
-          chatId={activeId}
-          busy={busy}
-          disabled={!activeId}
-          startedAt={turnStart}
-          status={statusOf(items, busy)}
-          onSend={(q, files) => void send(q, files)}
-          onStop={() => void stop()}
-        />
-      </main>
+          <Composer
+            ref={composer}
+            chatId={activeId}
+            busy={busy}
+            disabled={!activeId}
+            startedAt={turnStart}
+            status={statusOf(items, busy)}
+            onSend={(q, files) => void send(q, files)}
+            onStop={() => void stop()}
+          />
+        </main>
       )}
     </div>
   );

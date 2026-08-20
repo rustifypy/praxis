@@ -3,7 +3,7 @@ no containers, no model calls."""
 
 import pytest
 
-from analyst_agent.sources import vcs
+from analyst_agent.datamodel import vcs
 
 
 @pytest.fixture

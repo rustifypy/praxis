@@ -4,16 +4,29 @@ import httpx
 import pytest
 
 from analyst_agent.core.config import settings
+from analyst_agent.core.deployment import Deployment
 from analyst_agent.cube.catalog import Catalog
 from analyst_agent.cube.client import CompileResult, CubeError, LoadResult
 from analyst_agent.cube.schema import CubeQuery
 
 
 @pytest.fixture(autouse=True)
-def local_cube(monkeypatch):
-    """Pin where Cube answers. There is one address and it comes from settings, so without
-    this every test that touches health or the client reads the developer's own `.env`."""
-    monkeypatch.setattr(settings, "cube_url", "http://localhost:4000")
+def scratch_data_dir(monkeypatch, tmp_path_factory):
+    """Nothing may reach the developer's own ~/.analyst. The deployment row lives in
+    analyst.db and `open_client` reads it, so an unpinned data dir would point a test at a
+    real Cube."""
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path_factory.mktemp("data")))
+
+
+@pytest.fixture
+def deployment() -> Deployment:
+    return Deployment(
+        store_url="http://localhost:8500",
+        store_token="w" * 40,
+        api_secret="s" * 40,
+        driver="postgres",
+        credentials={"CUBEJS_DB_NAME": "shop"},
+    )
 
 
 META = {
@@ -88,6 +101,8 @@ class FakeCube:
     session (`gate`, `Session`, `dashboards.refresh`, `EditContext`) takes one in a test."""
 
     served: Catalog
+    root: str = "http://localhost:4000/cubejs-api"
+    """Part of the seam now: the catalog route reports which address the session is on."""
     sql: str = "SELECT 1"
     rows: list[dict] = field(default_factory=list)
     resolved_ranges: dict[str, list[str]] = field(default_factory=dict)

@@ -29,32 +29,32 @@ cp .env.example .env      # Azure OpenAI key + endpoint; check QUERY_MODEL
 make install              # uv sync --all-groups
 ```
 
-You need Docker and a database of your own — nothing is bundled. Point the tool at it
-from the portal: `make serve`, then **Sources** in the sidebar, **Add source**.
+You need a database of your own — nothing is bundled. Point the tool at it from the portal:
+`make web`, then **Data** in the rail, **Connect a database**.
 
-That writes one row to the `sources` table in `~/.analyst/analyst.db` (credentials
-included, chmod 600) and an
-empty `cube/sources/<name>/`, then starts the container from that row and verifies the
-connection through Cube's `/readyz`. There is no registry file and no credential file:
-`sources/docker.py` builds a `docker run` from the row, so there is nothing on disk that
-can drift from it.
+That writes one row to the `deployment` table in `~/.analyst/analyst.db` — credentials, the
+API secret and the model store's two tokens, chmod 600 — and **starts nothing**. The portal
+does not run Cube. It renders an environment file from that row; you save it as `services/semantic/.env`,
+run `docker compose up -d` there, and paste the two addresses back. Connecting is two steps
+because the portal cannot do the middle one.
 
-The portal is the only surface for this — `POST /api/sources` is the sole writer of a new
-row, and `web/sources.py` the sole caller of `run.action`. Keep it that way: a second
-surface means the connection form, its validation and the four steps' confirmations get
-written twice, which is exactly how two implementations of one rule start disagreeing.
+Docker is needed only for the **code sandbox** and for running that compose file locally. A
+machine without it can still connect, build a model and ask questions — it just cannot run
+Python.
 
-`make up` starts the Cube Store every source shares; source containers restart with
-Docker on their own.
+The portal is the only surface for this — `POST /api/source` is the sole writer of that row,
+and `web/sources.py` the sole caller of `steps.action`. Keep it that way: a second surface means
+the connection form, its validation and the pipeline's confirmations get written twice, which is
+exactly how two implementations of one rule start disagreeing.
 
-A database running on your machine is `host.docker.internal` from inside the container,
-not `localhost`. On Intel or AMD, set `CUBESTORE_TAG=latest` in `.env` — Cube Store has
-no multi-arch `latest` tag and the default is `arm64v8`.
+A database running on your machine is `host.docker.internal` from inside the container, not
+`localhost`. On Apple Silicon set `CUBESTORE_TAG=arm64v8` in `services/semantic/.env` — the generated
+file carries it as a commented line, and `cubejs/cubestore:latest` is amd64 only.
 
 ## The loop
 
 ```bash
-make test                 # 357 tests, no containers, no model calls — sub-second
+make test                 # 549 tests, no containers, no model calls
 make lint                 # ruff check + format --check
 make fmt                  # fix what is fixable
 ```

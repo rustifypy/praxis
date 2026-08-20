@@ -5,7 +5,7 @@ import yaml
 
 from analyst_agent.agent.tools import editor as tools
 from analyst_agent.dashboards.store import DashboardStore
-from analyst_agent.sources import registry, vcs
+from analyst_agent.datamodel import registry, vcs
 from analyst_agent.transcript import ChatStore
 
 ALBUM = {

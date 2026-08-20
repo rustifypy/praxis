@@ -10,9 +10,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..core import jobs as job_runner
-from ..sources import docker, modelgen
-from ..sources.modelgen.steps import StepFailed
-from ..sources.store import STAGES
+from ..datamodel import modelgen
+from ..datamodel.evidence import STAGES
+from ..datamodel.modelgen.steps import StepFailed
 from .stream import sse
 
 router = APIRouter(prefix="/api")
@@ -68,12 +68,12 @@ async def run_action(action: str, body: RunStep, request: Request) -> dict:
                 report=lambda stage, payload: runner.emit("progress", step=stage, **payload),
             )
         except StepFailed as exc:
+            # Cube's own refusal is in the message; there are no container logs to add, since
+            # the deployment runs wherever its owner put it.
             runner.emit("step_end", step=action, ok=False, error=str(exc))
-            # The container is left as it is — its logs are the diagnosis.
-            runner.emit("log", message=await docker.logs(40))
             raise
         finally:
-            # A rebuild changes what the container serves and nothing watches it for that.
+            # A rebuild changes what Cube serves and nothing watches it for that.
             app.state.health = None
             job.current = ""
         runner.emit(

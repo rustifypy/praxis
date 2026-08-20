@@ -8,10 +8,11 @@ from pathlib import Path
 from ...core.events import Event, emit
 from ...cube.client import CubeClient, CubeError
 from ...dashboards.store import DashboardStore
-from ...sources import grounding, vcs
-from ...sources.editing import impact, workspace
-from ...sources.modelgen import publish
-from ...sources.registry import model_dir
+from ...datamodel import grounding, vcs
+from ...datamodel.editing import impact, workspace
+from ...datamodel.modelgen import publish
+from ...datamodel.registry import model_dir
+from ...modelstore import StoreError
 
 EVENT_KEYS = frozenset({"tool", "label", "ok", "note", "errors"})
 """Every key an editor tool's event may carry — asserted by a test. Absent on purpose: the
@@ -116,16 +117,11 @@ def build_editor_tools(ctx: EditContext) -> list:
     async def validate_model() -> str:
         """Compile the edited model and report what it would break.
 
-        A saved file is already live, so this is not what loads it — it is how you learn
-        whether it compiled and which saved queries it broke. Roughly ten seconds.
+        A saved file is already live — Cube polls the store for the ref it is serving — so this
+        is not what loads it. It is how you learn whether it compiled and which saved queries it
+        broke. Roughly ten seconds.
         """
-        _start("validate_model", "Restarting Cube and compiling the model")
-        from ...sources import docker
-
-        if not (await docker.restart()).ok:
-            _end("validate_model", False)
-            return f"Could not restart {docker.CONTAINER}."
-
+        _start("validate_model", "Compiling the model")
         validation = await publish.check()
         if not validation.compiled:
             _end("validate_model", False, errors=[validation.compile_error[:200]])
@@ -138,11 +134,14 @@ def build_editor_tools(ctx: EditContext) -> list:
 
         try:
             catalog = await ctx.client.catalog(refresh=True)
-        except CubeError as exc:
+            # This branch's grounding, not main's: its certified queries are among the saved
+            # queries an edit here can break.
+            grounded = await grounding.load(await vcs.current(ctx.repo))
+        except (CubeError, StoreError) as exc:
             _end("validate_model", True, note="compiled; impact unread")
             return "\n".join([*lines, f"Could not check saved queries: {exc}"])
 
-        report = await impact.check(catalog, ctx.dashboards, grounding.load())
+        report = await impact.check(catalog, ctx.dashboards, grounded)
         _end(
             "validate_model",
             True,

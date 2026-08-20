@@ -26,7 +26,8 @@ from ..core.config import settings
 from ..core.db import connect
 from ..cube import gate
 from ..cube.shape import columns_of
-from ..sources import grounding
+from ..datamodel import grounding
+from . import state
 
 router = APIRouter(prefix="/api/mcp")
 
@@ -153,12 +154,12 @@ def build(app) -> MCPServer:
         """Find the measures and dimensions available for a question. Returns member ids,
         types, notes, and the valid filter operators for each. Call this before building
         any query."""
-        catalog = await app.state.cube.catalog()
+        catalog = await (await state.cube(app)).catalog()
         hits = LexicalRetriever(catalog).search(question)
         if not hits:
             return "The semantic model is empty."
         out = render(hits)
-        certified = grounding.load().render_certified(question)
+        certified = (await grounding.load()).render_certified(question)
         if certified:
             out += f"\n\n# Certified queries for similar requests\n\n{certified}"
         return out
@@ -168,8 +169,8 @@ def build(app) -> MCPServer:
         """Execute a Cube JSON query. Keys: measures, dimensions, timeDimensions, filters,
         segments, order, limit, offset. Returns rows and the SQL that produced them, or a
         rejection explaining what to fix."""
-        catalog = await app.state.cube.catalog()
-        result = await gate.run(query, catalog, app.state.cube, app.state.mcp_max_rows)
+        catalog = await (await state.cube(app)).catalog()
+        result = await gate.run(query, catalog, await state.cube(app), app.state.mcp_max_rows)
         if not result.ok:
             return result.as_message()
 
@@ -194,7 +195,7 @@ def build(app) -> MCPServer:
     async def describe_model() -> str:
         """List every cube and view in the semantic model, with its member count. The map of
         what can be asked about at all, where search_model answers one question."""
-        catalog = await app.state.cube.catalog()
+        catalog = await (await state.cube(app)).catalog()
         if not catalog.entities:
             return "The semantic model is empty. Nothing is being served."
         lines = []

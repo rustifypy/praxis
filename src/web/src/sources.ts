@@ -10,10 +10,9 @@
 import { json } from "./api";
 import type { AgentEvent } from "./types";
 
-export type StepName = "connect" | "cubes" | "describe" | "views";
+export type StepName = "cubes" | "describe" | "views";
 
 export const STEP_LABEL: Record<StepName, string> = {
-  connect: "Connect",
   cubes: "Build cubes",
   describe: "Describe with AI",
   views: "Build views",
@@ -27,18 +26,22 @@ export const ACTION_LABEL: Record<string, string> = {
 };
 
 const STEP_BLURB: Record<StepName, string> = {
-  connect: "Start the Cube container and check the database answers.",
   cubes: "Read the tables, then emit one cube each with its keys and joins.",
-  describe: "One model call per table: descriptions, measures and disambiguation notes.",
-  views: "Business-facing views over the join paths, validated across every join.",
+  describe:
+    "One model call per table: descriptions, measures and disambiguation notes.",
+  views:
+    "Business-facing views over the join paths, validated across every join.",
 };
 
 /**
- * What the pipeline looks like to a person: five stages, not four.
+ * What the pipeline looks like to a person: four stages, not three.
  *
  * `read` has no row in `steps` because it caches a catalog rather than producing model
  * files — a backend distinction that has no business leaking into the UI. Folding it into
- * "Build cubes" would promise four steps and then offer a button that does a fifth thing.
+ * "Build cubes" would promise three steps and then offer a button that does a fourth thing.
+ *
+ * There is no Connect stage: connecting is a form, and the row it writes either opened the
+ * database or did not. A stage records something that ran, and a connection is a condition.
  *
  * The order, the states and what blocks what all arrive on `SourceRow.stages`, from
  * `store.STAGES`. Only the copy below is the browser's: a label is presentation, a sequence
@@ -46,12 +49,16 @@ const STEP_BLURB: Record<StepName, string> = {
  */
 export type StageName = StepName | "read";
 
-export const STAGE_LABEL: Record<StageName, string> = { ...STEP_LABEL, read: "Read tables" };
+export const STAGE_LABEL: Record<StageName, string> = {
+  ...STEP_LABEL,
+  read: "Read tables",
+};
 
 export const STAGE_BLURB: Record<StageName, string> = {
   ...STEP_BLURB,
   read: "One throwaway container introspects every schema at once, so choosing tables afterwards is instant and touches no database.",
-  cubes: "Pick the tables to model, then emit one cube each with its keys and joins.",
+  cubes:
+    "Pick the tables to model, then emit one cube each with its keys and joins.",
 };
 
 export interface StageState {
@@ -59,11 +66,15 @@ export interface StageState {
   state: "done" | "error" | "todo";
   /** The step that must succeed first, or "" when nothing is holding it up. */
   blocked_by: StepName | "";
+  /** How much of the stage is done, when "done" is not the whole story — "9 of 11
+   *  described". Empty for every stage that is simply run or not. */
+  note: string;
 }
 
 /** From `health.serving_state`. The copy for each is below, in SERVING_NOTE — the state is
  *  the server's answer, the wording is ours. */
-export type ServingState = "stopped" | "unreachable" | "broken" | "empty" | "ok";
+export type ServingState =
+  "stopped" | "unreachable" | "broken" | "empty" | "ok";
 
 const SERVING_NOTE: Record<Exclude<ServingState, "ok">, string> = {
   stopped: "stopped",
@@ -87,47 +98,66 @@ export interface SourceRow {
   label: string;
   description: string;
   driver: string;
-  /** Where Cube answers, from CUBE_URL. */
-  url: string;
-  container: string;
+  /** The semantic layer's one address: the model store, which also proxies Cube at
+   *  `/cube/...`. Empty until someone has run it. There is no Cube address — Cube is not
+   *  published, and where it is, is the store's own configuration. */
+  store_url: string;
+  /** Where the agent runs Python, or "" — optional, and not part of `deployed`: a deployment
+   *  without one answers questions and just cannot do arithmetic Cube will not express. */
+  sandbox_url: string;
   credential_keys: string[];
   /** container path -> host path, for a driver that needs a key file. Not a secret, and
    *  the edit form needs it: the credential holds the container path, not this. */
   mounts: Record<string, string>;
   steps: Partial<Record<StepName, StepRecord>>;
-  running: boolean;
+  /** Whether both addresses are set. The portal does not run the deployment, so this is
+   *  something it was told rather than something it arranged — and it is the difference
+   *  between "nothing has been run yet" and "it is down". */
+  deployed: boolean;
   /** Structured, so a dot's colour comes from a boolean rather than from wording. */
   health: { healthy: boolean; status: string; detail: string };
-  container_state: string;
   /** What Cube is serving right now, read from /v1/meta. This is the truth about the
    *  model; `steps` is only what this portal did, and the two can disagree. */
   serving: { cubes: number; views: string[]; described: number } | null;
   /** Why `serving` is what it is. A null `serving` has two unrelated causes — the container
    *  is stopped, and Cube refuses to compile the model — so it cannot be read as either. */
   serving_state: ServingState;
+  /** Cube is serving a model this portal did not build — a colleague's, or one restored from
+   *  the store. Every stage reads "todo" and that is honest, so the rail says so rather than
+   *  presenting a working model as an unstarted one. */
+  adopted: boolean;
+  /** The cubes and views the model store holds, by name. What the rail is read off, so a
+   *  disagreement with `serving` is visible rather than inferred. */
+  cubes: string[];
+  views: string[];
   /** Per step, the later steps re-running it would discard. Computed server-side so the
    *  confirmation and the deletion come from one rule. */
   invalidates: Record<StepName, StepName[]>;
   /** Where every stage stands and what is holding it up, in order. Server-side, because
    *  `steps.action` enforces the same rule and only one of the two can be authoritative. */
   stages: StageState[];
-  /** The first stage not done, or null once all five are. The primary action every screen
+  /** The first stage not done, or null once all four are. The primary action every screen
    *  offers, so the header and the stage panel cannot name different ones. */
   next_stage: StageName | null;
   /** The checked-out branch, which is the model Cube serves. "" before the model directory
    *  is a repo. */
   branch: string;
+  /** Why the model store did not answer, or "". Its own field rather than a failed request,
+   *  because this page is where you find out something is down — and the rail below reads as
+   *  "nothing built" whenever it is set, which would be a lie left unexplained. */
+  store_error: string;
 }
 
 export interface System {
-  ok: boolean;
-  reason?: string;
-  docker?: string;
-  cubestore?: boolean;
-  container_state?: string;
-  cube_url?: string;
-  /** Cube skips JWT verification when this is on. The panel says so.  */
-  dev_mode?: boolean;
+  /** Why the sandbox is unavailable, or "". Never fatal, and nothing else here needs it —
+   *  every service runs wherever its owner put it, so this machine's own state is not a
+   *  precondition for anything. */
+  sandbox_reason: string;
+  store_url: string;
+  sandbox_url: string;
+  /** Where docker-compose.yml lives, so the panel can say which directory the environment
+   *  file goes in rather than making someone guess. */
+  semantic_dir: string;
 }
 
 interface DriverField {
@@ -245,7 +275,7 @@ export interface ModelCounts {
   described: number;
 }
 
-/** One markdown file under `cube/model/grounding/`, as the agent loads it. */
+/** One markdown file under the model's `grounding/`, as the agent loads it. */
 export interface GroundingArtefact {
   kind: "rule" | "skill" | "certified";
   /** From frontmatter, and what `load_grounding` is called with. */
@@ -262,10 +292,10 @@ export interface GroundingArtefact {
 }
 
 export interface Grounding {
-  /** Absolute, as resolved — not the tidy relative form. Grounding is the one agent
-   *  input that resolves from the directory the portal was launched in, so when it is
-   *  unexpectedly empty this path is the answer. */
+  /** The model store this was read from, so when grounding is unexpectedly empty the
+   *  address it came from is the answer. */
   root: string;
+  /** Whether the store answered at all. False is an outage, not an empty model. */
   exists: boolean;
   artefacts: GroundingArtefact[];
 }
@@ -279,7 +309,8 @@ export interface Closure {
 }
 
 export interface JobEvent {
-  type: "job_start" | "step_start" | "progress" | "log" | "step_end" | "job_end";
+  type:
+    "job_start" | "step_start" | "progress" | "log" | "step_end" | "job_end";
   data: Record<string, any>;
   seq: number;
 }
@@ -308,28 +339,52 @@ export const drivers = () =>
 /** The connection, or null before one has been made. */
 export const source = () => json<SourceRow | null>("/api/source");
 export const catalog = () => json<CatalogInfo>("/api/source/catalog");
-export const logs = () => json<{ container: string; logs: string }>("/api/source/logs");
 export const servedModel = () => json<ServedModel>("/api/source/model");
 export const grounding = () => json<Grounding>("/api/source/grounding");
 
 /** Probe now rather than waiting out the server's 15s health cache. */
 export const checkNow = () => post("/api/source/check") as Promise<SourceRow>;
 
-/** Replace the connection. The steps and the cached catalog go with it — they describe a
- *  database, and this is a different one. */
+/** Store the credentials and mint the secrets. **Starts nothing** — the environment file this
+ *  makes available is what someone runs, and the address comes back through `edit`. The steps
+ *  and the cached catalog go with it: they describe a database, and this is a different one. */
 export const connect = (body: {
   description: string;
   driver: string;
   values: Record<string, string>;
 }) => post("/api/source", body) as Promise<SourceRow>;
 
-export const edit = (body: { description?: string; values?: Record<string, string> }) =>
-  json<SourceRow>("/api/source", { method: "PATCH", body: JSON.stringify(body) });
+/** Also step two of connecting: the two addresses arrive here once the deployment is up, and
+ *  the same call is how one that moved is followed. */
+export const edit = (body: {
+  description?: string;
+  url?: string;
+  store_url?: string;
+  sandbox_url?: string;
+  values?: Record<string, string>;
+}) =>
+  json<SourceRow>("/api/source", {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+
+/** The environment file to run the deployment with — the one response carrying credential
+ *  values, because nothing can start Cube without them. */
+export const deployEnv = () =>
+  json<{
+    env: string;
+    directory: string;
+    /** The sandbox is its own deployment, so its own file and its own directory. */
+    sandbox_env: string;
+    sandbox_directory: string;
+    compose: string;
+    deployed: boolean;
+  }>("/api/source/env");
+
+export const composeFile = () =>
+  json<{ name: string; text: string }>("/api/source/compose");
 
 export const remove = () => json("/api/source", { method: "DELETE" });
-
-export const control = (action: "start" | "stop" | "restart") =>
-  post(`/api/source/container/${action}`) as Promise<SourceRow>;
 
 export const closure = (schema_name: string, tables: string[]) =>
   post("/api/source/closure", { schema_name, tables }) as Promise<Closure>;
@@ -422,9 +477,9 @@ export const branchDiff = (branch: string) =>
 
 /** `force` lands a branch that breaks saved queries — refused otherwise, server-side. */
 export const mergeBranch = (branch: string, force = false) =>
-  post(`/api/model/branches/${branch}/merge${force ? "?force=true" : ""}`) as Promise<
-    ModelValidation & { merged: string; current: string }
-  >;
+  post(
+    `/api/model/branches/${branch}/merge${force ? "?force=true" : ""}`,
+  ) as Promise<ModelValidation & { merged: string; current: string }>;
 
 export const modelFiles = () => json<ModelFiles>("/api/model/files");
 
@@ -433,21 +488,31 @@ export const modelFile = (path: string) =>
 
 /** Tiers 1-2 then the write. A rejection arrives as the thrown error's message. */
 export const writeModelFile = (path: string, text: string) =>
-  json<{ path: string; warnings: string[]; dirty: string[] }>(`/api/model/files/${path}`, {
-    method: "PUT",
-    body: JSON.stringify({ text }),
-  });
+  json<{ path: string; warnings: string[]; dirty: string[] }>(
+    `/api/model/files/${path}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ text }),
+    },
+  );
 
 export const deleteModelFile = (path: string) =>
-  json<{ deleted: string; dirty: string[] }>(`/api/model/files/${path}`, { method: "DELETE" });
+  json<{ deleted: string; dirty: string[] }>(`/api/model/files/${path}`, {
+    method: "DELETE",
+  });
 
 /** Tier 3. Restarts the container, so it is what makes an edit visible as well as checked. */
-export const validateModel = () => post("/api/model/validate") as Promise<ModelValidation>;
+export const validateModel = () =>
+  post("/api/model/validate") as Promise<ModelValidation>;
 
 export const commitModel = (message: string) =>
-  post("/api/model/commit", { message }) as Promise<{ branch: string; dirty: string[] }>;
+  post("/api/model/commit", { message }) as Promise<{
+    branch: string;
+    dirty: string[];
+  }>;
 
-export const discardModel = () => post("/api/model/discard") as Promise<{ dirty: string[] }>;
+export const discardModel = () =>
+  post("/api/model/discard") as Promise<{ dirty: string[] }>;
 
 // --- the editor chat -----------------------------------------------------------------
 
@@ -461,7 +526,11 @@ export interface EditChat {
 export const editChats = () => json<EditChat[]>("/api/model/chats");
 
 export const createEditChat = () =>
-  post("/api/model/chats") as Promise<{ id: string; title: string; branch: string }>;
+  post("/api/model/chats") as Promise<{
+    id: string;
+    title: string;
+    branch: string;
+  }>;
 
 /** Same SSE framing as the query chat — frames split on a blank line, since one read can
  *  hold a partial frame or several whole ones. */
@@ -489,7 +558,8 @@ export async function* sendEditMessage(
     while ((split = buffer.indexOf("\n\n")) !== -1) {
       const frame = buffer.slice(0, split);
       buffer = buffer.slice(split + 2);
-      if (frame.startsWith("data: ")) yield JSON.parse(frame.slice(6)) as AgentEvent;
+      if (frame.startsWith("data: "))
+        yield JSON.parse(frame.slice(6)) as AgentEvent;
     }
   }
 }
@@ -529,17 +599,28 @@ function servingSummary(serving: NonNullable<SourceRow["serving"]>): string {
   const total = serving.cubes + serving.views.length;
   const parts = [`${serving.cubes} cube${serving.cubes === 1 ? "" : "s"}`];
   if (serving.views.length) {
-    parts.push(`${serving.views.length} view${serving.views.length === 1 ? "" : "s"}`);
+    parts.push(
+      `${serving.views.length} view${serving.views.length === 1 ? "" : "s"}`,
+    );
   }
   if (serving.described) {
-    parts.push(serving.described >= total ? "all described" : `${serving.described} described`);
+    parts.push(
+      serving.described >= total
+        ? "all described"
+        : `${serving.described} described`,
+    );
   }
   return parts.join(", ");
 }
 
-/** The three states the panel draws: no container, up but unreachable, healthy. */
-export function healthOf(source: SourceRow): { tone: "ok" | "warn" | "bad"; label: string } {
-  if (!source.running) return { tone: "warn", label: "stopped" };
+/** The three states the panel draws: not deployed yet, up but unreachable, healthy. */
+export function healthOf(source: SourceRow): {
+  tone: "ok" | "warn" | "bad";
+  label: string;
+} {
+  // Not a fault: it is the normal state between storing credentials and running the compose
+  // file, so it is neutral rather than red.
+  if (!source.deployed) return { tone: "warn", label: "not deployed" };
   if (!source.health.healthy) {
     return { tone: "bad", label: source.health.detail || source.health.status };
   }
@@ -547,7 +628,10 @@ export function healthOf(source: SourceRow): { tone: "ok" | "warn" | "bad"; labe
 }
 
 /** A step's summary as one readable line. Lists are joined; counts are labelled. */
-export function summarise(step: StepName, record: StepRecord | undefined): string {
+export function summarise(
+  step: StepName,
+  record: StepRecord | undefined,
+): string {
   const summary = record?.summary;
   if (!summary) return "";
   const parts: string[] = [];
@@ -557,11 +641,6 @@ export function summarise(step: StepName, record: StepRecord | undefined): strin
       parts.push(`${value} ${value === 1 ? singular : plural}`);
     }
   };
-  if (step === "connect") {
-    // Cube's own status word is "HEALTH"; that is not something to show a person.
-    const status = String(summary.status ?? "");
-    return status === "HEALTH" || !status ? "connected" : status;
-  }
   if (step === "cubes") {
     say("cubes", "cube");
     say("keys", "key");

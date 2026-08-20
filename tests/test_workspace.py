@@ -6,8 +6,8 @@ refusal to a status code or to prose, and are verified against a live container.
 
 import pytest
 
-from analyst_agent.sources import registry, vcs
-from analyst_agent.sources.editing import workspace
+from analyst_agent.datamodel import registry, vcs
+from analyst_agent.datamodel.editing import workspace
 
 ALBUM = """cubes:
   - name: album

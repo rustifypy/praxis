@@ -1,8 +1,12 @@
-"""One session against the Cube container: its root, its token, and everything read from it.
+"""One session against Cube — which is reached **through the model store**, never directly.
 
-Every call to Cube goes through here, so a caller cannot forget to authenticate. The two
-exceptions are `/readyz` (outside the base path, unauthenticated by design) and
-`/playground/db-schema` (dev-mode only, and the probe's alone).
+Cube's port is not published, so the store at `/cube/...` is the only door and this client holds
+the store's write token rather than a Cube JWT. The ref goes in `X-Model-Ref` and the store signs
+it: Cube's secret never reaches this process, which is one credential fewer here and the reason
+`CUBEJS_DEV_MODE` disabling JWT verification is not something the host can exploit.
+
+Every call goes through here, so a caller cannot forget to authenticate. The paths are Cube's own
+and are forwarded verbatim, so `/readyz` and `/v1/load` differ only in what they are.
 """
 
 import asyncio
@@ -10,18 +14,19 @@ import time
 from dataclasses import dataclass, field
 
 import httpx
-import jwt
 
 from ..core.config import settings
+from ..core.deployment import MAIN, Deployment, current
 from .catalog import Catalog
 from .schema import CubeQuery
 
-# HS256's key must be at least as long as its output, or the signature is weaker than
-# the algorithm claims. pyjwt warns below this on every single token it mints.
-MIN_SECRET_BYTES = 32
-TOKEN_TTL_S = 900
-# Re-mint this far ahead of expiry: one session outlives its token, and a chat outlives both.
-TOKEN_REFRESH_MARGIN_S = 60
+CUBE_PREFIX = "/cube"
+"""Where the store proxies Cube. One constant, because the store's route and this base URL are
+the two halves of one path and a mismatch is a 404 with nothing to say."""
+REF_HEADER = "X-Model-Ref"
+"""Which model to compile. The store signs it into the token it mints — this process never
+holds a credential that could name a ref by itself."""
+
 # How stale a served catalog may be. Bounded staleness rather than invalidation, because
 # nothing watches Cube and the cache that had to be invalidated by hand was keyed on a global.
 CATALOG_TTL_S = 30.0
@@ -29,25 +34,6 @@ ADMIN_TIMEOUT_S = 10.0
 POLL_EVERY_S = 2.0
 POLL_TIMEOUT_S = 90.0
 POLL_REQUEST_TIMEOUT_S = 15.0
-
-LOCAL_CLAIMS = {"user_id": "local"}
-"""What is signed into the Cube JWT. One literal, because there is one caller — this is
-also the seam Cube's `security_context` would read if row-level security is ever wanted."""
-
-
-def mint_token(claims: dict, secret: str, ttl_s: int = TOKEN_TTL_S) -> str:
-    """Sign the security context Cube requires. Refusing a short secret is louder than pyjwt
-    warning per request; the same value must reach the container as CUBEJS_API_SECRET.
-    """
-    if len(secret.encode()) < MIN_SECRET_BYTES:
-        raise ValueError(
-            f"CUBE_API_SECRET is {len(secret.encode())} bytes; HS256 needs at least "
-            f"{MIN_SECRET_BYTES}. Generate one with "
-            "`python -c 'import secrets; print(secrets.token_urlsafe(36))'` and set it "
-            "as both CUBE_API_SECRET and CUBEJS_API_SECRET in .env, then "
-            "`make down && make up` so Cube verifies with the same key."
-        )
-    return jwt.encode({**claims, "exp": int(time.time()) + ttl_s}, secret, algorithm="HS256")
 
 
 @dataclass
@@ -81,35 +67,48 @@ class CubeError(RuntimeError):
 
 
 class CubeClient:
-    """The Cube container, for as long as you hold it. Whoever constructs it closes it."""
+    """Cube, for as long as you hold it. Whoever constructs it closes it."""
 
     def __init__(
         self,
         root: str,
-        secret: str | None,
+        token: str | None,
         *,
-        claims: dict | None = None,
+        ref: str = MAIN,
         timeout: float | None = None,
     ):
-        # An unset secret is a first run, not a mistake, and normalises to no auth; 1-31 bytes is
-        # a misconfiguration, and minting here refuses it at construction rather than per request.
-        self._secret = secret or None
+        # An unset token is a first run, not a mistake, and normalises to no auth.
+        self._token = token or ""
         self._root = root.rstrip("/")
-        self._claims = dict(claims or LOCAL_CLAIMS)
+        self._ref = ref
         self._client = httpx.AsyncClient(
             base_url=self._root, timeout=timeout or settings.query_timeout_s
         )
-        self._token = mint_token(self._claims, self._secret) if self._secret else ""
-        self._token_until = time.time() + TOKEN_TTL_S
         self._catalog: Catalog | None = None
         self._catalog_at = 0.0
         self._lock = asyncio.Lock()
 
     @classmethod
-    def local(cls, *, claims: dict | None = None, timeout: float | None = None) -> "CubeClient":
-        """The Cube container this portal runs. The only reader of `api_root`, so no session
-        can drift from the one address."""
-        return cls(settings.api_root, settings.cube_api_secret, claims=claims, timeout=timeout)
+    def for_deployment(
+        cls,
+        deployment: Deployment,
+        *,
+        ref: str = MAIN,
+        timeout: float | None = None,
+    ) -> "CubeClient":
+        """`ref` selects the model Cube compiles for this session, so a client is per-ref rather
+        than shared. It reaches Cube through the store, which is the only thing that can sign it
+        into a Cube token."""
+        return cls(
+            f"{deployment.store_url.rstrip('/')}{CUBE_PREFIX}{settings.cube_base_path}",
+            deployment.store_token,
+            ref=ref,
+            timeout=timeout,
+        )
+
+    @property
+    def ref(self) -> str:
+        return self._ref
 
     @property
     def root(self) -> str:
@@ -203,14 +202,13 @@ class CubeClient:
             raise CubeError(_error_text(body, text, status), status=status)
         return body
 
-    def _auth(self) -> dict[str, str]:
-        if not self._secret:
-            return {}
-        now = time.time()
-        if not self._token or now >= self._token_until - TOKEN_REFRESH_MARGIN_S:
-            self._token = mint_token(self._claims, self._secret)
-            self._token_until = now + TOKEN_TTL_S
-        return {"Authorization": self._token}
+    def _headers(self) -> dict[str, str]:
+        """The store's token and the ref. No expiry to manage: the Cube JWT is minted per request
+        on the other side, which is what removed the re-mint window this used to carry."""
+        headers = {REF_HEADER: self._ref}
+        if self._token:
+            headers["Authorization"] = f"Bearer {self._token}"
+        return headers
 
     async def _send(
         self, method: str, path: str, *, json: dict | None = None, timeout: float | None = None
@@ -222,7 +220,7 @@ class CubeClient:
                 method,
                 path,
                 json=json,
-                headers=self._auth(),
+                headers=self._headers(),
                 timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
             )
         except httpx.RequestError as exc:
@@ -234,9 +232,18 @@ class CubeClient:
         return r.status_code, body if isinstance(body, dict) else {}, r.text
 
 
-async def served_catalog(*, timeout: float = ADMIN_TIMEOUT_S) -> Catalog:
+async def open_client(*, ref: str = MAIN, timeout: float | None = None) -> CubeClient:
+    """A client on the configured deployment, read fresh from the row. What the callers too
+    deep to be handed one use, so an edited address leaves no stale copy anywhere."""
+    deployment = await current()
+    if deployment is None or not deployment.store_url:
+        raise CubeError("no Cube deployment is configured")
+    return CubeClient.for_deployment(deployment, ref=ref, timeout=timeout)
+
+
+async def served_catalog(*, ref: str = MAIN, timeout: float = ADMIN_TIMEOUT_S) -> Catalog:
     """The served model, read once. The admin screens want exactly this and nothing else."""
-    async with CubeClient.local(timeout=timeout) as cube:
+    async with await open_client(ref=ref, timeout=timeout) as cube:
         return await cube.catalog()
 
 

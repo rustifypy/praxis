@@ -18,16 +18,17 @@ TIERS: dict[str, int] = {
     # 0 — settings, the database file, the event format, the chat model, the job runner,
     # the subprocess wrapper. Nothing above it may be named here.
     "core": 0,
-    # 1 — the semantic layer, the transcript, and the code sandbox. None of the three knows
-    # the others exist.
+    # 1 — the transcript, and one client per service the deployment runs: Cube, the model
+    # store, the sandbox. None of the four knows the others exist.
     "cube": 1,
-    "transcript": 1,
+    "modelstore": 1,
     "sandbox": 1,
+    "transcript": 1,
     # 2 — saved queries.
     "dashboards": 2,
-    # 3 — a warehouse: its container, its generated model, its branches. Reads dashboards
+    # 3 — the data model: the connection, what was generated, its branches. Reads dashboards
     # to answer "what would this edit break".
-    "sources": 3,
+    "datamodel": 3,
     # 4 — everything the LLM touches: prompts, the three toolsets, one turn.
     "agent": 4,
     # 5 — HTTP. May reach anything; nothing may reach it.

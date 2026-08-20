@@ -1,6 +1,7 @@
 """The portal's HTTP surface."""
 
 import asyncio
+import contextlib
 import csv
 import io
 import secrets
@@ -16,9 +17,8 @@ from pydantic import BaseModel
 from ..agent.turn import stream_turn
 from ..core.config import settings
 from ..cube.catalog import Catalog
-from ..cube.client import CubeClient
 from ..cube.shape import Column, export_value
-from ..sandbox import container, scratch
+from ..sandbox import SandboxError, open_sandbox
 from ..transcript import ChatStore, checkpointer
 from . import dashboards, files, jobs, mcp, model_edit, sources, state, system
 from .stream import sse
@@ -55,13 +55,11 @@ async def lifespan(app: FastAPI):
     # All three stores open the same file; each runs the one SCHEMA, whoever is first.
     await dashboards.init_state(app)
     await state.init_state(app)
-    # One Cube session for the life of the process; its catalog cache is what every query
-    # turn reads.
-    async with checkpointer() as saver, CubeClient.local() as cube:
-        app.state.sandbox = asyncio.create_task(container.rebuild())
+    # Nothing to warm: the sandbox is a service someone else runs, so there is no image to
+    # build at startup and no container to bring up.
+    async with checkpointer() as saver:
         app.state.store = store
         app.state.saver = saver
-        app.state.cube = cube
         # One cancel flag per in-flight turn, so the stop button has something to set.
         app.state.cancels = {}
         # And one approval queue, for the chats still being asked. In memory on purpose: a
@@ -146,8 +144,12 @@ async def rename_chat(chat_id: str, body: Rename, request: Request) -> dict:
 
 @app.delete("/api/chats/{chat_id}")
 async def delete_chat(chat_id: str, request: Request) -> dict:
+    """Deleting a chat takes its workspace with it. Best-effort: the transcript is gone either
+    way, and a sandbox that is not answering must not leave a chat undeletable."""
     await request.app.state.store.delete(chat_id)
-    scratch.remove(chat_id)
+    with contextlib.suppress(SandboxError):
+        async with await open_sandbox() as sandbox:
+            await sandbox.forget(chat_id)
     return {"ok": True}
 
 
@@ -192,7 +194,12 @@ async def send(chat_id: str, body: Message, request: Request) -> StreamingRespon
     cancel = asyncio.Event()
     request.app.state.cancels[chat_id] = cancel
     # Only files actually in the workspace, so the transcript cannot name one that is not there.
-    attached = [p for p in body.files if p in scratch.listing(chat_id, "**/*")]
+    # An unreachable sandbox attaches nothing rather than trusting the browser's list.
+    known: list[str] = []
+    with contextlib.suppress(SandboxError):
+        async with await open_sandbox() as sandbox:
+            known, _ = await sandbox.listing(chat_id)
+    attached = [p for p in body.files if p in known]
 
     approvals = None
     if settings.approve_scripts and chat_id not in request.app.state.always:
@@ -206,7 +213,7 @@ async def send(chat_id: str, body: Message, request: Request) -> StreamingRespon
                 body.question,
                 store,
                 request.app.state.saver,
-                request.app.state.cube,
+                await state.cube(request.app),
                 cancel,
                 attached,
                 approvals,
@@ -262,9 +269,10 @@ async def result_csv(result_id: str, request: Request) -> Response:
 
 @app.get("/api/catalog")
 async def catalog(request: Request, refresh: bool = False) -> dict:
-    cat: Catalog = await request.app.state.cube.catalog(refresh=refresh)
+    cube = await state.cube(request.app)
+    cat: Catalog = await cube.catalog(refresh=refresh)
     return {
-        "cube_url": settings.cube_url,
+        "cube_url": cube.root,
         "entities": [
             {
                 "name": e.name,

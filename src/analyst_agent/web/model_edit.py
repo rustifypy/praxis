@@ -16,10 +16,11 @@ from pydantic import BaseModel
 
 from ..agent.turn import stream_edit_turn
 from ..cube.client import CubeError, served_catalog
-from ..sources import docker, grounding, vcs
-from ..sources.editing import impact, workspace
-from ..sources.modelgen import publish
-from ..sources.registry import model_dir
+from ..datamodel import grounding, vcs
+from ..datamodel.editing import impact, workspace
+from ..datamodel.modelgen import publish
+from ..datamodel.registry import model_dir
+from ..modelstore import StoreError
 from .stream import sse
 
 router = APIRouter(prefix="/api/model")
@@ -76,22 +77,25 @@ def _dirty(dirty: list[str]) -> None:
         raise HTTPException(409, f"uncommitted changes to {', '.join(dirty)} — commit or discard")
 
 
-async def _restart(request: Request) -> None:
-    """Load what is now checked out — deterministically, rather than trusting the file watcher
-    to have seen a whole branch change."""
-    result = await docker.restart()
+def _reloaded(request: Request) -> None:
+    """What Cube serves has changed, so the cached probe is stale.
+
+    There is nothing to restart: Cube asks the store for the version of the ref it is serving on
+    every request, so a commit is picked up on its own. The portal only has to stop believing
+    its own cache.
+    """
     request.app.state.health = None
-    if not result.ok:
-        raise HTTPException(400, result.message or f"could not restart {docker.CONTAINER}")
 
 
 async def _impact(request: Request) -> impact.Impact:
-    """What the checked-out model would break, against what Cube is serving right now."""
+    """What the checked-out model would break, against what Cube is serving right now. The
+    grounding comes from the same branch, since its certified queries are part of what breaks."""
     try:
         catalog = await served_catalog()
-    except CubeError as exc:
-        raise HTTPException(409, f"cannot read the served model to check impact: {exc}") from None
-    return await impact.check(catalog, request.app.state.dashboards, grounding.load())
+        grounded = await grounding.load(await vcs.current(model_dir()))
+    except (CubeError, StoreError) as exc:
+        raise HTTPException(409, f"cannot read the model to check impact: {exc}") from None
+    return await impact.check(catalog, request.app.state.dashboards, grounded)
 
 
 def _validation(validation: publish.Validation) -> dict:
@@ -147,7 +151,7 @@ async def checkout(branch: str, request: Request) -> dict:
     result = await vcs.checkout(path, branch)
     if not result.ok:
         raise HTTPException(400, result.message)
-    await _restart(request)
+    _reloaded(request)
     return await list_branches()
 
 
@@ -212,7 +216,7 @@ async def merge(branch: str, request: Request, force: bool = False) -> dict:
         await vcs.checkout(path, was)
         raise HTTPException(409, f"could not merge {branch}: {merged.message}")
 
-    await _restart(request)
+    _reloaded(request)
     return {
         "merged": branch,
         "current": await vcs.current(path),
@@ -274,7 +278,7 @@ async def delete_file(path: str) -> dict:
 async def validate(request: Request) -> dict:
     """Tier 3: restart and ask Cube. This is what makes an edit visible as well as checked."""
     _idle(request)
-    await _restart(request)
+    _reloaded(request)
     validation = await publish.check()
     # Reported here as well as at merge, so a broken tile surfaces while the edit is still
     # under the cursor rather than at the moment someone wanted to land it.
@@ -300,7 +304,7 @@ async def discard(request: Request) -> dict:
     result = await vcs.discard(repo)
     if not result.ok:
         raise HTTPException(400, result.message)
-    await _restart(request)
+    _reloaded(request)
     return {"dirty": await vcs.status(repo)}
 
 

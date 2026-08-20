@@ -14,7 +14,7 @@ from .tools.query import build_tools
 COMPACTION_TAG = "compaction"
 
 
-def build_agent(
+async def build_agent(
     session: Session,
     dashboards: DashboardContext,
     checkpointer=None,
@@ -23,10 +23,14 @@ def build_agent(
     audit log.
 
     One agent, so `run_query` and a Python interpreter are in the same hands. What keeps the gate
-    load-bearing is not a second agent but `--network none`: the sandbox cannot reach Cube or the
-    warehouse, so there is no route to a number that did not come through the four tiers. What it
-    adds is the arithmetic a `CubeQuery` cannot express — a ratio, a period delta, a share of a
-    total — which was otherwise done in prose. `export_result` is the only way rows cross over.
+    load-bearing is not a second agent but that **the sandbox holds no credential**: it cannot
+    sign a Cube token and has no warehouse password, so there is no route through it to a number
+    that did not come through the four tiers. What it adds is the arithmetic a `CubeQuery` cannot
+    express — a ratio, a period delta, a share of a total — which was otherwise done in prose.
+    `export_result` is the only way rows cross over.
+
+    Async because the uploads it puts in the prompt are read from the sandbox service, which is
+    the only reason building an agent touches the network at all.
     """
     model = build_model()
     return create_agent(
@@ -41,7 +45,7 @@ def build_agent(
             skill_catalog=session.grounding.catalog_lines(),
             dashboards=True,
             sandbox=True,
-            files="\n\n".join(p.as_prompt() for p in profile.saved(session.chat_id))
+            files="\n\n".join(p.as_prompt() for p in await profile.saved(session.chat_id))
             if session.chat_id
             else "",
         ),

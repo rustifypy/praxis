@@ -1,24 +1,26 @@
 """What the agent is told about a file it was given.
 
-The profiler itself runs in a container and is checked by `make sandbox-check`. What is here is
-everything around it: that a file with no readable shape is still named, and that what reaches the
-prompt is the shape rather than the file.
+The profiler runs in the sandbox service and is checked by that service's own suite. What is here
+is the portal's half: that what reaches the prompt is the shape rather than the file, and that a
+sandbox which is absent or silent costs a turn nothing.
 """
 
+import httpx
 import pytest
+import respx
 
-from analyst_agent.core.proc import Result
-from analyst_agent.sandbox import container, profile, scratch
+from analyst_agent.core.deployment import Deployment
+from analyst_agent.sandbox import profile
 
-CHAT = "profile00001"
+URL = "http://sandbox:8600"
 
 
-@pytest.fixture(autouse=True)
-def data_dir(tmp_path, monkeypatch):
-    from analyst_agent.core.config import settings
+@pytest.fixture
+def configured(monkeypatch):
+    async def deployment():
+        return Deployment(sandbox_url=URL, sandbox_token="tok")
 
-    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    return tmp_path
+    monkeypatch.setattr("analyst_agent.sandbox.client.current", deployment)
 
 
 def a_profile(**kwargs) -> profile.Profile:
@@ -59,51 +61,49 @@ def test_a_file_with_no_readable_shape_is_still_named():
     assert "IOError" in said
 
 
-def test_an_upload_with_no_cached_profile_is_still_offered_to_the_agent():
-    """The listing is the authority and the cache is only the shape. A file the sandbox never
-    read is one the agent can still open."""
-    scratch.save_upload(CHAT, "orders.csv", b"a,b\n1,2\n")
-    saved = profile.saved(CHAT)
+@respx.mock
+async def test_the_shape_read_on_arrival_is_what_reaches_the_prompt(configured):
+    """One request per turn, not one profiling run per file: this is in the system prompt for the
+    life of the chat."""
+    route = respx.get(f"{URL}/profiles/c1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "profiles": [{"path": "uploads/orders.csv", "bytes": 12, "rows": 3, "columns": []}]
+            },
+        )
+    )
+    saved = await profile.saved("c1")
     assert [p.path for p in saved] == ["uploads/orders.csv"]
+    assert route.call_count == 1
+
+
+@respx.mock
+async def test_an_upload_the_service_could_not_read_is_still_offered_to_the_agent(configured):
+    """The listing is the authority and the shape is only the shape. A file the profiler failed
+    on is one the agent can still open."""
+    respx.get(f"{URL}/profiles/c1").mock(
+        return_value=httpx.Response(
+            200, json={"profiles": [{"path": "uploads/notes.pdf", "note": "not profiled"}]}
+        )
+    )
+    saved = await profile.saved("c1")
     assert saved[0].note == "not profiled"
 
 
-async def test_a_sandbox_that_will_not_start_is_a_note_rather_than_a_failed_upload(monkeypatch):
-    async def down() -> Result:
-        return Result(127, "", "docker not found on PATH")
-
-    monkeypatch.setattr(container, "ensure_up", down)
-    path = scratch.save_upload(CHAT, "orders.csv", b"a,b\n1,2\n")
-
-    read = await profile.of(CHAT, path)
-    assert read.rows == 0
-    assert "docker not found" in read.note
-    # Cached anyway, so the prompt says the same thing on the next turn without asking again.
-    assert profile.saved(CHAT)[0].note == read.note
+@respx.mock
+async def test_a_sandbox_that_is_not_answering_costs_the_turn_nothing(configured):
+    """A file's shape is worth having and not worth failing a turn over — the agent can still
+    query, and it just does not know what it was handed."""
+    respx.get(f"{URL}/profiles/c1").mock(side_effect=httpx.ConnectError("x"))
+    assert await profile.saved("c1") == []
 
 
-async def test_output_that_is_not_json_is_reported_rather_than_raised(monkeypatch):
-    """The script's own errors come back *as* a note inside its JSON. This is the case where it
-    never got to print — killed at the timeout, or the container gone."""
+async def test_no_sandbox_configured_is_the_same_answer(monkeypatch):
+    """Every deployment until one is run. A raise here would take out every chat turn."""
 
-    async def up() -> Result:
-        return Result(0, "", "")
+    async def none():
+        return Deployment()
 
-    async def killed(chat_id: str, command: str, timeout: float = 0) -> Result:
-        return Result(124, "", "")
-
-    monkeypatch.setattr(container, "ensure_up", up)
-    monkeypatch.setattr(container, "execute", killed)
-    path = scratch.save_upload(CHAT, "orders.csv", b"a,b\n1,2\n")
-
-    read = await profile.of(CHAT, path)
-    assert "exit 124" in read.note
-
-
-def test_the_profiler_and_its_answers_are_hidden_from_the_workspace_listing():
-    """Otherwise the profiler's own script reads as a file the run wrote, and every upload would
-    put an artifact block in the transcript."""
-    scratch.save_upload(CHAT, "orders.csv", b"a,b\n")
-    (scratch.ensure(CHAT) / scratch.PROFILES).mkdir(parents=True, exist_ok=True)
-    (scratch.ensure(CHAT) / scratch.PROFILES / "profiler.py").write_text("print(1)")
-    assert scratch.listing(CHAT, "**/*") == ["uploads/orders.csv"]
+    monkeypatch.setattr("analyst_agent.sandbox.client.current", none)
+    assert await profile.saved("c1") == []

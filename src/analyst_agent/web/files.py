@@ -1,8 +1,8 @@
 """Files in and out of a chat's workspace.
 
-The workspace is the store: there is no `files` table, because the directory is a bind mount the
-sandbox already works in and a row would only ever describe what `ls` can answer. So an upload is
-bytes plus a profile, and getting something back is a read through `scratch.resolve`.
+The workspace is the store and it belongs to the sandbox service, so there is no `files` table
+and no directory on this side either: a row could only ever describe what the service's own `ls`
+answers. These routes are a proxy — bytes in, bytes out, and the path guard is the service's.
 
 Uploading is not a tool call and writes no event of its own. What records it is the *user* event
 of the turn it is attached to — `POST /messages` takes the paths — so a replayed transcript shows
@@ -16,15 +16,15 @@ import mimetypes
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 
-from ..sandbox import profile, scratch
+from ..sandbox import Profile, SandboxError, open_sandbox
 
 router = APIRouter(prefix="/api")
 
 MAX_BYTES = 100 * 1024 * 1024
-"""Nothing bounds `DATA_DIR`, so a 4 GB CSV is silent disk consumption in someone's home
-directory. 100 MB is more than the sandbox can hold in memory anyway."""
+"""Nothing bounds the sandbox's volume, so a 4 GB CSV is silent disk consumption on whoever's
+machine it runs on. 100 MB is more than it can hold in memory anyway."""
 TOO_BIG = f"that file is larger than the {MAX_BYTES // 1024 // 1024} MB limit"
 CHUNK = 1024 * 1024
 
@@ -45,12 +45,21 @@ bounded by nothing, and a 200 MB one is exactly the case where a preview is most
 download least. `truncated` is what says the rest is still there."""
 
 
+async def _sandbox():
+    """The sandbox, or the reason there is none as a status. 503 rather than 500: a deployment
+    without a sandbox is a working deployment that cannot run Python."""
+    try:
+        return await open_sandbox()
+    except SandboxError as exc:
+        raise HTTPException(503, str(exc)) from None
+
+
 @router.post("/chats/{chat_id}/files")
 async def upload(chat_id: str, file: UploadFile, request: Request) -> dict:
-    """Take a file into this chat's workspace and read its shape.
+    """Hand a file to the sandbox and report the shape it read.
 
-    The filename is a browser's, so `scratch.save_upload` is what turns it into a path — one
-    place, checked on the resolved target.
+    The filename is a browser's, so the service is what turns it into a path — one place,
+    checked on the resolved target, on the side that owns the directory.
     """
     if await request.app.state.store.get(chat_id) is None:
         raise HTTPException(404, "no such chat")
@@ -65,15 +74,24 @@ async def upload(chat_id: str, file: UploadFile, request: Request) -> dict:
         if len(body) > MAX_BYTES:
             raise HTTPException(413, TOO_BIG)
 
+    async with await _sandbox() as sandbox:
+        try:
+            body_json = await sandbox._send(
+                "POST",
+                f"/uploads/{chat_id}",
+                files={"file": (file.filename or "upload", bytes(body))},
+            )
+        except SandboxError as exc:
+            raise HTTPException(exc.status or 502, str(exc)) from None
+    # Profiled on arrival by the service, so this is one round trip rather than two. A shape it
+    # could not read is a note, never a failure: the file did arrive, and an upload reported as
+    # broken because its summary was malformed is the worst of both answers.
     try:
-        path = scratch.save_upload(chat_id, file.filename or "upload", bytes(body))
-    except ValueError as exc:
-        # Only reachable if `uploads/` is itself a symlink out of the workspace, which a script
-        # in the sandbox could plant. A sentence rather than a stack trace.
-        raise HTTPException(400, str(exc)) from None
-    read = await profile.of(chat_id, path)
+        read = Profile.model_validate(body_json.get("profile") or {"path": body_json["path"]})
+    except ValueError:
+        read = Profile(path=body_json["path"], note="not profiled")
     return {
-        "path": path,
+        "path": body_json["path"],
         "bytes": read.bytes,
         "rows": read.rows,
         "columns": len(read.columns),
@@ -84,39 +102,51 @@ async def upload(chat_id: str, file: UploadFile, request: Request) -> dict:
 # Below the chat routes that end in a fixed segment, and `{path:path}` because an artifact is
 # `charts/q1.png` as readily as `q1.png`.
 @router.get("/chats/{chat_id}/files/{path:path}")
-async def download(chat_id: str, path: str) -> FileResponse:
-    target, refused = scratch.resolve(chat_id, path)
-    if target is None:
-        raise HTTPException(400, refused)
-    if not target.is_file():
-        raise HTTPException(404, f"no file at {path!r} in this chat's workspace")
-
+async def download(chat_id: str, path: str) -> Response:
+    data = await _read(chat_id, path)
     inline = Path(path).suffix.lower() in INLINE
-    return FileResponse(
-        target,
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if not inline:
+        headers["Content-Disposition"] = f'attachment; filename="{Path(path).name}"'
+    return Response(
+        data,
         media_type=mimetypes.guess_type(path)[0] or "application/octet-stream",
-        filename=None if inline else Path(path).name,
-        headers={"X-Content-Type-Options": "nosniff"},
+        headers=headers,
     )
+
+
+async def _read(chat_id: str, path: str) -> bytes:
+    """One file's bytes from the sandbox, or the refusal as a status. The path guard is over
+    there, on the side that owns the directory — so a 400 here is its answer, not a second
+    opinion."""
+    async with await _sandbox() as sandbox:
+        try:
+            data, _ = await sandbox.read(chat_id, path)
+        except SandboxError as exc:
+            raise HTTPException(exc.status or 502, str(exc)) from None
+    return data
 
 
 @router.get("/chats/{chat_id}/preview/{path:path}")
 async def preview(chat_id: str, path: str) -> dict:
 
-    target, refused = scratch.resolve(chat_id, path)
-    if target is None:
-        raise HTTPException(400, refused)
-    if not target.is_file():
-        raise HTTPException(404, f"no file at {path!r} in this chat's workspace")
-
     suffix = Path(path).suffix.lower()
-    size = target.stat().st_size
-    empty = {"columns": [], "rows": [], "text": "", "bytes": size, "truncated": False}
     if suffix not in TABULAR and suffix not in READABLE:
-        return {**empty, "kind": "none"}
+        return {
+            "columns": [],
+            "rows": [],
+            "text": "",
+            "bytes": 0,
+            "truncated": False,
+            "kind": "none",
+        }
 
-    with target.open("rb") as handle:
-        head = handle.read(PREVIEW_BYTES)
+    whole = await _read(chat_id, path)
+    size = len(whole)
+    empty = {"columns": [], "rows": [], "text": "", "bytes": size, "truncated": False}
+    # Read whole and sliced, rather than the first N bytes off a handle: the file is on the far
+    # side of an HTTP call now, and `MAX_BYTES` already bounds what can be there.
+    head = whole[:PREVIEW_BYTES]
     clipped = size > len(head)
     # `replace` rather than a guessed encoding: a file the sandbox wrote is UTF-8 and one the user
     # uploaded may be anything, and a few replacement characters beat a 500.
@@ -167,12 +197,11 @@ async def preview(chat_id: str, path: str) -> dict:
 
 @router.delete("/chats/{chat_id}/files/{path:path}")
 async def discard(chat_id: str, path: str) -> dict:
-
-    target, refused = scratch.resolve(chat_id, path)
-    if target is None:
-        raise HTTPException(400, refused)
-    if not target.is_file():
-        raise HTTPException(404, f"no file at {path!r} in this chat's workspace")
-    target.unlink()
-    profile.forget(chat_id, path)
+    """The composer's ✕ deletes the file and not only the chip: `uploads/` is what the prompt is
+    built from every turn, so a chip removed while the file stayed would keep describing it."""
+    async with await _sandbox() as sandbox:
+        try:
+            await sandbox.delete(chat_id, path)
+        except SandboxError as exc:
+            raise HTTPException(exc.status or 502, str(exc)) from None
     return {"deleted": path}

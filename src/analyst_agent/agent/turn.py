@@ -12,10 +12,10 @@ from langchain_core.messages import AIMessageChunk
 from ..core.config import settings
 from ..core.events import Event
 from ..core.llm import reasoning_of, text_of
-from ..cube.client import ADMIN_TIMEOUT_S, CubeClient
+from ..cube.client import ADMIN_TIMEOUT_S, CubeClient, open_client
 from ..dashboards.store import DashboardStore
-from ..sources import grounding, vcs
-from ..sources.registry import model_dir
+from ..datamodel import grounding, vcs
+from ..datamodel.registry import model_dir
 from ..transcript import ChatStore
 from .build import (
     COMPACTION_TAG,
@@ -126,7 +126,8 @@ async def stream_turn(
         session = Session(
             catalog=await cube.catalog(),
             client=cube,
-            grounding=grounding.load(),
+            # Pinned to main: a question chat and a dashboard must never silently read a branch.
+            grounding=await grounding.load(),
             max_rows=settings.max_rows,
             # Result sets are kept beside the transcript, under this turn, so the table
             # and the CSV have something to address after the stream has closed.
@@ -140,7 +141,7 @@ async def stream_turn(
         # that" on turn three, and after a restart.
         session.executed, session.rejected = replay(await store.events(chat_id))
 
-        return build_agent(
+        return await build_agent(
             session,
             checkpointer=saver,
             dashboards=DashboardContext(store=DashboardStore(), catalog=session.catalog),
@@ -161,7 +162,7 @@ async def stream_edit_turn(
     turn restarts the container and waits for a compile, which a query timeout is not sized for.
     """
 
-    async with CubeClient.local(timeout=ADMIN_TIMEOUT_S) as client:
+    async with await open_client(timeout=ADMIN_TIMEOUT_S) as client:
 
         async def build(_turn_id: str):
             # Read per turn, not stored: the branch is whichever one is checked out, because

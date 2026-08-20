@@ -5,8 +5,8 @@ another schema, which `build` already handles — so selection is a filter on th
 and `build`/`decide`/`publish` are untouched.
 """
 
-from analyst_agent.sources.modelgen import build, selection
-from analyst_agent.sources.modelgen.warehouse import Column, ForeignKey, Schema, Table
+from analyst_agent.datamodel.modelgen import build, selection
+from analyst_agent.datamodel.modelgen.warehouse import Column, ForeignKey, Schema, Table
 
 
 def table(name, *, key=None, refs=(), columns=("name",)) -> Table:
