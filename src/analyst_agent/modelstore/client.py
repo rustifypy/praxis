@@ -1,11 +1,3 @@
-"""The model store, for as long as you hold it. Whoever constructs it closes it.
-
-Every call to the store goes through here, so a caller cannot forget the write token. The
-model is not on this filesystem any more, so the two things the portal used to get from disk
-for free — reading main's blobs, and listing the model — are network calls, and `files` is
-cached against `version` because grounding is read on every chat turn.
-"""
-
 import time
 from dataclasses import dataclass
 
@@ -15,9 +7,6 @@ from ..core.deployment import MAIN, Deployment, current
 
 TIMEOUT_S = 20.0
 FILES_TTL_S = 5.0
-"""How long a cached file set is reused without re-checking `version`. Bounded staleness
-rather than invalidation: nothing watches the store, and the alternative is a round trip per
-turn for a model that changes when someone presses a button."""
 
 
 class StoreError(RuntimeError):
@@ -27,7 +16,6 @@ class StoreError(RuntimeError):
 
     @property
     def missing(self) -> bool:
-        """A ref or a path that is not there, as against the store being unreachable."""
         return self.status == 404
 
 
@@ -63,20 +51,19 @@ class ModelStore:
     async def _send(self, method: str, path: str, **kwargs) -> dict:
         headers = {"Authorization": f"Bearer {self._token}"} if self._token else {}
         try:
-            r = await self._client.request(method, path, headers=headers, **kwargs)
+            response = await self._client.request(method, path, headers=headers, **kwargs)
+            # Parsed once for both outcomes: a refusal carries `detail`, an answer is the body.
+            parsed = response.json()
         except httpx.RequestError as exc:
             raise StoreError(f"{self._root} did not answer: {exc}") from exc
-        if r.status_code >= 400:
-            detail = ""
-            try:
-                detail = str(r.json().get("detail") or "")
-            except ValueError:
-                detail = r.text[:300]
-            raise StoreError(detail or f"[{r.status_code}]", status=r.status_code)
-        try:
-            return r.json()
         except ValueError:
-            return {"text": r.text}
+            parsed = None
+        if response.status_code >= 400:
+            detail = (
+                str(parsed.get("detail") or "") if isinstance(parsed, dict) else response.text[:300]
+            )
+            raise StoreError(detail or f"[{response.status_code}]", status=response.status_code)
+        return parsed if isinstance(parsed, dict) else {"text": response.text}
 
     # --- refs ---------------------------------------------------------------
 
@@ -97,15 +84,17 @@ class ModelStore:
     # --- reading ------------------------------------------------------------
 
     async def files(self, ref: str = MAIN, *, refresh: bool = False) -> dict[str, str]:
-        """Every model file at `ref`. Cached for `FILES_TTL_S`, then revalidated against the
-        sha — which is one small request rather than the whole model."""
-        hit = self._cache.get(ref)
+        # Past the TTL the sha is revalidated rather than the model refetched — one small
+        # request instead of the whole thing.
+        cached = self._cache.get(ref)
         now = time.monotonic()
-        if hit and not refresh and now - hit[0] < FILES_TTL_S:
-            return hit[2]
-        if hit and not refresh and await self.version(ref) == hit[1]:
-            self._cache[ref] = (now, hit[1], hit[2])
-            return hit[2]
+        if cached and not refresh:
+            checked_at, sha, files = cached
+            if now - checked_at < FILES_TTL_S:
+                return files
+            if await self.version(ref) == sha:
+                self._cache[ref] = (now, sha, files)
+                return files
         body = await self._send("GET", "/files", params={"ref": ref})
         self._cache[ref] = (now, body["sha"], body["files"])
         return body["files"]
@@ -118,13 +107,12 @@ class ModelStore:
 
     async def log(self, ref: str = MAIN, limit: int = 50) -> list[Commit]:
         body = await self._send("GET", "/log", params={"ref": ref, "limit": limit})
-        return [Commit(**c) for c in body["commits"]]
+        return [Commit(**commit) for commit in body["commits"]]
 
     # --- writing ------------------------------------------------------------
 
     async def replace(self, ref: str, files: dict[str, str], message: str) -> str:
-        """The whole model at `ref`, in one commit. What a rebuild does — and because it is a
-        commit on a ref rather than an unlink-and-write, a rejected model is abandonable."""
+        # The whole model in one commit, which is what makes a rejected rebuild abandonable.
         body = await self._send(
             "PUT", "/files", params={"ref": ref}, json={"files": files, "message": message}
         )
@@ -160,8 +148,6 @@ def for_deployment(deployment: Deployment, *, timeout: float | None = None) -> M
 
 
 async def open_store(*, timeout: float | None = None) -> ModelStore:
-    """A store client on the configured deployment, read fresh from the row — the same reason
-    `open_client` does: an edited address must not leave a stale copy anywhere."""
     deployment = await current()
     if deployment is None or not deployment.store_url:
         raise StoreError("no model store is configured")
@@ -169,24 +155,19 @@ async def open_store(*, timeout: float | None = None) -> ModelStore:
 
 
 async def model_files(ref: str = MAIN) -> dict[str, str]:
-    """The model at `ref`, or nothing at all.
-
-    Two absences answer empty rather than raising, because both mean "there is no model here":
-    a deployment with no store (every deployment until one is configured) and a ref the store
-    does not have (a candidate that was cleaned up). A store that *is* configured and does not
-    answer still raises — an outage reported as an empty model would erase the pipeline's rail
-    and silently drop the grounding an agent is bound by.
-
-    One function because five callers need that rule and it is the kind that drifts.
-    """
-    try:
-        opened = await open_store()
-    except StoreError:
+    # Two absences mean "no model here" and answer empty: no store configured, and a ref the
+    # store does not have. A configured store that does not answer still raises — an outage
+    # reported as an empty model would silently drop the grounding an agent is bound by.
+    # Asked of the row rather than caught off `open_store`, so the one handler below can tell a
+    # ref that is not there from a store that is not answering — both arrive as a StoreError
+    # with no status, and only the second must raise.
+    deployment = await current()
+    if deployment is None or not deployment.store_url:
         return {}
-    async with opened as store:
-        try:
+    try:
+        async with for_deployment(deployment) as store:
             return await store.files(ref)
-        except StoreError as exc:
-            if not exc.missing:
-                raise
-            return {}
+    except StoreError as exc:
+        if not exc.missing:
+            raise
+        return {}

@@ -24,9 +24,7 @@ TIME_OPS = [
     "beforeOrOnDate",
     "afterDate",
     "afterOrOnDate",
-    # Cube's docs list these under number dimensions only, but it accepts them on a
-    # timestamp and answers correctly — verified against a live source. Omitting them
-    # rejected a working query. `afterDate` and friends remain the idiomatic form.
+    # Accepted on a timestamp despite Cube documenting them for numbers only.
     "gt",
     "gte",
     "lt",
@@ -58,13 +56,7 @@ class MemberDoc:
     granularities: list[str] = field(default_factory=list)
     valid_operators: list[str] = field(default_factory=list)
     format: str = ""
-    """Cube's display format for a measure. Read off the cached `/v1/meta` rather than
-    `/v1/load`'s `annotation`, which would need plumbing through `LoadResult` and `GateResult`.
-    """
     alias_member: str = ""
-    """For a view member, the cube member it re-exports. The only thing in `/v1/meta` that
-    says what a view is made of — without it a view and a cube differ by a type string.
-    """
 
     @property
     def search_text(self) -> str:
@@ -73,17 +65,12 @@ class MemberDoc:
 
 @dataclass
 class Folder:
-    """A view's member grouping. Cube calls the list `members` in `/v1/meta` and `includes` in
-    the model YAML, which is why `decide.FolderDecision` is a separate shape."""
-
     name: str
     members: list[str] = field(default_factory=list)
 
 
 @dataclass
 class Entity:
-    """A cube or a view from /v1/meta."""
-
     name: str
     is_view: bool
     title: str = ""
@@ -95,31 +82,27 @@ class Entity:
     @property
     def search_text(self) -> str:
         head = " ".join(filter(None, [self.name, self.title, self.description, self.ai_context]))
-        return head + " " + " ".join(m.search_text for m in self.members)
+        return head + " " + " ".join(member.search_text for member in self.members)
 
 
 @dataclass
 class Counts:
-    """How big a model is. Over cubes only — a view's members are the cube's members
-    re-exported, so counting every entity reports a model as roughly twice its size."""
-
     cubes: int
     views: int
     members: int
     exposed: int
-    """Cube members some view re-exports. Surrogate keys are omitted from views on purpose,
-    so this is never the whole membership of a healthy model."""
     described: int
 
 
 class Catalog:
     def __init__(self, entities: list[Entity]):
         self.entities = entities
-        self.members: dict[str, MemberDoc] = {m.id: m for e in entities for m in e.members}
-        self.views = [e for e in entities if e.is_view]
-        self.cubes = [e for e in entities if not e.is_view]
-        # Which views re-export each cube member, from `aliasMember` — the only thing in
-        # `/v1/meta` that says what a view is made of.
+        self.members: dict[str, MemberDoc] = {
+            member.id: member for entity in entities for member in entity.members
+        }
+        self.views = [entity for entity in entities if entity.is_view]
+        self.cubes = [entity for entity in entities if not entity.is_view]
+        # Which views re-export each cube member, keyed by the aliased cube member.
         self.exposure: dict[str, list[str]] = {}
         for view in self.views:
             for member in view.members:
@@ -127,26 +110,31 @@ class Catalog:
                     self.exposure.setdefault(member.alias_member, []).append(view.name)
 
     def draws_from(self, entity: Entity) -> list[str]:
-        """The cubes a view projects over, or nothing for a cube."""
         if not entity.is_view:
             return []
-        return sorted({m.alias_member.rpartition(".")[0] for m in entity.members if m.alias_member})
+        return sorted(
+            {
+                member.alias_member.rpartition(".")[0]
+                for member in entity.members
+                if member.alias_member
+            }
+        )
 
     def exposed_by(self, entity: Entity) -> list[str]:
-        """The views exposing any of a cube's members — the other direction of `draws_from`,
-        named for what each side is asking."""
         if entity.is_view:
             return []
-        return sorted({v for m in entity.members for v in self.exposure.get(m.id, [])})
+        return sorted(
+            {view for member in entity.members for view in self.exposure.get(member.id, [])}
+        )
 
     def counts(self) -> Counts:
-        members = [m for e in self.cubes for m in e.members]
+        members = [member for entity in self.cubes for member in entity.members]
         return Counts(
             cubes=len(self.cubes),
             views=len(self.views),
             members=len(members),
-            exposed=sum(1 for m in members if self.exposure.get(m.id)),
-            described=sum(1 for m in members if m.description),
+            exposed=sum(1 for member in members if self.exposure.get(member.id)),
+            described=sum(1 for member in members if member.description),
         )
 
     @classmethod
@@ -160,8 +148,8 @@ class Catalog:
                 description=raw.get("description", ""),
                 ai_context=_ai_context(raw),
                 folders=[
-                    Folder(name=f.get("name", ""), members=list(f.get("members") or []))
-                    for f in raw.get("folders") or []
+                    Folder(name=folder.get("name", ""), members=list(folder.get("members") or []))
+                    for folder in raw.get("folders") or []
                 ],
             )
             for kind, key in (
@@ -169,34 +157,35 @@ class Catalog:
                 ("dimension", "dimensions"),
                 ("segment", "segments"),
             ):
-                for m in raw.get(key) or []:
-                    member_id = m["name"] if "." in m["name"] else f"{entity.name}.{m['name']}"
-                    mtype = m.get("type", "")
+                for raw_member in raw.get(key) or []:
+                    name = raw_member["name"]
+                    member_id = name if "." in name else f"{entity.name}.{name}"
+                    member_type = raw_member.get("type", "")
                     if kind == "measure":
-                        ops = MEASURE_OPS
+                        operators = MEASURE_OPS
                     elif kind == "dimension":
-                        ops = DIMENSION_OPS.get(mtype, STRING_OPS)
+                        operators = DIMENSION_OPS.get(member_type, STRING_OPS)
                     else:
-                        ops = []
+                        operators = []
                     grains = [
-                        g["name"] if isinstance(g, dict) else g
-                        for g in m.get("granularities") or []
+                        grain["name"] if isinstance(grain, dict) else grain
+                        for grain in raw_member.get("granularities") or []
                     ]
-                    if kind == "dimension" and mtype == "time" and not grains:
+                    if kind == "dimension" and member_type == "time" and not grains:
                         grains = ["day", "week", "month", "quarter", "year"]
                     entity.members.append(
                         MemberDoc(
                             id=member_id,
                             kind=kind,
                             cube=entity.name,
-                            type=mtype,
-                            title=m.get("shortTitle") or m.get("title", ""),
-                            description=m.get("description", ""),
-                            ai_context=_ai_context(m),
+                            type=member_type,
+                            title=raw_member.get("shortTitle") or raw_member.get("title", ""),
+                            description=raw_member.get("description", ""),
+                            ai_context=_ai_context(raw_member),
                             granularities=grains,
-                            valid_operators=list(ops),
-                            format=m.get("format", "") or "",
-                            alias_member=m.get("aliasMember", "") or "",
+                            valid_operators=list(operators),
+                            format=raw_member.get("format", "") or "",
+                            alias_member=raw_member.get("aliasMember", "") or "",
                         )
                     )
             entities.append(entity)
@@ -206,18 +195,16 @@ class Catalog:
         return self.members.get(member_id)
 
     def nearest(self, member_id: str, limit: int = 3) -> list[str]:
-        """Real members to suggest for one the agent invented, or nothing. Scored on the part after
-        the dot: scoring the whole id ranks by shared cube prefix.
-        """
+        # Scored on the part after the dot; scoring the whole id ranks by shared cube prefix.
         entity, _, wanted = member_id.rpartition(".")
         scored = []
         for candidate in self.members:
-            cand_entity, _, cand_member = candidate.rpartition(".")
+            candidate_entity, _, candidate_member = candidate.rpartition(".")
             # snake_case to spaces, so token-set scoring can see the words.
             score = fuzz.token_set_ratio(
-                wanted.replace("_", " ").lower(), cand_member.replace("_", " ").lower()
+                wanted.replace("_", " ").lower(), candidate_member.replace("_", " ").lower()
             )
-            if entity and cand_entity == entity:
+            if entity and candidate_entity == entity:
                 score += 10
             if score >= 60:
                 scored.append((score, candidate))
@@ -226,7 +213,9 @@ class Catalog:
 
     def views_containing(self, member_ids: list[str]) -> list[str]:
         wanted = set(member_ids)
-        return [v.name for v in self.views if wanted <= {m.id for m in v.members}]
+        return [
+            view.name for view in self.views if wanted <= {member.id for member in view.members}
+        ]
 
 
 def _ai_context(raw: dict) -> str:

@@ -1,15 +1,3 @@
-"""Stage 1 — read the database, through the connected Cube's own driver.
-
-**A ref, not a container.** The deployment runs wherever its owner put it, so there is nothing
-here to start: the probe cubes are committed to a ref of their own, the connected Cube is asked
-about that ref, and the ref is deleted. One Cube compiles every ref independently, so this
-neither disturbs nor is disturbed by the model being served.
-
-That also removes the last thing that needed dev mode. `/playground/db-schema` is served only
-in dev mode, and a deployment on a server is not in dev mode — so tables and columns come from
-`information_schema` like everything else, which is portable rather than merely working here.
-"""
-
 from dataclasses import dataclass, field
 
 import yaml
@@ -20,16 +8,17 @@ from ...cube.schema import CubeQuery
 from ...modelstore import StoreError, open_store
 from .warehouse import Column, ForeignKey, Schema, Table
 
+# Its own ref, so the served model is neither read nor touched.
 PROBE_REF = "probe"
-"""Where the introspection cubes live while they are being queried. Its own ref so the served
-model is neither read nor touched, and deleted afterwards — a leftover is harmless but it would
-show up in the branch list as something nobody created."""
 BOOT_TIMEOUT_S = 90.0
-PROBE_QUERY_TIMEOUT_S = 180.0
-"""A catalog query scans pg_constraint across every schema; the compile poll has its own."""
+
+# Under the store's proxy cap, so this side reports: at 180 it could never elapse and a slow
+# warehouse arrived as a generic 502.
+PROBE_QUERY_TIMEOUT_S = 110.0
+
+# Cube's own ceiling. More constraints or statistics than this is reported as truncated rather
+# than silently half-read.
 ROW_LIMIT = 50_000
-"""Cube's own ceiling. A database with more constraints or column statistics than this
-is reported as truncated rather than silently half-read."""
 SYSTEM_SCHEMAS = ("pg_catalog", "information_schema", "pg_toast")
 
 COLUMN_COLUMNS = ("table_schema", "table_name", "column_name", "data_type")
@@ -47,14 +36,13 @@ STAT_COLUMNS = ("table_schema", "table_name", "column_name", "distinct_value", "
 
 @dataclass(frozen=True)
 class Dialect:
+    # One row per constraint, and cardinality plus null rate per column without scanning tables.
     keys_sql: str
-    """One row per constraint: contype 'p' or 'f', columns comma-joined in key order."""
     stats_sql: str = ""
-    """Cardinality and null rate per column, ideally without scanning tables."""
 
 
 def _not_system(column: str) -> str:
-    return f"{column} NOT IN ({', '.join(repr(s) for s in SYSTEM_SCHEMAS)})"
+    return f"{column} NOT IN ({', '.join(repr(name) for name in SYSTEM_SCHEMAS)})"
 
 
 COLUMNS_SQL = f"""
@@ -62,9 +50,8 @@ COLUMNS_SQL = f"""
   FROM information_schema.columns
   WHERE {_not_system("table_schema")}
 """
-"""Tables and columns for every driver, not per dialect: `information_schema.columns` is ANSI
-and the warehouses here all answer it. This is what `/playground/db-schema` used to give, minus
-the requirement that Cube be in dev mode to serve it."""
+# Every driver rather than per dialect: `information_schema.columns` is ANSI, and
+# `/playground/db-schema` is served only in dev mode.
 
 
 POSTGRES = Dialect(
@@ -110,36 +97,32 @@ DIALECTS: dict[str, Dialect] = {"postgres": POSTGRES}
 
 @dataclass
 class Introspection:
-    """Everything the connection can see, before anyone chooses what to model."""
-
     schemas: dict[str, Schema] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    # A catalog query hit Cube's row ceiling, so keys or statistics are incomplete.
     truncated: bool = False
-    """A catalog query hit Cube's row ceiling — keys or statistics are incomplete."""
 
     def summary(self) -> list[dict]:
-        """One entry per schema, for the picker. Sorted with the biggest first."""
-        out = [
+        entries = [
             {
                 "schema": name,
                 "tables": len(schema.tables),
-                "keyed": sum(1 for t in schema.tables if t.primary_key),
+                "keyed": sum(1 for table in schema.tables if table.primary_key),
             }
             for name, schema in self.schemas.items()
         ]
-        out.sort(key=lambda s: (-s["tables"], s["schema"]))
-        return out
+        entries.sort(key=lambda entry: (-entry["tables"], entry["schema"]))
+        return entries
 
 
 async def read_catalog(deployment: Deployment, timeout: float = BOOT_TIMEOUT_S) -> Introspection:
-    """Commit the probe cubes to their own ref, ask the connected Cube about that ref, drop it."""
     if not deployment.credentials:
         raise RuntimeError("no credentials stored — connect a database first")
 
     catalog = Introspection()
 
-    # Probe cubes wrap a catalog SELECT each; their output columns become string
-    # dimensions we can query back as rows.
+    # Probe cubes wrap a catalog SELECT each; their output columns become string dimensions
+    # we can query back as rows.
     dialect = DIALECTS.get(deployment.driver)
     probes: list[tuple[str, str, tuple[str, ...]]] = [
         ("probe_columns", COLUMNS_SQL, COLUMN_COLUMNS)
@@ -158,7 +141,7 @@ async def read_catalog(deployment: Deployment, timeout: float = BOOT_TIMEOUT_S) 
     for name, sql, columns in probes:
         body: dict = {"name": name, "sql": sql, "measures": [{"name": "count", "type": "count"}]}
         if columns:
-            body["dimensions"] = [{"name": c, "sql": c, "type": "string"} for c in columns]
+            body["dimensions"] = [{"name": name, "sql": name, "type": "string"} for name in columns]
         cubes.append(body)
     files = {"cubes/probe.yml": yaml.safe_dump({"cubes": cubes}, sort_keys=False)}
 
@@ -184,7 +167,10 @@ async def read_catalog(deployment: Deployment, timeout: float = BOOT_TIMEOUT_S) 
                     if not columns:
                         continue
                     query = CubeQuery.model_validate(
-                        {"dimensions": [f"{name}.{c}" for c in columns], "limit": ROW_LIMIT}
+                        {
+                            "dimensions": [f"{name}.{column}" for column in columns],
+                            "limit": ROW_LIMIT,
+                        }
                     )
                     try:
                         loaded = await cube.load(query)
@@ -196,7 +182,8 @@ async def read_catalog(deployment: Deployment, timeout: float = BOOT_TIMEOUT_S) 
                         catalog.notes.append(f"statistics unavailable: {str(exc)[:400]}")
                         continue
                     rows[name] = [
-                        {c: row.get(f"{name}.{c}") for c in columns} for row in loaded.rows
+                        {column: row.get(f"{name}.{column}") for column in columns}
+                        for row in loaded.rows
                     ]
                     if len(rows[name]) >= ROW_LIMIT:
                         catalog.truncated = True
@@ -205,12 +192,11 @@ async def read_catalog(deployment: Deployment, timeout: float = BOOT_TIMEOUT_S) 
                             "statistics are missing, so check the joins on a large schema"
                         )
         finally:
-            # Disposable from the start, and leaving it would put a ref in the branch list
-            # that nobody created.
+            # Leaving it would put a ref in the list that nobody created.
             await store.delete_ref(PROBE_REF)
 
-    # Statistics arrive as strings, because every probe dimension is declared as a
-    # string, so convert them here — once — and leave anything unparsable as None.
+    # Every probe dimension is declared as a string, so statistics arrive as strings: converted
+    # once here, and anything unparsable left as None.
     statistics: dict[tuple[str, str, str], dict] = {}
     for row in rows.get("probe_stats", []):
         numbers = {}
@@ -221,9 +207,8 @@ async def read_catalog(deployment: Deployment, timeout: float = BOOT_TIMEOUT_S) 
                 numbers[key] = None
         statistics[(row["table_schema"], row["table_name"], row["column_name"])] = numbers
 
-    # One row per column, so the schema/table shape is rebuilt from them. Order is whatever
-    # the warehouse returned, hence the sorts — a picker whose table order moves between reads
-    # is worse than one that is merely alphabetical.
+    # One row per column, so the schema/table shape is rebuilt from them. The sorts are because
+    # a picker whose table order moves between reads is worse than a merely alphabetical one.
     by_table: dict[tuple[str, str], list[dict]] = {}
     for row in rows.get("probe_columns", []):
         schema_name, table_name = row["table_schema"], row["table_name"]
@@ -234,12 +219,12 @@ async def read_catalog(deployment: Deployment, timeout: float = BOOT_TIMEOUT_S) 
     for (schema_name, table_name), columns in sorted(by_table.items()):
         schema = catalog.schemas.setdefault(schema_name, Schema())
         table = Table(name=table_name, schema=schema_name)
-        for col in columns:
-            stat = statistics.get((schema_name, table_name, col["column_name"]), {})
+        for raw_column in columns:
+            stat = statistics.get((schema_name, table_name, raw_column["column_name"]), {})
             table.columns.append(
                 Column(
-                    name=col["column_name"],
-                    data_type=col.get("data_type") or "",
+                    name=raw_column["column_name"],
+                    data_type=raw_column.get("data_type") or "",
                     distinct=stat.get("distinct_value"),
                     null_fraction=stat.get("null_frac"),
                 )
@@ -251,20 +236,19 @@ async def read_catalog(deployment: Deployment, timeout: float = BOOT_TIMEOUT_S) 
         table = schema.table(row["table_name"]) if schema else None
         if table is None:
             continue
-        key_columns = [c for c in (row.get("cols") or "").split(",") if c]
+        key_columns = [name for name in (row.get("cols") or "").split(",") if name]
         if row["constraint_type"] == "p":
             table.primary_key = key_columns
         elif row["constraint_type"] == "f":
-            # A cube references a joined cube by bare name, so a foreign key pointing
-            # into another schema is not expressible — record it only when both ends
-            # live together.
+            # A cube references a joined cube by bare name, so a foreign key into another
+            # schema is not expressible.
             if (row.get("ref_schema") or row["table_schema"]) != row["table_schema"]:
                 continue
             table.foreign_keys.append(
                 ForeignKey(
                     columns=key_columns,
                     ref_table=row["ref_table"],
-                    ref_columns=[c for c in (row.get("ref_cols") or "").split(",") if c],
+                    ref_columns=[name for name in (row.get("ref_cols") or "").split(",") if name],
                 )
             )
 

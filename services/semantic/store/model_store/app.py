@@ -14,6 +14,15 @@ ROOT = Path(os.environ.get("MODEL_STORE_PATH", "/data/model.git"))
 READ_TOKEN = os.environ.get("MODEL_STORE_READ_TOKEN", "")
 WRITE_TOKEN = os.environ.get("MODEL_STORE_WRITE_TOKEN", "")
 
+CONTRACT = 1
+"""The HTTP contract this store implements, reported on `/health`.
+
+A compatibility integer, not a version: bumped only when a route, a body or a header changes in
+a way a portal built against the previous number would get wrong. The portal compares it with
+its own and *warns* — it cannot know an older store is actually incompatible with what is about
+to be asked of it, and refusing would strand a deployment that works.
+"""
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -79,7 +88,9 @@ class Merge(BaseModel):
 
 @app.get("/health")
 async def health() -> dict:
-    return {"ok": True, "refs": len(await repo.refs(ROOT))}
+    """Unauthenticated on purpose: it is what a deployment is checked with before anyone has
+    established that the tokens match. It says nothing a caller could not learn by connecting."""
+    return {"ok": True, "refs": len(await repo.refs(ROOT)), "contract": CONTRACT}
 
 
 @app.get("/refs", dependencies=[Depends(reader)])

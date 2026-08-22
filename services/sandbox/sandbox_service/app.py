@@ -57,9 +57,24 @@ def _target(chat_id: str, path: str):
     return resolved
 
 
+CONTRACT = 1
+"""The HTTP contract this service implements, reported on `/health` like the model store's.
+
+A compatibility integer, not a version: bumped only when a route, a body or a header changes in
+a way a portal built against the previous number would get wrong.
+"""
+
+
 @app.get("/health")
 async def health() -> dict:
-    return {"ok": True, "root": str(workspace.ROOT), "running": sum(1 for _ in _busy())}
+    """Unauthenticated, so it can be checked before anyone knows the tokens match. It says
+    nothing a caller could not learn by connecting to the port."""
+    return {
+        "ok": True,
+        "contract": CONTRACT,
+        "root": str(workspace.ROOT),
+        "running": sum(1 for _ in _busy()),
+    }
 
 
 def _busy():

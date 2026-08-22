@@ -1,15 +1,8 @@
-"""The read-only tool subset, for agents that are not this one.
+"""Agent access: what something else gets to call, and the switch that lets it.
 
-Three tools and no state. An MCP session is per-connection and ends without notice, so holding
-a `Session` between calls would be the first thing in this process that leaks; instead every
-call builds one from `app.state` and throws it away, and `run_query` returns the SQL inline
-rather than leaving it somewhere for a second call to ask about. That is what makes
-`explain_last_query` unnecessary here rather than merely absent.
-
-What is exposed is what is safe to expose without a browser: reading the model, and running a
-query through the same four-tier gate a chat turn uses. The dashboard, sandbox and editor
-toolsets are not here — they author state whose invariants assume an event stream, an approval
-click, or a container that only one checkout can serve.
+The read-only half of the query agent's vocabulary — `search_model`, `run_query`, the served
+model — behind a token of its own, so turning it off is one flag and rotating it does not touch
+the portal's. Off by default: this opens the warehouse to whatever holds the token.
 """
 
 import json
@@ -20,10 +13,12 @@ from dataclasses import dataclass
 from fastapi import APIRouter, Request
 from mcp.server.mcpserver import MCPServer
 from pydantic import BaseModel
+from sqlalchemy import insert, select, update
 
 from ..agent.retrieval import LexicalRetriever, render
 from ..core.config import settings
 from ..core.db import connect
+from ..core.db import mcp as row
 from ..cube import gate
 from ..cube.shape import columns_of
 from ..datamodel import grounding
@@ -38,58 +33,55 @@ queries are written against those ids rather than against table or column names.
 takes Cube JSON and returns rows with the SQL that produced them. There is no SQL entry point —
 a query that does not pass the gate comes back as an explanation of what to fix."""
 
+# Rows returned inline: an MCP client pays per token as the local agent does, and the whole set
+# is not addressable here — there is no chat to store it under.
 PREVIEW_ROWS = 30
-"""Rows returned inline. An MCP client pays per token exactly as the local agent does, and the
-whole set is not addressable here — there is no chat to store it under."""
 
 
 @dataclass
 class Access:
-    """The stored row. Held on `app.state.mcp` and written through, so the guard tests one
-    in-memory copy per request rather than opening the database on every tool call."""
-
+    # Held on `app.state.mcp` and written through, so the guard tests one in-memory copy per
+    # request rather than opening the database on every tool call.
     enabled: bool
     token: str
 
 
 async def load() -> Access:
-    """The one row, created with a fresh token the first time it is asked for. Callers must run
-    after a store's `init()` — `core.db.SCHEMA` is what creates the table."""
+    # Created with a fresh token the first time it is asked for. Callers must run after a
+    # store's `init()`, which is what creates the table.
     async with connect(settings.db_path) as db:
-        cursor = await db.execute("SELECT enabled, token FROM mcp WHERE id = 1")
-        row = await cursor.fetchone()
-        if row is not None:
-            return Access(enabled=bool(row["enabled"]), token=row["token"])
+        found = await db.execute(select(row.c.enabled, row.c.token).where(row.c.id == 1))
+        stored = found.mappings().first()
+        if stored is not None:
+            return Access(enabled=bool(stored["enabled"]), token=stored["token"])
         access = Access(enabled=True, token=secrets.token_urlsafe(24))
         now = time.time()
         await db.execute(
-            "INSERT INTO mcp (id, enabled, token, created_at, updated_at) VALUES (1, ?, ?, ?, ?)",
-            (int(access.enabled), access.token, now, now),
+            insert(row).values(
+                id=1,
+                enabled=int(access.enabled),
+                token=access.token,
+                created_at=now,
+                updated_at=now,
+            )
         )
-        await db.commit()
         return access
 
 
 async def save(access: Access) -> None:
     async with connect(settings.db_path) as db:
         await db.execute(
-            "UPDATE mcp SET enabled = ?, token = ?, updated_at = ? WHERE id = 1",
-            (int(access.enabled), access.token, time.time()),
+            update(row)
+            .where(row.c.id == 1)
+            .values(enabled=int(access.enabled), token=access.token, updated_at=time.time())
         )
-        await db.commit()
 
 
 def client_config(access: Access, base_url: str) -> dict:
-    """What to paste, in the two shapes people actually need — and derived here rather than in
-    the browser so that the endpoint and the header have one definition.
-
-    `base_url` is the address this request arrived on, not `settings.web_host` — reach the
-    portal over a tunnel or a LAN address and the settings pair still says 127.0.0.1, which is
-    a config that cannot work from wherever the person actually is.
-
-    `mcp-remote` is the shim because Claude Desktop's own connectors expect OAuth while this
-    takes a bearer token; Cube's documented config has the same shape for the same reason.
-    """
+    # `base_url` is the address this request arrived on and not `settings.web_host`: reached
+    # over a tunnel or a LAN address, the settings pair still says 127.0.0.1, which is a config
+    # that cannot work from wherever the person actually is. `mcp-remote` is the shim because
+    # Claude Desktop's own connectors expect OAuth while this takes a bearer token.
     url = f"{base_url.rstrip('/')}/mcp"
     header = f"Authorization: Bearer {access.token}"
     desktop = {
@@ -113,15 +105,14 @@ class Toggle(BaseModel):
 
 @router.get("")
 async def status(request: Request) -> dict:
-    """Everything the panel draws: the switch, the token, what to paste, and the tool list read
-    off the server itself rather than named a second time here."""
+    # The tool list is read off the server rather than named a second time here.
     access: Access = request.app.state.mcp
     server: MCPServer = request.app.state.mcp_server
     tools = await server.list_tools()
     return {
         "enabled": access.enabled,
         "token": access.token,
-        "tools": [{"name": t.name, "description": t.description or ""} for t in tools],
+        "tools": [{"name": tool.name, "description": tool.description or ""} for tool in tools],
         **client_config(access, str(request.base_url)),
     }
 
@@ -136,8 +127,8 @@ async def set_enabled(body: Toggle, request: Request) -> dict:
 
 @router.post("/rotate")
 async def rotate(request: Request) -> dict:
-    """A new token, which invalidates every config already pasted anywhere. That is the point —
-    it is how access is taken back — so the panel says so before it is clicked."""
+    # Invalidates every config already pasted anywhere, which is the point: it is how access is
+    # taken back, so the panel says so before it is clicked.
     access: Access = request.app.state.mcp
     access.token = secrets.token_urlsafe(24)
     await save(access)
@@ -145,8 +136,8 @@ async def rotate(request: Request) -> dict:
 
 
 def build(app) -> MCPServer:
-    """The server, reading its catalog off the portal's own `app.state.cube` — one cached
-    catalog for the process, so an MCP call cannot query a model the portal is not serving."""
+    # Reads its catalog off the portal's own `app.state.cube`, so an MCP call cannot query a
+    # model the portal is not serving.
     mcp = MCPServer(name="analyst", instructions=INSTRUCTIONS)
 
     @mcp.tool()
@@ -178,17 +169,19 @@ def build(app) -> MCPServer:
         columns = columns_of(query, catalog)
         head = rows[:PREVIEW_ROWS]
         body = {
-            "columns": [{"id": c.id, "label": c.label, "kind": c.kind} for c in columns],
+            "columns": [
+                {"id": column.id, "label": column.label, "kind": column.kind} for column in columns
+            ],
             "rows": head,
             "rows_returned": len(head),
             "rows_total": len(rows),
             "sql": result.sql,
         }
         # Inline, because there is no second call that could ask for it: an MCP session does
-        # not outlive the request reliably enough to be asked "what was that query?".
+        # not reliably outlive the request.
         out = json.dumps(body, indent=2, default=str)
         if result.warnings:
-            out += "\n\nWarnings:\n" + "\n".join(f"- {w}" for w in result.warnings)
+            out += "\n\nWarnings:\n" + "\n".join(f"- {warning}" for warning in result.warnings)
         return out
 
     @mcp.tool()

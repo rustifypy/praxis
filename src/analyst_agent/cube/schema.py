@@ -8,8 +8,6 @@ Order = Literal["asc", "desc"]
 
 
 class Filter(BaseModel):
-    """Leaf filter. Cube requires all values as strings."""
-
     model_config = ConfigDict(extra="forbid")
 
     member: str
@@ -56,9 +54,6 @@ class TimeDimension(BaseModel):
 
 
 class CubeQuery(BaseModel):
-    """A Cube JSON query. `ungrouped` is deliberately absent: agents may not
-    request raw un-aggregated rows."""
-
     model_config = ConfigDict(extra="forbid")
 
     measures: list[str] = Field(default_factory=list)
@@ -67,9 +62,8 @@ class CubeQuery(BaseModel):
     filters: list[FilterNode] = Field(default_factory=list)
     segments: list[str] = Field(default_factory=list)
     order: dict[str, Order] | None = None
-    # None means the agent did not ask for one, which is not the same as asking for
-    # the default: the gate warns about a limit without an order, and with a default
-    # here that warning fired on every query ever made.
+    # No default: the gate warns about a limit without an order, and a default here
+    # fired that warning on every query ever made.
     limit: int | None = Field(default=None, ge=1, le=50_000)
     offset: int = Field(default=0, ge=0)
     timezone: str | None = None
@@ -77,11 +71,6 @@ class CubeQuery(BaseModel):
     @field_validator("order", mode="before")
     @classmethod
     def accept_both_order_forms(cls, value: Any) -> Any:
-        """Cube documents two shapes for `order` and takes either, so this takes either and
-        normalises to the object form. Anything else names both, because pydantic's own
-        "Input should be a valid dictionary" tells the agent what it got and never what to
-        send — and a rejection it cannot act on costs a whole retry.
-        """
         if value is None or isinstance(value, dict):
             return value
         if isinstance(value, list) and all(
@@ -106,15 +95,15 @@ class CubeQuery(BaseModel):
 
     def to_payload(self) -> dict:
         raw = self.model_dump(exclude_none=True, by_alias=True)
-        return {k: v for k, v in raw.items() if v != [] and v != {}}
+        return {key: value for key, value in raw.items() if value != [] and value != {}}
 
     def referenced_members(self) -> list[str]:
-        out = [*self.measures, *self.dimensions, *self.segments]
-        out += [td.dimension for td in self.timeDimensions]
-        out += [f.member for f in self.iter_filters()]
+        members = [*self.measures, *self.dimensions, *self.segments]
+        members += [time_dimension.dimension for time_dimension in self.timeDimensions]
+        members += [leaf.member for leaf in self.iter_filters()]
         if self.order:
-            out += list(self.order)
-        return out
+            members += list(self.order)
+        return members
 
     def iter_filters(self, nodes: list[FilterNode] | None = None):
         for node in self.filters if nodes is None else nodes:

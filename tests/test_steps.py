@@ -7,7 +7,9 @@ order rule, and what a failure leaves in the database.
 
 import pytest
 
-from analyst_agent.core.deployment import Deployment, DeploymentStore
+from analyst_agent.core import db
+from analyst_agent.core import deployment as _deployment
+from analyst_agent.core.deployment import Deployment
 from analyst_agent.datamodel.modelgen import steps
 from analyst_agent.datamodel.modelgen.steps import StepFailed
 
@@ -15,9 +17,9 @@ SHOP = Deployment(store_url="http://localhost:8500", driver="postgres", credenti
 
 
 @pytest.fixture
-async def store(tmp_path) -> DeploymentStore:
-    s = DeploymentStore(tmp_path / "analyst.db")
-    await s.init()
+async def store():
+    await db.create_tables()
+    s = _deployment
     await s.save(SHOP)
     return s
 
@@ -34,15 +36,15 @@ def no_store(monkeypatch):
 
 async def test_an_unknown_action_is_refused():
     with pytest.raises(StepFailed, match="unknown action"):
-        await steps.action("enrich", None)
+        await steps.action("enrich")
 
 
 async def test_a_step_cannot_run_before_the_one_it_depends_on(store):
     """Enforced here, not in the browser — the browser is advice, not a guarantee."""
     with pytest.raises(StepFailed, match="run cubes first"):
-        await steps.action("describe", store)
+        await steps.action("describe")
     with pytest.raises(StepFailed, match="run describe first"):
-        await steps.action("views", store)
+        await steps.action("views")
 
 
 async def test_read_is_reachable_without_any_step_and_records_none(store, monkeypatch):
@@ -52,7 +54,7 @@ async def test_read_is_reachable_without_any_step_and_records_none(store, monkey
         return {"schemas": [{"schema": "public", "tables": 3}]}
 
     monkeypatch.setattr(steps, "read_catalog", fake_read)
-    result = await steps.action("read", store)
+    result = await steps.action("read")
     assert result.summary["schemas"][0]["tables"] == 3
     assert await store.steps() == {}, "read has no row in the panel"
 
@@ -66,7 +68,7 @@ async def test_a_failing_step_is_recorded_before_it_is_re_raised(store, monkeypa
     monkeypatch.setattr(steps, "cubes", lambda *a, **k: boom(a[0]))
 
     with pytest.raises(StepFailed, match="Cube rejected"):
-        await steps.action("cubes", store)
+        await steps.action("cubes")
 
     record = (await store.steps())["cubes"]
     assert record["status"] == "error"
@@ -82,7 +84,7 @@ async def test_a_failing_read_records_nothing(store, monkeypatch):
 
     monkeypatch.setattr(steps, "read_catalog", boom)
     with pytest.raises(StepFailed):
-        await steps.action("read", store)
+        await steps.action("read")
     assert await store.steps() == {}
 
 
@@ -91,7 +93,7 @@ async def test_a_stage_with_no_branch_is_refused_rather_than_run_as_views(store,
     the dispatch has to be refused rather than fall through to whichever step is last."""
     monkeypatch.setattr(steps, "STAGES", (*steps.STAGES, "publish"))
     with pytest.raises(StepFailed, match="stage with no branch"):
-        await steps.action("publish", store)
+        await steps.action("publish")
 
 
 def test_a_rejected_model_is_named_where_it_can_still_be_read():
@@ -122,7 +124,7 @@ async def test_generate_runs_the_actions_in_order(store, monkeypatch):
     # The order rule reads the state each step needs, and the stubs never write it.
     monkeypatch.setattr(store, "state", _built)
 
-    await steps.generate(store, enrich=True)
+    await steps.generate(enrich=True)
     assert order == ["read", "cubes", "describe", "views"]
 
 
@@ -141,7 +143,7 @@ async def test_generate_stops_before_the_llm_steps_without_enrich(store, monkeyp
     monkeypatch.setattr(steps, "read_catalog", stub("read"))
     monkeypatch.setattr(store, "state", _built)
 
-    await steps.generate(store)
+    await steps.generate()
     assert order == ["read", "cubes"]
 
 

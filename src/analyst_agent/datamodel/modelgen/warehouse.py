@@ -1,6 +1,6 @@
 """What the warehouse says about itself: tables, columns, keys, statistics."""
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 
 NUMBER_TYPES = (
     "smallint",
@@ -32,9 +32,9 @@ class Column:
 
         if low in BOOLEAN_TYPES:
             return "boolean"
-        if any(low.startswith(p) for p in TIME_PREFIXES):
+        if any(low.startswith(prefix) for prefix in TIME_PREFIXES):
             return "time"
-        if any(low.startswith(t) for t in NUMBER_TYPES):
+        if any(low.startswith(table) for table in NUMBER_TYPES):
             return "number"
         return "string"
 
@@ -65,10 +65,12 @@ class Table:
     @property
     def key_columns(self) -> set[str]:
         """Primary and foreign key columns — join plumbing, not slicing dimensions."""
-        return set(self.primary_key) | {c for fk in self.foreign_keys for c in fk.columns}
+        return set(self.primary_key) | {
+            column for foreign_key in self.foreign_keys for column in foreign_key.columns
+        }
 
     def column(self, name: str) -> Column | None:
-        return next((c for c in self.columns if c.name == name), None)
+        return next((column for column in self.columns if column.name == name), None)
 
 
 @dataclass
@@ -76,4 +78,28 @@ class Schema:
     tables: list[Table] = field(default_factory=list)
 
     def table(self, name: str) -> Table | None:
-        return next((t for t in self.tables if t.name == name), None)
+        return next((table for table in self.tables if table.name == name), None)
+
+
+# These two stay each other's inverse without anyone maintaining it: `asdict` emits every field a
+# dataclass has and `cls(**raw)` accepts exactly those, so an added field round-trips with no edit
+# here and an unknown key raises rather than being dropped on a resume days later.
+
+
+def dump_schema(schema: Schema) -> dict:
+    return asdict(schema)
+
+
+def load_schema(raw: dict) -> Schema:
+    return Schema(
+        tables=[
+            Table(
+                **{
+                    **table,
+                    "columns": [Column(**column) for column in table["columns"]],
+                    "foreign_keys": [ForeignKey(**key) for key in table["foreign_keys"]],
+                }
+            )
+            for table in raw["tables"]
+        ]
+    )

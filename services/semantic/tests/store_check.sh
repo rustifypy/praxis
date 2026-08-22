@@ -17,8 +17,8 @@
 #   make store-check              run it
 #   make store-check ARGS=clean   remove what it left behind
 set -uo pipefail
-# The repo root, three up: it mounts `services/semantic/cube.js` into the Cube it starts and
-# runs its JSON parsing through the root venv's python, so both are relative to there.
+# The repo root, three up: it builds both images from `services/semantic/` and runs its JSON
+# parsing through the root venv's python, so both are relative to there.
 cd "$(dirname "$0")/../../.." || exit 1
 
 NET=store-check-net
@@ -34,13 +34,23 @@ CUBE_PORT=4199
 READ=read-$RANDOM
 WRITE=write-$RANDOM
 SECRET=$(head -c 48 /dev/urandom | base64 | tr -d '/+=' | head -c 48)
-IMAGE=${STORE_IMAGE:-analyst-model-store:dev}
-# Built here if it is missing, so this needs nothing run beforehand. Nothing else in the repo
-# builds it: the deployment is the user's to bring up, and `docker compose up` does its own.
+IMAGE=${STORE_IMAGE:-analyst-model-store:1}
+CUBE_IMAGE=${CUBE_IMAGE:-analyst-cube:1}
+# Built here if missing, so this needs nothing run beforehand. Nothing else in the repo builds
+# them: the deployment is the user's to bring up, and `docker compose up` does its own.
+#
+# Cube is *our* image and not `cubejs/cube`, because `cube.js` is baked into it now. That is the
+# thing under test as much as the store is — a check that bind-mounted the file instead would
+# pass while the published image shipped without it.
 build_image() {
-  docker image inspect "$IMAGE" >/dev/null 2>&1 && return 0
-  printf '  building %s\n' "$IMAGE"
-  docker build -q -t "$IMAGE" services/semantic/store >/dev/null
+  docker image inspect "$IMAGE" >/dev/null 2>&1 || {
+    printf '  building %s\n' "$IMAGE"
+    docker build -q -t "$IMAGE" services/semantic/store >/dev/null
+  }
+  docker image inspect "$CUBE_IMAGE" >/dev/null 2>&1 || {
+    printf '  building %s\n' "$CUBE_IMAGE"
+    docker build -q -t "$CUBE_IMAGE" services/semantic/cube >/dev/null
+  }
 }
 
 W="Authorization: Bearer $WRITE"
@@ -100,7 +110,7 @@ docker run -d --name $STORE --network $NET -p 127.0.0.1:$STORE_PORT:8500 \
   -e CUBE_URL=http://$CUBE:4000 -e CUBEJS_API_SECRET="$SECRET" \
   -v ${STORE}-data:/data "$IMAGE" >/dev/null
 for _ in $(seq 1 40); do sleep 1; curl -sf $S/health >/dev/null && break; done
-check "store health" "$(curl -sS $S/health)" '{"ok":true,"refs":1}'
+check "store health" "$(curl -sS $S/health)" '{"ok":true,"refs":1,"contract":1}'
 
 cube_yml() {
   printf 'cubes:\n  - name: %s\n    sql_table: %s\n    dimensions:\n      - name: id\n        sql: %s_id\n        type: number\n        primary_key: true\n    measures:\n      - name: count\n        type: count\n' "$1" "$1" "$1"
@@ -126,8 +136,7 @@ docker run -d --name $CUBE --network $NET -p 127.0.0.1:$CUBE_PORT:4000 \
   -e CUBEJS_DEV_MODE=false -e CUBEJS_API_SECRET="$SECRET" \
   -e CUBEJS_CUBESTORE_HOST=$CUBESTORE -e CUBEJS_CUBESTORE_PORT=3030 \
   -e MODEL_STORE_URL=http://$STORE:8500 -e MODEL_STORE_TOKEN="$READ" \
-  -v "$PWD/services/semantic/cube.js:/cube/conf/cube.js:ro" \
-  cubejs/cube:latest >/dev/null
+  "$CUBE_IMAGE" >/dev/null
 
 mint() {
   SECRET="$SECRET" REF="$1" .venv/bin/python -c "

@@ -1,26 +1,22 @@
-"""What merging a branch would break — the members saved queries name, against what Cube is
-serving now."""
-
 from dataclasses import dataclass, field
 
 from pydantic import ValidationError
 
 from ...cube.catalog import Catalog
 from ...cube.schema import CubeQuery
-from ...dashboards.store import DashboardStore
+from ...dashboards import store
 from ..grounding import Grounding
 
 
 @dataclass
 class Broken:
+    # `tile` or `certified`, and the dashboard it sits on or the grounding file it lives in.
     kind: str
-    """`tile` or `certified`."""
     where: str
-    """The dashboard it sits on, or the grounding file it lives in."""
     title: str
     members: list[str]
+    # Closest surviving names, so a fix is one edit rather than a search.
     nearest: dict[str, list[str]] = field(default_factory=dict)
-    """Closest surviving names, so a fix is one edit rather than a search."""
 
 
 @dataclass
@@ -47,43 +43,39 @@ class Impact:
 
 
 def missing_members(query: dict, catalog: Catalog) -> tuple[list[str], dict[str, list[str]]]:
-    """Members this query names that the catalog does not have, and what is nearest to each."""
     try:
         parsed = CubeQuery.model_validate(query)
+        absent = sorted(
+            {member for member in parsed.referenced_members() if catalog.get(member) is None}
+        )
+        return absent, {member: catalog.nearest(member) for member in absent}
     except ValidationError:
-        # A stored query that no longer parses is not this check's problem — the gate that
-        # runs before every refresh reports it, with the schema errors attached.
+        # A stored query that no longer parses is not this check's problem — the gate that runs
+        # before every refresh reports it, with the schema errors attached.
         return [], {}
-    absent = sorted({m for m in parsed.referenced_members() if catalog.get(m) is None})
-    return absent, {m: catalog.nearest(m) for m in absent}
 
 
 async def check(
     catalog: Catalog,
-    dashboards: DashboardStore,
     grounding: Grounding,
 ) -> Impact:
-    """Every saved query, against the model being served.
-
-    Deliberately not a diff of main's members against the branch's: only one catalog is ever
-    served at a time, and asking "is what this tile reads still here" answers the question that
-    matters without checking main out to find the answer. It also catches breakage whatever
-    caused it — a renamed view, a changed alias, an include quietly dropped.
-    """
-    out = Impact()
-    for board in await dashboards.list_dashboards():
-        for tile in await dashboards.tiles(board.id):
-            out.checked += 1
+    # Every saved query against the model being served, and deliberately not a diff of main's
+    # members against the ref's: "is what this tile reads still here" catches breakage
+    # whatever caused it — a renamed view, a changed alias, an include quietly dropped.
+    impact = Impact()
+    for board in await store.list_dashboards():
+        for tile in await store.tiles(board.id):
+            impact.checked += 1
             absent, nearest = missing_members(tile.query, catalog)
             if absent:
-                out.broken.append(Broken("tile", board.title, tile.title, absent, nearest))
+                impact.broken.append(Broken("tile", board.title, tile.title, absent, nearest))
 
     for artefact in grounding.certified:
         query = artefact.query
         if query is None:
             continue
-        out.checked += 1
+        impact.checked += 1
         absent, nearest = missing_members(query, catalog)
         if absent:
-            out.broken.append(Broken("certified", artefact.file, artefact.name, absent, nearest))
-    return out
+            impact.broken.append(Broken("certified", artefact.file, artefact.name, absent, nearest))
+    return impact

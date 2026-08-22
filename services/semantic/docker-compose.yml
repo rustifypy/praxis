@@ -13,14 +13,14 @@
 #   MODEL_STORE_WRITE_TOKEN  given to the workspace; writes the model *and* queries
 #   CUBEJS_API_SECRET        shared by cube and model-store, internal to this file
 #
-# The code sandbox is not here. It is its own deployment in `sandbox-service/`, sharing no
-# network, volume or secret with this one — see that directory's compose file.
+# The code sandbox is not here. It is its own deployment, sharing no network, volume or secret
+# with this one — see its own compose file.
 
-name: analyst-cube
+name: analyst-semantic
 
 services:
   model-store:
-    image: ${STORE_IMAGE:-analyst-model-store:dev}
+    image: ${STORE_IMAGE:-analyst-model-store:1}
     build: ./store
     environment:
       MODEL_STORE_READ_TOKEN: ${MODEL_STORE_READ_TOKEN:?required}
@@ -28,23 +28,29 @@ services:
       # Where it proxies queries, and what it signs them with. Both internal to this file.
       CUBE_URL: http://cube:4000
       CUBEJS_API_SECRET: ${CUBEJS_API_SECRET:?required}
+    # The one published port, and the address the portal is given. To move it, change the
+    # left-hand number only — the right-hand one is what the store listens on inside the
+    # container. The portal has no opinion about either: it is told a URL.
     ports:
       - "127.0.0.1:${MODEL_STORE_PORT:-8500}:8500"
     volumes:
       - model:/data
 
   cube:
-    image: cubejs/cube:${CUBE_TAG:-latest}
-    # Some drivers ship an amd64-only build; the portal's .env names the one to use.
-    platform: ${CUBE_PLATFORM:-}
+    # Ours, not upstream's: `cube.js` is baked in. CUBE_TAG selects the upstream build it was
+    # built from, because the JDBC drivers need `jdk` and most drivers do not.
+    image: ${CUBE_IMAGE:-analyst-cube:1}
+    build:
+      context: ./cube
+      args:
+        CUBE_BASE: ${CUBE_TAG:-latest}
+    platform: ${CUBE_PLATFORM:-} # only the drivers whose Cube build is amd64-only
     depends_on: [model-store, cubestore]
     environment:
-      CUBEJS_DB_TYPE: ${CUBEJS_DB_TYPE:?required}
-      CUBEJS_DB_HOST: ${CUBEJS_DB_HOST:?required}
-      CUBEJS_DB_PORT: ${CUBEJS_DB_PORT:-5432}
-      CUBEJS_DB_NAME: ${CUBEJS_DB_NAME:?required}
-      CUBEJS_DB_USER: ${CUBEJS_DB_USER:?required}
-      CUBEJS_DB_PASS: ${CUBEJS_DB_PASS:?required}
+      # This file builds the images and is what `store_check.sh` runs. The hand-over is not
+      # rendered from it — `deployenv` holds its own copy, so a wheel can produce one — and the
+      # warehouse keys are written there, since which CUBEJS_DB_* keys a connection needs is
+      # its own business rather than this file's.
       CUBEJS_DEV_MODE: ${CUBEJS_DEV_MODE:-false}
       CUBEJS_API_SECRET: ${CUBEJS_API_SECRET:?required}
       CUBEJS_CUBESTORE_HOST: cubestore
@@ -56,8 +62,6 @@ services:
     # harmless, since nothing outside this network can reach it.
     expose:
       - "4000"
-    volumes:
-      - ./cube.js:/cube/conf/cube.js:ro
 
   cubestore:
     # `latest` is amd64 only, so an Apple Silicon host needs CUBESTORE_TAG=arm64v8 — the pull

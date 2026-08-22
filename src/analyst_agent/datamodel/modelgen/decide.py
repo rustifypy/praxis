@@ -84,15 +84,15 @@ class Enrichment(BaseModel):
     @property
     def counts(self) -> dict[str, int]:
         return {
-            "described_cubes": sum(1 for d in self.cubes.values() if d.description),
-            "described_members": sum(len(d.members) for d in self.cubes.values()),
-            "measures": sum(len(d.measures) for d in self.cubes.values()),
+            "described_cubes": sum(1 for decision in self.cubes.values() if decision.description),
+            "described_members": sum(len(decision.members) for decision in self.cubes.values()),
+            "measures": sum(len(decision.measures) for decision in self.cubes.values()),
             "ai_context": sum(
-                sum(1 for m in d.members if m.ai_context)
-                + sum(1 for m in d.measures if m.ai_context)
-                for d in self.cubes.values()
+                sum(1 for member in decision.members if member.ai_context)
+                + sum(1 for measure in decision.measures if measure.ai_context)
+                for decision in self.cubes.values()
             )
-            + sum(1 for v in self.views if v.ai_context),
+            + sum(1 for view in self.views if view.ai_context),
             "views": len(self.views),
             "rejected": len(self.rejected),
         }
@@ -116,17 +116,21 @@ def cube_prompt(table: Table, menu: Menu) -> str:
 
     # Statistics decide whether a number is worth aggregating, so they go in the prompt.
     candidates = []
-    for c in menu.for_cube(table.name):
-        bits = [f"{c.column} ({c.data_type})"]
-        if c.always_same_value:
+    for candidate in menu.for_cube(table.name):
+        bits = [f"{candidate.column} ({candidate.data_type})"]
+        if candidate.always_same_value:
             bits.append("ALWAYS THE SAME VALUE in every row — summing it equals a row count")
-        elif c.distinct is not None:
-            bits.append(f"n_distinct={c.distinct}")
-        if c.null_fraction:
-            bits.append(f"{c.null_fraction:.0%} null")
+        elif candidate.distinct is not None:
+            bits.append(f"n_distinct={candidate.distinct}")
+        if candidate.null_fraction:
+            bits.append(f"{candidate.null_fraction:.0%} null")
         candidates.append("  " + " — ".join(bits))
 
-    joins = [fk.ref_table for fk in table.foreign_keys if fk.ref_table != table.name]
+    joins = [
+        foreign_key.ref_table
+        for foreign_key in table.foreign_keys
+        if foreign_key.ref_table != table.name
+    ]
 
     return (
         f"Table `{table.qualified}` in a Cube semantic layer.\n\n"
@@ -150,7 +154,9 @@ def available_members(
     roots: list[ViewRoot], enriched: dict[str, CubeDecision]
 ) -> dict[str, set[str]]:
     """join_path -> the members a view may include there."""
-    measures = {cube: {m.name for m in decision.measures} for cube, decision in enriched.items()}
+    measures = {
+        cube: {measure.name for measure in decision.measures} for cube, decision in enriched.items()
+    }
     return {
         path: {*members, *measures.get(path.split(".")[-1], ()), "count"}
         for root in roots
@@ -214,7 +220,7 @@ SQL_WORDS = frozenset(
 def qualify_expression(expression: str, columns: set[str]) -> str | None:
     """Prefix this table's columns with {CUBE}, or None if a foreign column is named."""
     words = set(re.findall(IDENTIFIER, expression))
-    if {w for w in words if w.upper() not in SQL_WORDS and w not in columns}:
+    if {word for word in words if word.upper() not in SQL_WORDS and word not in columns}:
         return None
     return re.sub(
         IDENTIFIER,
@@ -263,17 +269,17 @@ def validate_cube(
 ) -> tuple[CubeDecision, list[str]]:
     """Drop anything the table does not support. Returns the decision and the refusals."""
     context = MeasureContext(
-        columns={c.name for c in table.columns},
-        members={c.name for c in table.columns if c.name not in table.key_columns},
-        candidates={c.column for c in menu.for_cube(table.name)},
+        columns={column.name for column in table.columns},
+        members={column.name for column in table.columns if column.name not in table.key_columns},
+        candidates={entry.column for entry in menu.for_cube(table.name)},
         seen=set(),
     )
-    decision.members = [m for m in decision.members if m.name in context.members]
+    decision.members = [member for member in decision.members if member.name in context.members]
 
     rejected: list[str] = []
     kept = []
     for measure in decision.measures:
-        broken = next((r for r in MEASURE_RULES if not r.holds(measure, context)), None)
+        broken = next((rule for rule in MEASURE_RULES if not rule.holds(measure, context)), None)
         if broken:
             rejected.append(f"[{broken.id}] {table.name}.{measure.name}: {broken.reason}")
             continue
@@ -290,15 +296,15 @@ def validate_paths(
 ) -> tuple[list[ViewCube], list[str]]:
     """Keep a view to one root, and each cube to one path."""
     rejected = [
-        f"view {view.name}: unknown join_path {e.join_path!r}"
-        for e in view.cubes
-        if e.join_path not in available
+        f"view {view.name}: unknown join_path {entry.join_path!r}"
+        for entry in view.cubes
+        if entry.join_path not in available
     ]
-    known = [e for e in view.cubes if e.join_path in available]
+    known = [entry for entry in view.cubes if entry.join_path in available]
     if not known:
         return [], rejected
 
-    root = min((e.join_path for e in known), key=lambda p: p.count("."))
+    root = min((entry.join_path for entry in known), key=lambda path: path.count("."))
     cubes: list[ViewCube] = []
     reached: set[str] = set()
     for entry in known:
@@ -313,7 +319,7 @@ def validate_paths(
             continue
         # Joined cubes must be prefixed, or their members collide with the root's.
         entry.prefix = entry.join_path != root
-        entry.includes = [m for m in entry.includes if m in available[entry.join_path]]
+        entry.includes = [name for name in entry.includes if name in available[entry.join_path]]
         if not entry.includes:
             continue
         reached.add(terminal)
@@ -359,8 +365,8 @@ def validate_views(
             continue
         exposed = {name for _, _, name, _ in exposed_members(view)}
         for folder in view.folders:
-            folder.includes = [m for m in folder.includes if m in exposed]
-        view.folders = [f for f in view.folders if f.includes]
+            folder.includes = [name for name in folder.includes if name in exposed]
+        view.folders = [folder for folder in view.folders if folder.includes]
         kept.append(view)
     return kept, rejected
 
@@ -407,11 +413,14 @@ async def repair(enrichment: Enrichment, schema: Schema, errors: dict[str, str])
         table = schema.table(cube_name)
         if decision is None or table is None or measure_name == "count":
             continue
-        target = next((m for m in decision.measures if m.name == measure_name), None)
+        target = next(
+            (measure for measure in decision.measures if measure.name == measure_name),
+            None,
+        )
         if target is None:
             continue
 
-        columns = {c.name for c in table.columns}
+        columns = {column.name for column in table.columns}
         fix = await model.ainvoke(
             f"Cube rejected this measure on table `{table.qualified}`.\n\n"
             f"measure: {target.name}\n"
@@ -425,7 +434,9 @@ async def repair(enrichment: Enrichment, schema: Schema, errors: dict[str, str])
 
         qualified = qualify_expression(fix.expression, columns) if fix.expression else ""
         if fix.give_up or fix.aggregation not in AGGREGATIONS or qualified is None:
-            decision.measures = [m for m in decision.measures if m.name != target.name]
+            decision.measures = [
+                measure for measure in decision.measures if measure.name != target.name
+            ]
             enrichment.dropped.append(member)
             continue
 

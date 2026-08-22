@@ -1,21 +1,23 @@
-"""Chat history and the LangGraph checkpointer in one SQLite file. The event log *is* the
-transcript, so provenance survives a restart rather than dying with a per-request Session.
+"""The chats, their events and their results — the transcript, and the checkpointer beside it.
 
-Storage only, and knows nothing about what an event means: turning a transcript back into
-provenance is `agent.session.replay`, which reads what `events` returns.
+Functions and not a store class: the only state such a class held was a path, every caller in
+the app used the default, and no test ever substituted a double for it. Which database this
+talks to is `settings.db_path`, in one place.
+
+Storage only. Turning a transcript back into provenance is `agent.session.replay`.
 """
 
-import json
 import time
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+import sqlalchemy as sa
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from .core import db
 from .core.config import settings
-from .core.db import SCHEMA, connect
 from .core.events import Event
 
 
@@ -23,174 +25,130 @@ from .core.events import Event
 class Chat:
     id: str
     title: str
+    # 'question' or 'model' — which agent this chat runs.
     kind: str
-    """'question' or 'model' — which agent this chat runs."""
-    branch: str
+    ref: str
     created_at: float
     updated_at: float
 
 
-class ChatStore:
-    def __init__(self, path: Path | None = None):
-        self.path = path or settings.db_path
+async def create(title: str = "New chat", kind: str = "question", ref: str = "") -> Chat:
+    now = time.time()
+    chat = Chat(
+        id=uuid.uuid4().hex,
+        title=title,
+        kind=kind,
+        ref=ref,
+        created_at=now,
+        updated_at=now,
+    )
+    async with db.connect() as conn:
+        await conn.execute(sa.insert(db.chats).values(**chat.__dict__))
+    return chat
 
-    def _db(self):
-        return connect(self.path)
 
-    async def init(self) -> None:
-        async with self._db() as db:
-            await db.executescript(SCHEMA)
-            await db.commit()
-
-    async def create(
-        self,
-        title: str = "New chat",
-        kind: str = "question",
-        branch: str = "",
-    ) -> Chat:
-        now = time.time()
-        chat = Chat(
-            id=uuid.uuid4().hex,
-            title=title,
-            kind=kind,
-            branch=branch,
-            created_at=now,
-            updated_at=now,
+async def list_chats(kind: str = "question") -> list[Chat]:
+    async with db.connect() as conn:
+        found = await conn.execute(
+            sa.select(db.chats)
+            .where(db.chats.c.kind == kind)
+            .order_by(db.chats.c.updated_at.desc())
         )
-        async with self._db() as db:
-            # Named, not positional: a column added to the schema would otherwise shift
-            # every value one place to the left without erroring.
-            await db.execute(
-                "INSERT INTO chats (id, title, kind, branch, created_at, updated_at)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
-                (
-                    chat.id,
-                    chat.title,
-                    chat.kind,
-                    chat.branch,
-                    chat.created_at,
-                    chat.updated_at,
-                ),
+    return [Chat(**row) for row in found.mappings()]
+
+
+async def get(chat_id: str) -> Chat | None:
+    async with db.connect() as conn:
+        found = await conn.execute(sa.select(db.chats).where(db.chats.c.id == chat_id))
+    row = found.mappings().first()
+    return Chat(**row) if row else None
+
+
+async def rename(chat_id: str, title: str) -> None:
+    async with db.connect() as conn:
+        await conn.execute(
+            sa.update(db.chats)
+            .where(db.chats.c.id == chat_id)
+            .values(title=title, updated_at=time.time())
+        )
+
+
+async def delete_chat(chat_id: str) -> None:
+    # The children go explicitly rather than by cascade: the checkpointer writes its own tables
+    # into this file, and a partial delete would be worse than a slow one.
+    async with db.connect() as conn:
+        await conn.execute(sa.delete(db.events).where(db.events.c.chat_id == chat_id))
+        await conn.execute(sa.delete(db.results).where(db.results.c.chat_id == chat_id))
+        await conn.execute(sa.delete(db.chats).where(db.chats.c.id == chat_id))
+
+
+async def append(chat_id: str, turn_id: str, event: Event) -> None:
+    async with db.connect() as conn:
+        found = await conn.execute(
+            sa.select(sa.func.coalesce(sa.func.max(db.events.c.seq), 0) + 1).where(
+                db.events.c.chat_id == chat_id
             )
-            await db.commit()
-        return chat
-
-    async def list_chats(self, kind: str = "question") -> list[Chat]:
-        """Chats of one kind, newest first. Defaults to the question chats, which is the
-        sidebar; model chats are listed on the data page instead."""
-        async with self._db() as db:
-            rows = await db.execute_fetchall(
-                "SELECT * FROM chats WHERE kind = ? ORDER BY updated_at DESC", (kind,)
+        )
+        await conn.execute(
+            sa.insert(db.events).values(
+                id=event.id,
+                chat_id=chat_id,
+                turn_id=turn_id,
+                seq=found.scalar_one(),
+                type=event.type,
+                data=event.data,
+                parent_id=event.parent_id,
+                depth=event.depth,
             )
-        return [Chat(**dict(r)) for r in rows]
+        )
+        await conn.execute(
+            sa.update(db.chats).where(db.chats.c.id == chat_id).values(updated_at=time.time())
+        )
 
-    async def get(self, chat_id: str) -> Chat | None:
-        async with self._db() as db:
-            rows = await db.execute_fetchall("SELECT * FROM chats WHERE id = ?", (chat_id,))
-        return Chat(**dict(rows[0])) if rows else None
 
-    async def rename(self, chat_id: str, title: str) -> None:
-        async with self._db() as db:
-            await db.execute(
-                "UPDATE chats SET title = ?, updated_at = ? WHERE id = ?",
-                (title, time.time(), chat_id),
+async def events(chat_id: str) -> list[dict]:
+    async with db.connect() as conn:
+        found = await conn.execute(
+            sa.select(db.events).where(db.events.c.chat_id == chat_id).order_by(db.events.c.seq)
+        )
+    # `chat_id` dropped: the caller asked for one chat and already knows which.
+    return [
+        {key: value for key, value in row.items() if key != "chat_id"} for row in found.mappings()
+    ]
+
+
+async def save_result(chat_id: str, turn_id: str, columns: list[dict], rows: list[dict]) -> str:
+    result_id = uuid.uuid4().hex
+    async with db.connect() as conn:
+        await conn.execute(
+            sa.insert(db.results).values(
+                id=result_id,
+                chat_id=chat_id,
+                turn_id=turn_id,
+                columns=columns,
+                data=rows,
+                row_count=len(rows),
+                created_at=time.time(),
             )
-            await db.commit()
+        )
+    return result_id
 
-    async def delete(self, chat_id: str) -> None:
-        async with self._db() as db:
-            await db.execute("DELETE FROM events WHERE chat_id = ?", (chat_id,))
-            await db.execute("DELETE FROM results WHERE chat_id = ?", (chat_id,))
-            await db.execute("DELETE FROM chats WHERE id = ?", (chat_id,))
-            await db.commit()
 
-    async def append(self, chat_id: str, turn_id: str, event: Event) -> None:
-        async with self._db() as db:
-            rows = await db.execute_fetchall(
-                "SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM events WHERE chat_id = ?",
-                (chat_id,),
-            )
-            await db.execute(
-                "INSERT INTO events (id, chat_id, turn_id, seq, type, data, parent_id, depth)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    event.id,
-                    chat_id,
-                    turn_id,
-                    rows[0]["next"],
-                    event.type,
-                    json.dumps(event.data, default=str),
-                    event.parent_id,
-                    event.depth,
-                ),
-            )
-            await db.execute("UPDATE chats SET updated_at = ? WHERE id = ?", (time.time(), chat_id))
-            await db.commit()
-
-    async def events(self, chat_id: str) -> list[dict]:
-        """The whole transcript, in order, ready to send to the browser."""
-        async with self._db() as db:
-            rows = await db.execute_fetchall(
-                "SELECT * FROM events WHERE chat_id = ? ORDER BY seq", (chat_id,)
-            )
-        return [
-            {
-                "id": r["id"],
-                "turn_id": r["turn_id"],
-                "seq": r["seq"],
-                "type": r["type"],
-                "data": json.loads(r["data"]),
-                "parent_id": r["parent_id"],
-                "depth": r["depth"],
-            }
-            for r in rows
-        ]
-
-    async def save_result(
-        self, chat_id: str, turn_id: str, columns: list[dict], rows: list[dict]
-    ) -> str:
-        """Keep a whole result set and return the handle the browser fetches it by."""
-        result_id = uuid.uuid4().hex
-        async with self._db() as db:
-            await db.execute(
-                "INSERT INTO results (id, chat_id, turn_id, columns, data, row_count, "
-                "created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (
-                    result_id,
-                    chat_id,
-                    turn_id,
-                    json.dumps(columns, default=str),
-                    json.dumps(rows, default=str),
-                    len(rows),
-                    time.time(),
-                ),
-            )
-            await db.commit()
-        return result_id
-
-    async def result(self, result_id: str) -> dict | None:
-        """One stored result, whole; paging is the caller's slice. The rows are a single JSON blob,
-        so no SQL could return page two on its own.
-        """
-        async with self._db() as db:
-            rows = await db.execute_fetchall("SELECT * FROM results WHERE id = ?", (result_id,))
-        if not rows:
-            return None
-        record = rows[0]
-        return {
-            "id": record["id"],
-            "chat_id": record["chat_id"],
-            "turn_id": record["turn_id"],
-            "columns": json.loads(record["columns"]),
-            "rows": json.loads(record["data"]),
-            "row_count": record["row_count"],
-            "created_at": record["created_at"],
-        }
+async def result(result_id: str) -> dict | None:
+    # Whole, and paging is the caller's slice: the rows are one JSON blob, so no SQL could
+    # return page two on its own.
+    async with db.connect() as conn:
+        found = await conn.execute(sa.select(db.results).where(db.results.c.id == result_id))
+    row = found.mappings().first()
+    if row is None:
+        return None
+    # `data` is the column and `rows` is what every caller reads, because `ROWS` is a SQLite
+    # keyword and could not be the column's name.
+    return {**{key: value for key, value in row.items() if key != "data"}, "rows": row["data"]}
 
 
 @asynccontextmanager
 async def checkpointer(path: Path | None = None):
-    """LangGraph's thread state. Same file as the transcript, different tables."""
     target = path or settings.db_path
     target.parent.mkdir(parents=True, exist_ok=True)
     async with AsyncSqliteSaver.from_conn_string(str(target)) as saver:

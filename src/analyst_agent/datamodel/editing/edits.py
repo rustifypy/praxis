@@ -1,28 +1,15 @@
-"""Tiers 1-2 of the edit gate — everything checkable without a container.
-
-Tier 3 is Cube itself (write, restart, `publish.check`), and it runs against the **live**
-container, because a branch is served rather than deployed. That is what makes these two tiers
-load-bearing rather than a convenience: what they refuse never reaches disk, so it never takes
-the model down.
-
-The base for every comparison is **main**, not the branch's previous state. A member main
-carries is frozen because a dashboard or a certified query may name it; a member the branch
-added itself is the branch's own, and may be reshaped or dropped freely until it merges.
-"""
-
 import re
 from dataclasses import dataclass, field
 
 from ..definitions import Definition, read
 from ..modelgen.decide import IDENTIFIER, SQL_WORDS
 
+# What may change on something main already has. `public` is deliberately absent: hiding a member
+# leaves the queryable surface exactly as a deletion does, and a tile naming it breaks the same way.
 DOC_FIELDS = frozenset({"description", "title", "meta", "format"})
-"""What may change on something main already has. `public` is deliberately absent — hiding a
-member is not a rename, but it leaves the queryable surface exactly as a deletion does, and a
-tile naming it breaks the same way."""
 
+# Cube body keys holding named things. Everything else in a body is compared whole.
 COLLECTIONS = ("measures", "dimensions", "segments", "joins", "hierarchies", "pre_aggregations")
-"""Cube body keys holding named things. Everything else in a body is compared whole."""
 
 KEYWORDS = SQL_WORDS | frozenset(
     {
@@ -43,8 +30,8 @@ KEYWORDS = SQL_WORDS | frozenset(
         "FILTER",
     }
 )
-"""A superset of `decide.SQL_WORDS`: that set gates what the model may *emit* and is
-deliberately tight, while this one only suppresses false warnings on hand-written SQL."""
+"""A superset of `decide.SQL_WORDS`: that set gates what the model may emit and is deliberately
+tight, while this one only suppresses false warnings on hand-written SQL."""
 
 QUALIFIED = re.compile(r"\{CUBE\}\s*\.\s*" + IDENTIFIER)
 CALL = re.compile(IDENTIFIER + r"\s*\(")
@@ -57,67 +44,61 @@ class EditResult:
     warnings: list[str] = field(default_factory=list)
 
     def as_message(self) -> str:
-        """The same shape `GateResult` returns, for the same reason: an editing agent acts on
-        text, and an exception is not something it can fix."""
         parts = []
         if self.errors:
-            parts.append("EDIT REJECTED:\n" + "\n".join(f"- {e}" for e in self.errors))
+            parts.append("EDIT REJECTED:\n" + "\n".join(f"- {error}" for error in self.errors))
         if self.warnings:
-            parts.append("Warnings:\n" + "\n".join(f"- {w}" for w in self.warnings))
+            parts.append("Warnings:\n" + "\n".join(f"- {warning}" for warning in self.warnings))
         return "\n\n".join(parts)
 
 
 def shape_errors(entity: Definition, entities: dict[str, Definition]) -> list[str]:
-    """What Cube would refuse, checked here so it is refused before the write instead."""
+    # What Cube would refuse, checked here so it is refused before the write instead.
     if entity.kind != "view":
         return []
-    out = []
+    problems = []
     cubes = entity.body.get("cubes")
     if not isinstance(cubes, list) or not cubes:
         return [f"view {entity.name!r}: needs a `cubes:` list saying what it exposes"]
     for entry in cubes:
         if not isinstance(entry, dict) or not isinstance(entry.get("join_path"), str):
-            out.append(f"view {entity.name!r}: every `cubes:` entry needs a `join_path`")
+            problems.append(f"view {entity.name!r}: every `cubes:` entry needs a `join_path`")
             continue
         if "includes" not in entry:
-            out.append(f"view {entity.name!r}: `{entry['join_path']}` has no `includes`")
+            problems.append(f"view {entity.name!r}: `{entry['join_path']}` has no `includes`")
         root = entry["join_path"].split(".")[0]
         if root not in entities:
-            out.append(
+            problems.append(
                 f"view {entity.name!r}: join_path starts at {root!r}, which is not a cube "
                 "in this model"
             )
         elif entities[root].kind != "cube":
-            out.append(f"view {entity.name!r}: join_path starts at {root!r}, which is a view")
-    return out
+            problems.append(f"view {entity.name!r}: join_path starts at {root!r}, which is a view")
+    return problems
 
 
 # --- tier 2: what this edit is allowed to have changed ------------------------
 
 
 def frozen_violations(was: Definition, now: Definition) -> list[str]:
-    """Cubes are append-only. What main carries keeps its name and its structure, documentation
-    does not count as structure, and anything genuinely new is welcome.
-
-    Keys are compared as a **union** rather than by walking what main had: a member that gains
-    `public: false` is neither a rename nor a removal, and leaves the queryable surface exactly
-    as a deletion would.
-    """
+    # Cubes are append-only: what main carries keeps its name and structure, documentation does
+    # not count as structure, and anything genuinely new is welcome. Compared as a union rather
+    # than by walking what main had, so a member that gains `public: false` is caught too.
     editable = ", ".join(sorted(DOC_FIELDS))
-    out = []
+    problems = []
     for key in sorted(set(was.body) | set(now.body)):
         if key in DOC_FIELDS:
             continue
         if key not in COLLECTIONS:
             if key not in now.body:
-                out.append(f"{was.name}: `{key}` was removed — a cube's structure is fixed")
+                problems.append(f"{was.name}: `{key}` was removed — a cube's structure is fixed")
             elif key not in was.body:
-                out.append(
+                problems.append(
                     f"{was.name}: `{key}` was added — a cube's structure is fixed, and only "
                     f"{editable} may be set on one that already exists"
                 )
             elif now.body[key] != was.body[key]:
-                out.append(
+                problems.append(
                     f"{was.name}: `{key}` changed from {was.body[key]!r} to "
                     f"{now.body[key]!r} — a cube's structure is fixed, so add rather than alter"
                 )
@@ -127,7 +108,7 @@ def frozen_violations(was: Definition, now: Definition) -> list[str]:
         for member, body in was.collection(key).items():
             target = current.get(member)
             if target is None:
-                out.append(
+                problems.append(
                     f"{was.name}: the join to {member!r} was removed — every view built on "
                     "that path depends on it"
                     if key == "joins"
@@ -139,21 +120,16 @@ def frozen_violations(was: Definition, now: Definition) -> list[str]:
                 if name in DOC_FIELDS or body.get(name) == target.get(name):
                     continue
                 verb = "was added" if name not in body else "changed"
-                out.append(
+                problems.append(
                     f"{was.name}.{member}: `{name}` {verb} — only {editable} may be edited "
                     "on a member that already exists"
                 )
-    return out
+    return problems
 
 
 def unqualified_columns(expression: str) -> set[str]:
-    """Column references Cube will hand to the database exactly as written.
-
-    Cube qualifies a `sql:` that is *precisely one* identifier and passes anything longer
-    through verbatim, so every column inside an expression needs `{CUBE}.` — `quantity *
-    unit_price` arrives bare and dies with `column reference "unit_price" is ambiguous` the
-    moment a join brings in another table carrying that name.
-    """
+    # Cube qualifies a `sql:` that is precisely one identifier and passes anything longer
+    # through verbatim, so every column inside an expression needs `{CUBE}.`.
     text = expression.strip()
     if re.fullmatch(IDENTIFIER, text):
         return set()
@@ -166,9 +142,10 @@ def unqualified_columns(expression: str) -> set[str]:
 
 
 def check(base: dict[str, str], proposed: dict[str, str]) -> EditResult:
-    """Tiers 1-2. `base` is main's model files; `proposed` is the whole model as it would be
-    written. Both are relative path -> YAML text.
-    """
+    # Tiers 1-2. `base` is main's model files, `proposed` the whole model as it would be
+    # written, both as relative path -> YAML text. The base for every comparison is main and
+    # never the ref's own previous state: a member main carries is frozen because a tile or
+    # a certified query may name it.
     entities, errors = read(proposed)
     if errors:
         # Comparing a model that does not parse produces noise, not findings.
@@ -178,7 +155,7 @@ def check(base: dict[str, str], proposed: dict[str, str]) -> EditResult:
     before, base_errors = read(base)
     if base_errors:
         # A `cubes` step Cube rejected is committed to main on purpose, so an unreadable main
-        # is a real state rather than an impossible one. Check what parsed and say so.
+        # is a real state. Check what parsed and say so.
         warnings.append(
             f"main does not fully parse ({base_errors[0]}), so some members could not be "
             "checked for removal"

@@ -27,7 +27,8 @@ export interface Chat {
   title: string;
   /** 'question' or 'model' — which agent this chat runs. */
   kind: string;
-  branch: string;
+  /** The model ref a 'model' chat edits. Empty on a question chat, which always reads main. */
+  ref: string;
   created_at: number;
   updated_at: number;
 }

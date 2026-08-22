@@ -78,22 +78,18 @@ async def test_the_catalog_is_read_once_and_refreshed_on_request():
 @respx.mock
 async def test_a_stopped_container_is_a_cube_error_not_a_transport_error():
     """`httpx.RequestError` does not subclass OSError, and letting it out is what 500'd the
-    dashboard page. Callers catch CubeError alone now."""
+    dashboard page. `from exc` is what keeps the original without a field holding it."""
     respx.get(f"{ROOT}/v1/meta").mock(side_effect=httpx.ConnectError("refused"))
     with pytest.raises(CubeError) as caught:
         await client().catalog()
-    assert caught.value.unreachable
-    assert caught.value.status is None
+    assert isinstance(caught.value.__cause__, httpx.ConnectError)
 
 
 @respx.mock
-async def test_cube_answering_badly_is_not_reported_as_unreachable():
-    """`health.serving` tells a stopped container from one serving no model."""
+async def test_cube_answering_badly_carries_what_it_said():
     respx.get(f"{ROOT}/v1/meta").mock(return_value=httpx.Response(500, text="boom"))
-    with pytest.raises(CubeError) as caught:
+    with pytest.raises(CubeError, match="boom"):
         await client().catalog()
-    assert not caught.value.unreachable
-    assert caught.value.status == 500
 
 
 @respx.mock

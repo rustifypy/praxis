@@ -32,7 +32,9 @@ LOCAL_CLAIMS = {"user_id": "local"}
 """Besides `ref`. Cube's `security_context` is also the seam row-level security would read."""
 
 TIMEOUT_S = 120.0
-"""A warehouse query, not a metadata read. Longer than the store's own calls for that reason."""
+"""A warehouse query, not a metadata read. Longer than the store's own calls for that reason. A
+client's cap should be smaller: when this fires the client gets a 502, which says a proxy failed
+rather than that a query was slow."""
 
 
 def mint(ref: str) -> str:

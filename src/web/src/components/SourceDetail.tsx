@@ -3,13 +3,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ago, useDismiss } from "../hooks";
 import * as api from "../sources";
 import type {
-  CatalogInfo,
   Grounding,
   JobState,
   ServedModel as Model,
   SourceRow,
   StageName,
-  System,
+  TableCache,
 } from "../sources";
 import {
   STAGE_BLURB,
@@ -33,34 +32,37 @@ import { TablePicker } from "./TablePicker";
  *
  * Three rules shape this screen. One primary action, because there is always exactly one
  * obvious next move and burying it among seven peer buttons hid it. One stage panel open at
- * a time, because the pipeline is a sequence with a position, not four independent
- * accordions. And destruction lives at the bottom behind a typed word, not beside "Test
- * connection".
+ * a time, because the pipeline is a sequence with a position, not four independent accordions.
+ * And anything that costs a re-run of the deployment sits behind a typed word, not beside
+ * "Test connection".
+ *
+ * There is no disconnect. Editing the connection covers pointing somewhere else — and it resets
+ * the pipeline when the database changes, server-side — whereas a delete is how a model, its
+ * grounding and four recorded steps get orphaned in a store nothing points at any more.
  */
 export function SourceDetail({
   source,
-  system,
   job,
   busy,
   onRefresh,
   onEdit,
 }: {
   source: SourceRow;
-  system: System;
   job: JobState | null;
   busy: boolean;
   onRefresh: () => void;
   onEdit: () => void;
 }) {
-  const [catalog, setCatalog] = useState<CatalogInfo | null>(null);
+  const [catalog, setCatalog] = useState<TableCache | null>(null);
   const [model, setModel] = useState<Model | null>(null);
   const [loadingModel, setLoadingModel] = useState(false);
   const [grounding, setGrounding] = useState<Grounding | null>(null);
   const [loadingGrounding, setLoadingGrounding] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [confirmRotate, setConfirmRotate] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
   const [checkedAt, setCheckedAt] = useState(0);
   const [stage, setStage] = useState<StageName | null>(null);
-  const [confirmRemove, setConfirmRemove] = useState(false);
   // Two slots, so a failed Restart reports itself next to Restart and not 400px above
   // the stage panel that had nothing to do with it.
   const [topError, setTopError] = useState("");
@@ -81,7 +83,7 @@ export function SourceDetail({
 
   const loadCatalog = useCallback(() => {
     void api
-      .catalog()
+      .tables()
       .then(setCatalog)
       .catch(() => setCatalog(null));
   }, []);
@@ -89,18 +91,15 @@ export function SourceDetail({
   const loadModel = useCallback(() => {
     setLoadingModel(true);
     void api
-      .servedModel()
+      .model()
       .then(setModel)
-      // The request itself failed, so nothing is known about the branch either — the editor
-      // reads its own branch state and is not blocked by this.
+      // The request itself failed, so there is no served model to describe — the editor reads
+      // its own ref list and is not blocked by this.
       .catch((err) =>
         setModel({
           serving: false,
           error: String(err),
           entities: [],
-          branch: "",
-          editable: false,
-          dirty: [],
           unloaded: [],
         }),
       )
@@ -162,7 +161,7 @@ export function SourceDetail({
   const test = async () => {
     setChecking(true);
     try {
-      await guard(() => api.checkNow());
+      await guard(() => api.probe());
       setCheckedAt(Date.now());
     } finally {
       setChecking(false);
@@ -170,7 +169,7 @@ export function SourceDetail({
   };
 
   const runStage = (name: StageName) =>
-    void guard(() => api.runAction(name), "stage");
+    void guard(() => api.runStage(name), "stage");
 
   const selected = stage;
   // The server's rail, not a second reading of `steps` — `steps.action` enforces the same
@@ -257,9 +256,13 @@ export function SourceDetail({
                 disabled: busy ? "a job is running" : undefined,
               },
               {
-                label: "Disconnect",
-                danger: true,
-                onSelect: () => setConfirmRemove(true),
+                label: "Rotate the secrets",
+                onSelect: () => setConfirmRotate(true),
+                disabled: busy ? "a job is running" : undefined,
+              },
+              {
+                label: "Reset the pipeline",
+                onSelect: () => setConfirmReset(true),
                 disabled: busy ? "a job is running" : undefined,
               },
             ]}
@@ -271,7 +274,7 @@ export function SourceDetail({
         <p className="detail-desc">{source.description}</p>
       )}
 
-      <SystemBanners system={system} />
+      <SystemBanners source={source} />
 
       {topError && <p className="banner bad">{topError}</p>}
       {health.tone === "bad" && (
@@ -410,12 +413,12 @@ export function SourceDetail({
                 onRun={(schema, tables) =>
                   void guard(
                     () =>
-                      api.runAction("cubes", { schema_name: schema, tables }),
+                      api.runStage("cubes", { schema_name: schema, tables }),
                     "stage",
                   )
                 }
                 onReread={() =>
-                  void guard(() => api.runAction("read"), "stage")
+                  void guard(() => api.runStage("read"), "stage")
                 }
               />
             ) : (
@@ -465,7 +468,7 @@ export function SourceDetail({
         <div className="panel-head">
           <h3>Model</h3>
           <Info label="About the model panel">
-            Everything the agent brings to a question, and — on a branch — where
+            Everything the agent brings to a question, and — on an edit ref — where
             you change it. The list is read live from Cube's{" "}
             <code>/v1/meta</code> and parsed by the same code the agent queries
             through, so it is what a question can actually reach rather than
@@ -489,25 +492,51 @@ export function SourceDetail({
         />
       </section>
 
-      {confirmRemove && (
+      {confirmReset && (
         <Confirm
-          word="disconnect"
-          title="Disconnect this database?"
-          confirmLabel="Disconnect"
-          onCancel={() => setConfirmRemove(false)}
+          word="reset"
+          title="Discard what was built?"
+          confirmLabel="Reset"
+          onCancel={() => setConfirmReset(false)}
           onConfirm={() => {
-            setConfirmRemove(false);
-            void guard(() => api.remove());
+            setConfirmReset(false);
+            void guard(() => api.resetPipeline());
           }}
         >
           <p>
-            This removes the stored credentials and the two addresses.{" "}
-            <strong>Nothing is stopped</strong> — the deployment is not run from
-            here, so it keeps running until you stop it yourself.
+            Every stage goes back to todo and the cached table list is dropped. For when this
+            connection now points at a different database — editing a host or a name does not
+            do this on its own, because a moved database and a different one look identical
+            from here.
           </p>
           <p>
-            The model stays in the store, commits and all. This forgets how to
-            reach the database, not what was built on it.
+            The model Cube is serving is <strong>not</strong> touched: it keeps answering until
+            a rebuild replaces it, which is why the next stage after this is Read tables.
+          </p>
+        </Confirm>
+      )}
+
+      {confirmRotate && (
+        <Confirm
+          word="rotate"
+          title="Rotate every secret?"
+          confirmLabel="Rotate"
+          onCancel={() => setConfirmRotate(false)}
+          onConfirm={() => {
+            setConfirmRotate(false);
+            void guard(() => api.rotate());
+          }}
+        >
+          <p>
+            New values for all four: Cube's API secret, the store's read and
+            write tokens, and the sandbox's. The credentials, the pipeline and
+            the model are untouched — it is the same database, reached with new
+            secrets.
+          </p>
+          <p>
+            <strong>Nothing will answer until you re-run both deployments</strong>{" "}
+            from freshly downloaded files. The ones you have now hold the old
+            secrets, and a container's environment cannot be changed in place.
           </p>
         </Confirm>
       )}

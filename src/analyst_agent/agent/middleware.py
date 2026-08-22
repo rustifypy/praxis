@@ -8,8 +8,6 @@ log = logging.getLogger("analyst.audit")
 
 
 class AuditLog(AgentMiddleware):
-    """Records every tool call. Swap the log sink for your warehouse table."""
-
     def _record(self, request) -> None:
         log.info("tool=%s args=%s", request.tool_call["name"], request.tool_call.get("args"))
 
@@ -19,14 +17,14 @@ class AuditLog(AgentMiddleware):
         return result
 
     async def awrap_tool_call(self, request, handler):
-        """Separate from the sync path — `ainvoke` never falls back to it."""
+        # Separate from the sync path: `ainvoke` never falls back to it.
         result = await handler(request)
         self._record(request)
         return result
 
 
 def _notice(state, result) -> None:
-    """`before_model` returns None unless it actually summarized — exact, not a guess."""
+    # `before_model` returns None unless it actually summarized, so this is exact.
     if result is None:
         return
     emit(
@@ -41,9 +39,8 @@ def _notice(state, result) -> None:
 
 
 class CompactionNotice(SummarizationMiddleware):
-    """Marks where history was rewritten. Without it the user scrolls a full conversation the
-    agent can no longer see, then asks for "the same for last year" about a summarized turn.
-    """
+    # Marks where history was rewritten: without it the reader scrolls a conversation the agent
+    # can no longer see, then asks for "the same for last year" about a summarized turn.
 
     def before_model(self, state, runtime):
         result = super().before_model(state, runtime)
@@ -51,7 +48,7 @@ class CompactionNotice(SummarizationMiddleware):
         return result
 
     async def abefore_model(self, state, runtime):
-        """Separate from the sync path — the async graph never falls back to it."""
+        # Separate from the sync path: the async graph never falls back to it.
         result = await super().abefore_model(state, runtime)
         _notice(state, result)
         return result

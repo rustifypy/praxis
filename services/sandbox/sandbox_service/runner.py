@@ -21,6 +21,10 @@ from pathlib import Path
 from . import workspace
 
 EXEC_TIMEOUT_S = 120.0
+"""A client's cap must exceed this, or it leaves a run nobody is reading."""
+PROFILE_TIMEOUT_S = 60.0
+"""A client's cap must exceed this. Overrunning here is not a failure — it becomes a `note` on a
+successful upload — so a client giving up first is the only thing that can lose the file."""
 OUTPUT_LIMIT = 4_000
 """What the caller is handed. The whole thing goes to a log file in the workspace, so this is a
 head-and-tail rather than a truncation — a traceback keeps its cause at one end and its message
@@ -154,7 +158,7 @@ async def run(chat_id: str, script: str, timeout: float = EXEC_TIMEOUT_S) -> Asy
     }
 
 
-async def profile(chat_id: str, path: str, timeout: float = 60.0) -> str:
+async def profile(chat_id: str, path: str) -> str:
     """Run the profiler over one file and return its last line of stdout, which is the JSON.
 
     Copied in from beside this module rather than baked into the image: the image is tagged by
@@ -177,10 +181,10 @@ async def profile(chat_id: str, path: str, timeout: float = 60.0) -> str:
         start_new_session=True,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout)
+        stdout, stderr = await asyncio.wait_for(process.communicate(), PROFILE_TIMEOUT_S)
     except TimeoutError:
         _signal(process, signal.SIGKILL)
-        raise RuntimeError(f"the profiler did not finish within {timeout:.0f}s") from None
+        raise RuntimeError(f"the profiler did not finish within {PROFILE_TIMEOUT_S:.0f}s") from None
     printed = stdout.decode(errors="replace").strip()
     if not printed:
         raise RuntimeError(f"exit {process.returncode}: {stderr.decode(errors='replace')[:200]}")

@@ -1,7 +1,3 @@
-"""`validate` is tiers 1-3 and touches no data; `refresh` adds execution, and nothing executes
-until every tile has compiled. `refused` did not compile, `failed` compiled then broke.
-"""
-
 import asyncio
 from dataclasses import asdict, dataclass, field
 
@@ -9,13 +5,13 @@ from ..cube import gate
 from ..cube.catalog import Catalog
 from ..cube.client import CubeClient
 from ..cube.shape import columns_of
-from . import delta
+from . import delta, store
 from . import tiles as tilecheck
 from .delta import Delta
-from .store import Dashboard, DashboardStore, Tile
+from .store import Dashboard, Tile
 
+# Tiles at once — a cap on the Cube container, which shares a Cube Store with the workers.
 CONCURRENCY = 4
-"""Tiles at once. A cap on the Cube container, which shares a Cube Store with the workers."""
 
 
 @dataclass
@@ -36,15 +32,12 @@ class RunOutcome:
     status: str
     run_id: str = ""
     tiles: list[TileOutcome] = field(default_factory=list)
+    # Set when the refresh never reached the tiles: no dashboard, or no tiles.
     error: str = ""
-    """Set when the refresh never reached the tiles — no dashboard, or no tiles."""
 
 
-async def _open(
-    dashboard_id: str, store: DashboardStore
-) -> tuple[Dashboard | None, list[Tile], RunOutcome | None]:
-    """The board, its live tiles, and the outcome to return instead if it cannot run. Shared
-    so the page-open check and the refresh cannot compile different queries than each other."""
+async def _open(dashboard_id: str) -> tuple[Dashboard | None, list[Tile], RunOutcome | None]:
+    # Shared, so the page-open check and the refresh cannot compile different queries.
     board = await store.get(dashboard_id)
     if board is None:
         return (
@@ -57,49 +50,46 @@ async def _open(
 
 async def validate(
     dashboard_id: str,
-    store: DashboardStore,
     catalog: Catalog,
     client: CubeClient,
     max_rows: int,
 ) -> RunOutcome:
-    """Tiers 1-3 for every tile. Executes nothing and records no run."""
-    _, live, stop = await _open(dashboard_id, store)
-    if stop is not None:
-        return stop
-    if not live:
+    _, live_tiles, refusal = await _open(dashboard_id)
+    if refusal is not None:
+        return refusal
+    if not live_tiles:
         return RunOutcome(ok=True, status="ok")
 
-    checks = await _compile_all([t.query for t in live], catalog, client, max_rows)
-    outcomes = [_outcome(tile, checked) for tile, checked in zip(live, checks, strict=True)]
-    ok = all(o.ok for o in outcomes)
+    payloads = [tile.query for tile in live_tiles]
+    checks = await _compile_all(payloads, catalog, client, max_rows)
+    outcomes = [_outcome(tile, checked) for tile, checked in zip(live_tiles, checks, strict=True)]
+    ok = all(outcome.ok for outcome in outcomes)
     return RunOutcome(ok=ok, status="ok" if ok else "refused", tiles=outcomes)
 
 
 async def refresh(
     dashboard_id: str,
-    store: DashboardStore,
     catalog: Catalog,
     client: CubeClient,
     max_rows: int,
 ) -> RunOutcome:
-    """Re-execute every tile's stored query and append the results as one run."""
-    board, live, stop = await _open(dashboard_id, store)
-    if stop is not None:
-        return stop
-    if not live:
+    board, live_tiles, refusal = await _open(dashboard_id)
+    if refusal is not None:
+        return refusal
+    if not live_tiles:
         return RunOutcome(ok=False, status="refused", error="this dashboard has no tiles")
 
-    payloads = [tile.query for tile in live]
+    payloads = [tile.query for tile in live_tiles]
     run = await store.start_run(dashboard_id)
     checks = await _compile_all(payloads, catalog, client, max_rows)
-    outcomes = [_outcome(tile, checked) for tile, checked in zip(live, checks, strict=True)]
+    outcomes = [_outcome(tile, checked) for tile, checked in zip(live_tiles, checks, strict=True)]
 
     # The atomic part. Every tile compiles or none executes.
-    if not all(o.ok for o in outcomes):
+    if not all(outcome.ok for outcome in outcomes):
         errors = [
-            {"tile_id": o.tile_id, "title": o.title, "errors": o.errors}
-            for o in outcomes
-            if not o.ok
+            {"tile_id": outcome.tile_id, "title": outcome.title, "errors": outcome.errors}
+            for outcome in outcomes
+            if not outcome.ok
         ]
         await store.finish_run(run.id, "refused", errors=errors)
         return RunOutcome(ok=False, status="refused", run_id=run.id, tiles=outcomes)
@@ -114,7 +104,7 @@ async def refresh(
     loaded = await asyncio.gather(*(load(checked) for checked in checks))
 
     failures: list[dict] = []
-    for tile, payload, outcome, result in zip(live, payloads, outcomes, loaded, strict=True):
+    for tile, payload, outcome, result in zip(live_tiles, payloads, outcomes, loaded, strict=True):
         if not result.ok:
             outcome.ok = False
             outcome.errors = result.errors
@@ -133,7 +123,7 @@ async def refresh(
         await store.save_tile_result(
             run.id,
             tile.id,
-            [asdict(c) for c in columns],
+            [asdict(column) for column in columns],
             rows,
             resolved_ranges=result.resolved_ranges,
             duration_ms=result.duration_ms,

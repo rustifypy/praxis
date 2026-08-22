@@ -159,7 +159,7 @@ async def test_load_reads_the_ref_it_is_asked_for(configured):
 
 @respx.mock
 async def test_load_defaults_to_main(configured):
-    """Pinned, because a question chat and a dashboard must never silently read a branch."""
+    """Pinned, because a question chat and a dashboard must never silently read an edit ref."""
     route = respx.get(f"{URL}/files", params={"ref": "main"}).mock(
         return_value=httpx.Response(200, json={"sha": "abc", "files": {}})
     )
@@ -169,7 +169,7 @@ async def test_load_defaults_to_main(configured):
 
 @respx.mock
 async def test_a_ref_that_is_not_there_grounds_on_nothing(configured):
-    """A candidate that was cleaned up, or a branch this store never had — the same answer a
+    """A candidate that was cleaned up, or a ref this store never had — the same answer a
     directory nobody had created used to give."""
     respx.get(f"{URL}/files", params={"ref": "gone"}).mock(
         return_value=httpx.Response(404, json={"detail": "no such ref: 'gone'"})

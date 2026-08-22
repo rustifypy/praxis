@@ -1,14 +1,11 @@
-"""Files in and out of a chat's workspace.
+"""The sandbox boundary: a file in, a file out, and taking one back.
 
-The workspace is the store and it belongs to the sandbox service, so there is no `files` table
-and no directory on this side either: a row could only ever describe what the service's own `ls`
-answers. These routes are a proxy — bytes in, bytes out, and the path guard is the service's.
-
-Uploading is not a tool call and writes no event of its own. What records it is the *user* event
-of the turn it is attached to — `POST /messages` takes the paths — so a replayed transcript shows
-the file above the question that used it, and nothing here has to invent a turn to belong to.
+Under `/api/chats` because a workspace belongs to a chat, but nothing here touches the
+transcript — the files live in the *service's* volume, which is why none of them has a row. A
+row could only ever be a second copy of `ls`, and the copy is what would go stale.
 """
 
+import contextlib
 import csv
 import io
 import itertools
@@ -18,50 +15,54 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
+from .. import transcript
 from ..sandbox import Profile, SandboxError, open_sandbox
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/api/chats")
 
+# Nothing bounds the sandbox's volume, so a 4 GB CSV is silent disk consumption on whoever's
+# machine it runs on.
 MAX_BYTES = 100 * 1024 * 1024
-"""Nothing bounds the sandbox's volume, so a 4 GB CSV is silent disk consumption on whoever's
-machine it runs on. 100 MB is more than it can hold in memory anyway."""
 TOO_BIG = f"that file is larger than the {MAX_BYTES // 1024 // 1024} MB limit"
 CHUNK = 1024 * 1024
 
+# Raster only, and the type is derived from the extension rather than echoing the browser's: an
+# SVG is a document that can carry script, and serving one inline would hand it this origin.
 INLINE = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
-"""Rendered in the transcript rather than downloaded, and raster only: an SVG is a document that
-can carry script, and serving one inline from this origin would hand it the portal's cookie. The
-type is derived from the extension here — a browser-supplied content type is never echoed back."""
 
+# What `/preview` reads back as a table and as text. Anything else — a parquet, a zip — has no
+# useful head, and offering one would render bytes as mojibake.
 TABULAR = {".csv", ".tsv"}
 READABLE = {".json", ".txt", ".md", ".log", ".py", ".sql", ".yml", ".yaml"}
-"""What `/preview` will read back as a table and as text. Anything else — a parquet, a zip, a
-model checkpoint — has no useful head, and offering one would render bytes as mojibake."""
 
+# The head is read rather than the whole file streamed: `truncated` says the rest is still there.
 PREVIEW_ROWS = 50
 PREVIEW_BYTES = 256 * 1024
-"""The head is read from disk rather than streamed to the browser whole: a script's CSV is
-bounded by nothing, and a 200 MB one is exactly the case where a preview is most wanted and a
-download least. `truncated` is what says the rest is still there."""
 
 
+@contextlib.asynccontextmanager
 async def _sandbox():
-    """The sandbox, or the reason there is none as a status. 503 rather than 500: a deployment
-    without a sandbox is a working deployment that cannot run Python."""
+    # What a sandbox failure becomes as HTTP, in one place — 503 when there is no sandbox at all,
+    # since a deployment without one is a working deployment that cannot run Python, and the
+    # service's own status for anything that happens inside the block.
     try:
-        return await open_sandbox()
+        async with await open_sandbox() as sandbox:
+            yield sandbox
     except SandboxError as exc:
-        raise HTTPException(503, str(exc)) from None
+        # The service's own status when it gave one; 503 when it did not, which is both "no
+        # sandbox is configured" and "it did not answer" — a working deployment that cannot
+        # run Python either way.
+        raise HTTPException(exc.status or 503, str(exc)) from None
 
 
-@router.post("/chats/{chat_id}/files")
+@router.post("/{chat_id}/files")
 async def upload(chat_id: str, file: UploadFile, request: Request) -> dict:
     """Hand a file to the sandbox and report the shape it read.
 
     The filename is a browser's, so the service is what turns it into a path — one place,
     checked on the resolved target, on the side that owns the directory.
     """
-    if await request.app.state.store.get(chat_id) is None:
+    if await transcript.get(chat_id) is None:
         raise HTTPException(404, "no such chat")
 
     if int(request.headers.get("content-length") or 0) > MAX_BYTES:
@@ -74,15 +75,8 @@ async def upload(chat_id: str, file: UploadFile, request: Request) -> dict:
         if len(body) > MAX_BYTES:
             raise HTTPException(413, TOO_BIG)
 
-    async with await _sandbox() as sandbox:
-        try:
-            body_json = await sandbox._send(
-                "POST",
-                f"/uploads/{chat_id}",
-                files={"file": (file.filename or "upload", bytes(body))},
-            )
-        except SandboxError as exc:
-            raise HTTPException(exc.status or 502, str(exc)) from None
+    async with _sandbox() as sandbox:
+        body_json = await sandbox.upload(chat_id, file.filename or "upload", bytes(body))
     # Profiled on arrival by the service, so this is one round trip rather than two. A shape it
     # could not read is a note, never a failure: the file did arrive, and an upload reported as
     # broken because its summary was malformed is the worst of both answers.
@@ -101,7 +95,7 @@ async def upload(chat_id: str, file: UploadFile, request: Request) -> dict:
 
 # Below the chat routes that end in a fixed segment, and `{path:path}` because an artifact is
 # `charts/q1.png` as readily as `q1.png`.
-@router.get("/chats/{chat_id}/files/{path:path}")
+@router.get("/{chat_id}/files/{path:path}")
 async def download(chat_id: str, path: str) -> Response:
     data = await _read(chat_id, path)
     inline = Path(path).suffix.lower() in INLINE
@@ -119,15 +113,12 @@ async def _read(chat_id: str, path: str) -> bytes:
     """One file's bytes from the sandbox, or the refusal as a status. The path guard is over
     there, on the side that owns the directory — so a 400 here is its answer, not a second
     opinion."""
-    async with await _sandbox() as sandbox:
-        try:
-            data, _ = await sandbox.read(chat_id, path)
-        except SandboxError as exc:
-            raise HTTPException(exc.status or 502, str(exc)) from None
+    async with _sandbox() as sandbox:
+        data, _ = await sandbox.read(chat_id, path)
     return data
 
 
-@router.get("/chats/{chat_id}/preview/{path:path}")
+@router.get("/{chat_id}/preview/{path:path}")
 async def preview(chat_id: str, path: str) -> dict:
 
     suffix = Path(path).suffix.lower()
@@ -178,10 +169,10 @@ async def preview(chat_id: str, path: str) -> dict:
             parsed = []
         if parsed:
             # Lists and not objects: a repeated header name would silently drop a column.
-            columns = [name or f"column {i + 1}" for i, name in enumerate(parsed[0])]
+            columns = [name or f"column {index + 1}" for index, name in enumerate(parsed[0])]
             # Ragged rows are normal in a file a script appended to. Padded rather than dropped,
             # so the table stays rectangular and the gap shows as an empty cell.
-            rows = [r[: len(columns)] + [""] * (len(columns) - len(r)) for r in parsed[1:]]
+            rows = [row[: len(columns)] + [""] * (len(columns) - len(row)) for row in parsed[1:]]
 
     if columns:
         return {
@@ -195,13 +186,10 @@ async def preview(chat_id: str, path: str) -> dict:
     return {**empty, "kind": "text", "text": text, "truncated": clipped}
 
 
-@router.delete("/chats/{chat_id}/files/{path:path}")
+@router.delete("/{chat_id}/files/{path:path}")
 async def discard(chat_id: str, path: str) -> dict:
     """The composer's ✕ deletes the file and not only the chip: `uploads/` is what the prompt is
     built from every turn, so a chip removed while the file stayed would keep describing it."""
-    async with await _sandbox() as sandbox:
-        try:
-            await sandbox.delete(chat_id, path)
-        except SandboxError as exc:
-            raise HTTPException(exc.status or 502, str(exc)) from None
+    async with _sandbox() as sandbox:
+        await sandbox.delete(chat_id, path)
     return {"deleted": path}

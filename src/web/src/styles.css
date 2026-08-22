@@ -645,16 +645,6 @@ textarea {
   white-space: nowrap;
 }
 
-/* Rendered only off main, so it reads as a state and not as decoration. */
-.src-chip-branch {
-  padding: 1px 6px;
-  border-radius: 10px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
 .src-chip-caret {
   color: var(--faint);
   font-size: 10px;
@@ -2737,6 +2727,9 @@ textarea {
   border-left-color: var(--bad);
   color: var(--ink);
 }
+.banner.good {
+  border-left-color: var(--ok);
+}
 
 .link {
   border: none;
@@ -3402,6 +3395,88 @@ button.danger.solid {
   color: var(--ink);
   font-size: 12px;
   cursor: pointer;
+}
+
+/* --- the connection variables ------------------------------------------------------- */
+/* Its own rules rather than the drawer's, because this form renders in two places: the
+   drawer on the data page and inline in the first-run wizard. */
+
+.envs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.envs-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.envs-head small {
+  color: var(--faint);
+  font-size: 11.5px;
+}
+
+.env-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.env-name,
+.env-value {
+  min-height: var(--control);
+  line-height: 1.2;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 13px;
+  min-width: 0;
+}
+
+/* The name is the shorter of the two: a value can be a JDBC URL or a base64 key. */
+.env-name {
+  flex: 0 1 42%;
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.env-value {
+  flex: 1 1 58%;
+}
+
+.env-drop,
+.env-add {
+  border: 1px solid transparent;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.env-drop {
+  min-height: var(--control);
+  padding: 0 6px;
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.env-drop:hover {
+  color: var(--bad);
+}
+
+.env-add {
+  align-self: flex-start;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.env-add:hover {
+  color: var(--ink);
 }
 
 .drawer-error {
@@ -4761,98 +4836,19 @@ button.danger.solid {
   padding-right: 4px;
 }
 
-/* What you asked, as a quiet block rather than a bubble: the agent's reply is the content
-   and two competing bubbles made the exchange harder to skim, not easier. */
-.edchat-you {
-  margin: 10px 0 8px;
-  padding: 6px 10px;
-  border-left: 2px solid var(--accent);
-  background: var(--raised);
-  border-radius: 0 var(--radius) var(--radius) 0;
-  font-size: 13px;
+/* The chat page's rows are laid out for a 760px column and centre themselves in it. In a
+   panel this narrow that gutter is most of the width, so it goes — the rows are the same
+   blocks either way, only the column they sit in differs. */
+.edchat-log .row {
+  width: auto;
+  margin-left: 0;
+  margin-right: 0;
 }
 
-.edchat-agent {
-  margin-bottom: 12px;
-}
-
-.edchat-tool {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
-  padding: 1px 0;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.edchat-tool.bad {
-  color: var(--bad);
-}
-
-.edchat-tick {
-  width: 10px;
-  color: var(--faint);
-  text-align: center;
-}
-
-.edchat-tool.bad .edchat-tick {
-  color: var(--bad);
-}
-
-.edchat-label {
-  flex: 0 1 auto;
-}
-
-.edchat-note {
-  color: var(--faint);
-  font-family: var(--mono);
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.edchat-wait {
-  margin: 0;
-  color: var(--faint);
-  font-size: 13px;
-}
-
-/* This agent replies with the YAML it wrote, so the fenced block is the point. */
-.edchat-md {
-  font-size: 13px;
-}
-
-.edchat-md > :first-child {
-  margin-top: 0;
-}
-
-.edchat-md > :last-child {
-  margin-bottom: 0;
-}
-
-.edchat-md p,
-.edchat-md ul,
-.edchat-md ol {
-  margin: 0 0 8px;
-}
-
-.edchat-md pre {
-  margin: 0 0 8px;
-  padding: 8px 10px;
-  border-radius: var(--radius);
-  background: var(--code-bg);
-  /* Its own scroller: a long `sql:` must not make the page scroll sideways. */
-  overflow-x: auto;
-}
-
-.edchat-md code {
-  font-family: var(--mono);
-  font-size: 12px;
-}
-
-.edchat-md pre code {
-  white-space: pre;
+.edchat-log .row.user {
+  width: fit-content;
+  max-width: 100%;
+  margin: 14px 0 10px auto;
 }
 
 .edchat-ask {
@@ -5064,35 +5060,51 @@ button.danger.solid {
   margin-top: 6px;
 }
 
-.deploy-file {
+/* One service's file. The contents are never rendered — it holds the warehouse password and all
+   four secrets, and the only thing to do with it is run it somewhere. */
+.deploy-get {
   border: 1px solid var(--line);
   border-radius: 6px;
-  overflow: hidden;
-  background: var(--code-bg);
-}
-
-.deploy-file-head {
+  padding: 12px 14px;
+  background: var(--panel);
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 5px 8px 5px 10px;
-  border-bottom: 1px solid var(--line);
-  font-family: var(--mono);
-  font-size: 11px;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
 }
 
-/* The file can be forty lines, and it is meant to be copied rather than read line by line. */
-.deploy-file pre {
+.deploy-get strong {
+  font-size: 13px;
+}
+
+/* An anchor and not a button, because `Content-Disposition` is what saves the file — so the
+   button styling has to be restated here: `button.primary` is scoped to the element. */
+.deploy-download {
+  min-height: var(--control);
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.2;
+  text-decoration: none;
+}
+
+.deploy-download:hover {
+  filter: brightness(1.08);
+}
+
+.deploy-cmd {
   margin: 0;
   padding: 10px 12px;
-  max-height: 300px;
-  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--code-bg);
   color: var(--muted);
   font-family: var(--mono);
   font-size: 11.5px;
-  line-height: 1.55;
-  white-space: pre;
 }
 
 .deploy-where {
@@ -5135,4 +5147,121 @@ button.danger.solid {
 
 .deploy-where button.primary {
   margin-top: 14px;
+}
+
+/* --- first-run setup ------------------------------------------------------- */
+/* The whole screen, rail included: until it finishes there is no model, so chat cannot answer
+   and a board cannot refresh. See Setup.tsx. */
+.setup {
+  height: 100%;
+  overflow-y: auto;
+  padding: 48px 24px 80px;
+}
+
+.setup-head,
+.setup-steps {
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.setup-head h1 {
+  margin: 0 0 8px;
+  font-size: 22px;
+}
+
+.setup-head p {
+  margin: 0 0 32px;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+
+.setup-steps {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.setup-step {
+  display: flex;
+  gap: 14px;
+  padding: 18px 0 22px;
+  border-top: 1px solid var(--line);
+}
+
+/* Steps ahead of the current one stay visible but inert, so the shape of what is left is
+   legible from the first screen rather than appearing one surprise at a time. */
+.setup-step.later {
+  opacity: 0.45;
+}
+
+.setup-n {
+  flex: 0 0 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.setup-step.live > .setup-n {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+}
+
+.setup-step.done > .setup-n {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.setup-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.setup-body h2 {
+  margin: 3px 0 10px;
+  font-size: 14px;
+}
+
+.setup-body p {
+  margin: 0 0 10px;
+}
+
+.setup-done {
+  font-size: 13px;
+}
+
+.setup-get {
+  margin: 4px 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.setup-url {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 14px 0 12px;
+  font-size: 13px;
+}
+
+.setup-url input {
+  min-height: var(--control);
+  line-height: 1.2;
+}
+
+/* `>` because this container holds the connection form, which renders its own footer button —
+   without it that button would be restyled by a rule meant for the step's own action. */
+.setup-body > button.primary {
+  margin-top: 2px;
 }

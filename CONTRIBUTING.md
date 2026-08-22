@@ -42,19 +42,20 @@ Docker is needed only for the **code sandbox** and for running that compose file
 machine without it can still connect, build a model and ask questions — it just cannot run
 Python.
 
-The portal is the only surface for this — `POST /api/source` is the sole writer of that row,
-and `web/sources.py` the sole caller of `steps.action`. Keep it that way: a second surface means
+The portal is the only surface for this — `POST /api/connection` is the sole writer of that row,
+and `web/pipeline.py` the sole caller of `steps.action`. Keep it that way: a second surface means
 the connection form, its validation and the pipeline's confirmations get written twice, which is
 exactly how two implementations of one rule start disagreeing.
 
 A database running on your machine is `host.docker.internal` from inside the container, not
-`localhost`. On Apple Silicon set `CUBESTORE_TAG=arm64v8` in `services/semantic/.env` — the generated
-file carries it as a commented line, and `cubejs/cubestore:latest` is amd64 only.
+`localhost`. On Apple Silicon edit the handed-over file to `cubejs/cubestore:arm64v8` —
+`cubejs/cubestore:latest` is amd64 only and the pull fails outright rather than falling back.
+The file's own header comment says so; the portal no longer picks the tag.
 
 ## The loop
 
 ```bash
-make test                 # 549 tests, no containers, no model calls
+make test                 # 545 tests, no containers, no model calls
 make lint                 # ruff check + format --check
 make fmt                  # fix what is fixable
 ```
@@ -72,18 +73,18 @@ and compare the answer against the database directly. The chat's tool calls show
 query and the SQL it compiled to. Several real bugs in this
 repository were caught that way and would not have been caught by a mock.
 
-**Never run the `cubes` step against a source whose model you did not build.** It rewrites
-every YAML file in `cube/sources/<name>/`, views and descriptions included, and those cost
-one model call per table to rebuild. Add a throwaway source pointing at the same database
-instead. Nothing in the tool undoes it — commit the model directory first, because `git`
-is the only way back.
+**Re-running the `cubes` step discards the views and descriptions**, and those cost one model
+call per table to rebuild. It can no longer lose them: `publish.install` replaces the whole
+model in one commit on a ref, so what was there is the parent commit and `GET /diff` shows what
+the rebuild changed. The picker still warns first, because recoverable is not the same as
+intended.
 
 ## Code style
 
 Ruff, line length 100. Beyond that, two habits this codebase holds to:
 
 **Inline single-caller helpers.** A private function with one call site is a hop the
-reader has to follow for no benefit. The pipeline in `sources/modelgen/` is procedural on
+reader has to follow for no benefit. The pipeline in `datamodel/modelgen/` is procedural on
 purpose — it reads top to bottom. Helpers earn their place at two or more callers, and
 especially when they exist so two code paths cannot drift apart.
 
@@ -102,25 +103,31 @@ writing.
 
 Two independent pieces, and you can do the first without the second.
 
-**Connecting** — add a `Driver` to `sources/drivers.py` with its `CUBEJS_DB_*` fields.
-Field names are Cube's own, so anything Cube documents works verbatim. The source will
-connect and serve a hand-written model, and the connection form grows the fields on its
-own. Drivers needing a different image or platform set `image` / `platform`; a field
-holding a host path (a key file) sets `mount_to`, and the form then renders it as a typed
-path — a file input would hand the browser the contents and never the location.
+**Connecting** — nothing. The connection form takes arbitrary `CUBEJS_DB_*` variables and
+`POST /api/connection` checks only that every name carries that prefix, so a warehouse this
+repo has never heard of connects and serves a hand-written model with no code at all. There is
+no per-driver field table any more: `WAREHOUSES` in `ConnectionForm` is a dropdown with a
+starting set of rows for each entry, and it is prefill rather than schema — nothing validates
+against it and a type missing from it is typed in and works.
 
-**Extracting tables** — add a `Dialect` to `sources/modelgen/read.py` with SQL returning
+A warehouse needing a different Cube build or an architecture pin (Databricks wants
+`analyst-cube:1-jdk` and `platform: linux/amd64`) is an edit to the compose file the user was
+handed. The portal has no opinion: the templates in `deployenv` carry static tags, the same way
+they carry static ports.
+
+**Extracting tables** — add a `Dialect` to `datamodel/modelgen/read.py` with SQL returning
 `KEY_COLUMNS` (and optionally `STAT_COLUMNS`). Those SELECTs run as probe cubes through
 Cube's own driver, so no new database client is needed. `DIALECTS` is the single list of
-drivers that can extract tables — the form's `no table extraction yet` label reads from
-it, so adding an entry is all that is required.
+drivers that can extract tables; a driver missing from it still gets tables, columns and types
+from `information_schema`, and `read` records a note saying its cubes will have no joins and no
+primary keys.
 
 Statistics are optional. Without them the model still generates; the LLM just has less to
 go on when deciding which numbers are worth aggregating.
 
 ## Changing model generation
 
-`sources/modelgen/` has one module per stage. `steps.action` is the only way to run one — a
+`datamodel/modelgen/` has one module per stage. `steps.action` is the only way to run one — a
 caller chooses *which* actions and in what order, never how, so the order rule and what a
 failed step records cannot drift across callers. Before changing it, know the three
 invariants:
@@ -140,23 +147,25 @@ reason, a predicate. The id shows up in the rejection line, so failures stay cou
 
 ## Changing the model editor
 
-`sources/editing/{edits,impact,workspace}.py`, `sources/vcs.py`,
-`agent/tools/editor.py` and `web/model_edit.py` let a branch of a
-source's model be edited safely, on the same bind mount the container is serving live —
-there's no isolated dev endpoint the way Cube Cloud has one per branch. Two invariants
-hold before you touch it:
+`datamodel/editing/{edits,impact,workspace}.py`, `agent/tools/editor.py` and `web/model.py`
+let a ref of the model be edited safely. There is no local model directory and no git
+subprocess: the store does refs, diff and merge over HTTP, and one Cube compiles every ref
+independently, so a ref is not switched *to* — it is asked *about*. Two invariants hold before
+you touch it:
 
-1. **The gate runs before the write, not after.** `edits.check` is what keeps a file that
-   won't compile off disk in the first place, because in dev mode a saved file is live in
-   under a second. A new write path that skips it can take a whole source to zero cubes.
-2. **Impact is only meaningful against the checked-out branch.** Two sources can carry a
-   member of the same name; a diff computed against any branch other than the one actually
-   served would report a plausible number about the wrong warehouse. `branch_diff` and
-   `merge` both refuse to compute it otherwise — don't route around that check.
+1. **The gate runs before the write, because the write is the deploy.** `edits.check` is what
+   keeps a file that will not compile from ever being committed — Cube asks the store for the
+   ref's version on every request, so a commit is live within seconds and there is no restart
+   afterwards to hide behind. A new write path that skips it can take a ref to zero cubes.
+2. **Impact is measured on the ref being asked about, and every ref is answerable.** This is
+   what one-Cube-per-ref bought: `GET /refs/{ref}/diff` reports real breakage for a ref nobody
+   is looking at, and merge no longer has to demand a checkout first. `impact.check` asks the
+   ref's own compiled catalog rather than diffing members against main, because "is what this
+   tile reads still here" is the question that survives whatever caused the breakage.
 
-The editor agent's tools (`tools.py`) deliberately exclude merge, checkout and
-branch-create — those restart the container and land work, so they stay buttons on the
-page rather than something an agent can trigger mid-conversation.
+The editor agent's tools (`agent/tools/editor.py`) deliberately exclude merge and ref-create —
+those land work, so they stay buttons on the page rather than something an agent can trigger
+mid-conversation. There is no commit tool either: every write to a ref is already a commit.
 
 ## Pull requests
 

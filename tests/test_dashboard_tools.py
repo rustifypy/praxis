@@ -9,8 +9,11 @@ event-shape assertions need to observe.
 import pytest
 
 from analyst_agent.agent.tools import dashboards as tools
+from analyst_agent.agent.tools import trace
+from analyst_agent.core import db
 from analyst_agent.dashboards import layout
-from analyst_agent.dashboards.store import DashboardStore, Tile
+from analyst_agent.dashboards import store as _dashboards
+from analyst_agent.dashboards.store import Tile
 
 QUERY = {"measures": ["orders.net_revenue"], "dimensions": ["orders.status"]}
 BAR = {"type": "bar", "x": "orders.status", "y": ["orders.net_revenue"]}
@@ -91,17 +94,18 @@ def test_the_default_layout_leads_with_the_kpis():
 
 @pytest.fixture
 def events(monkeypatch):
-    """Collect what the dashboard tools emit."""
+    """Collect what the dashboard tools emit — patched on `trace`, which authors every
+    tool_start and tool_end in the codebase."""
     captured: list[dict] = []
-    monkeypatch.setattr(tools, "emit", lambda event: captured.append(event.model_dump()))
+    monkeypatch.setattr(trace, "emit", lambda event: captured.append(event.model_dump()))
     return captured
 
 
 @pytest.fixture
 async def kit(tmp_path, catalog):
-    store = DashboardStore(tmp_path / "analyst.db")
-    await store.init()
-    ctx = tools.DashboardContext(store=store, catalog=catalog)
+    await db.create_tables()
+    store = _dashboards
+    ctx = tools.DashboardContext(catalog=catalog)
     return store, {t.name: t for t in tools.build_dashboard_tools(ctx)}
 
 

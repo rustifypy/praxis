@@ -1,113 +1,102 @@
-"""The model directory as an editable working tree.
-
-The gate runs before the write because the write is live: Cube watches the mount in dev mode
-and reloads in under a second, so a file that will not compile has to be kept off disk rather
-than rolled back after. Both callers go through `write` and `delete` — the HTTP routes and the
-editor agent's tools — so the two cannot come to disagree about what a valid edit is, or about
-whether the directory is versioned at all. Without a repo there is no main to diff against, and
-every append-only rule passes vacuously.
-
-A refusal is a value with a `kind`, so HTTP can choose a status and the agent can be told what
-to do instead. Neither decision belongs here.
-"""
-
 from dataclasses import dataclass, field
-from pathlib import Path
 
-from .. import vcs
-from ..registry import model_dir
+from ...core.deployment import MAIN
+from ...modelstore.client import ModelStore, StoreError
 from . import edits
 
 
 @dataclass
 class Outcome:
     ok: bool
+    # Why it was refused: ref | path | missing | rejected | store. Empty when it was not.
     kind: str = ""
-    """Why it was refused: branch | path | missing | rejected | repo. Empty when it was not."""
     reason: str = ""
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     path: str = ""
-    """The path actually written, relative to the model directory."""
 
 
-def files() -> dict[str, str]:
-    """Every `*.yml` in the working tree, relative path -> text. `.git` holds none."""
-    root = model_dir()
-    return {str(p.relative_to(root)): p.read_text() for p in sorted(root.rglob("*.yml"))}
+def resolve(path: str) -> tuple[str, str]:
+    """The path a model file has inside a ref, or ('', reason)."""
+    cleaned = path.strip()
+    parts = cleaned.split("/")
+    # Relative and inside the model: the store resolves a path against the ref's own root, so an
+    # absolute one is not a near-miss — it is a different tree.
+    if (
+        not cleaned
+        or cleaned.startswith("/")
+        or ".." in parts
+        or any(part.startswith(".") for part in parts)
+    ):
+        return "", "a model file lives inside the model, so its path cannot leave it"
+    if not cleaned.endswith(".yml"):
+        return "", "a model file is a *.yml — Cube ignores everything else in the model"
+    return cleaned, ""
 
 
-def resolve(path: str) -> tuple[Path | None, str]:
-    """A caller's path inside the model directory, or why not."""
-    root = model_dir().resolve()
-    # `..` and an absolute path both resolve out of the tree, so the check is on the result.
-    target = (root / path).resolve()
-    if not target.is_relative_to(root) or ".git" in target.parts:
-        return None, "a model file lives inside the model directory"
-    if target.suffix != ".yml":
-        return None, "a model file is a *.yml — Cube ignores the rest of the mount"
-    return target, ""
+def validate_ref(name: str, taken: list[str] | None = None) -> str | None:
+    """Returns an error message, or None when the name is usable as a ref."""
+    if not name:
+        return "a name is required"
+    if name == MAIN:
+        return f"{MAIN!r} is the generated model — edits go on a ref off it"
+    if not name[0].isalnum() or not all(c.isalnum() or c in "-_/" for c in name):
+        return "use letters, digits, hyphens and underscores, starting with a letter or digit"
+    if name.endswith((".lock", "/")) or ".." in name:
+        return "not a valid ref name"
+    if taken and name in taken:
+        return f"{name!r} already exists"
+    return None
 
 
-async def editable() -> Outcome | None:
-    """Why the model must not be changed right now, or None. Versioning it first is part of
-    the guard: without a repo there is no main, so `edits.check` would have nothing to diff a
-    proposed cube against and every append-only rule would pass vacuously."""
-    repo = model_dir()
-    ensured = await vcs.ensure(repo)
-    if not ensured.ok:
-        return Outcome(False, "repo", f"could not version {repo}: {ensured.message}")
-    if await vcs.current(repo) == vcs.MAIN:
+def editable(ref: str) -> Outcome | None:
+    if ref == MAIN:
         return Outcome(
-            False,
-            "branch",
-            f"{vcs.MAIN!r} is what the pipeline generates — create a branch before editing",
+            False, "ref", f"{MAIN!r} is what the pipeline generates — edit a ref off it instead"
         )
     return None
 
 
-async def _editable(path: str) -> tuple[Path, str, Outcome | None]:
-    """The target, its relative path, and the refusal to return instead. Shared by `write` and
-    `delete` so a guard cannot apply to one and not the other."""
-    if refusal := await editable():
-        return Path(), "", refusal
-    target, refused = resolve(path)
-    if target is None:
-        return Path(), "", Outcome(False, "path", refused)
-    return target, str(target.relative_to(model_dir().resolve())), None
+def model_yaml(files: dict[str, str]) -> dict[str, str]:
+    # A ref carries its grounding markdown as well as its model, and the gate reads definitions.
+    return {name: body for name, body in files.items() if name.endswith(".yml")}
 
 
-async def write(path: str, text: str) -> Outcome:
-    """Tiers 1-2, then the write."""
-    target, relative, refusal = await _editable(path)
-    if refusal is not None:
-        return refusal
+async def write(store: ModelStore, ref: str, path: str, text: str) -> Outcome:
+    # Tiers 1-2, then the write. The gate runs first because the write *is* the deploy: Cube
+    # polls the store for the ref's version, so a commit is live within seconds and there is no
+    # restart afterwards to hide behind.
+    try:
+        if refusal := editable(ref):
+            return refusal
+        relative, refused = resolve(path)
+        if not relative:
+            return Outcome(False, "path", refused)
+        proposed = {**model_yaml(await store.files(ref, refresh=True)), relative: text}
+        result = edits.check(model_yaml(await store.files(MAIN)), proposed)
+        if not result.ok:
+            return Outcome(False, "rejected", result.as_message(), errors=result.errors)
+        await store.edit(ref, write={relative: text}, message=f"edit {relative}")
+        return Outcome(True, path=relative, warnings=result.warnings)
+    except StoreError as exc:
+        return Outcome(False, "store", str(exc))
 
-    repo = model_dir()
-    result = edits.check(
-        await vcs.files_at(repo, vcs.MAIN, suffix=".yml"), {**files(), relative: text}
-    )
-    if not result.ok:
-        return Outcome(False, "rejected", result.as_message(), errors=result.errors)
 
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(text)
-    return Outcome(True, path=relative, warnings=result.warnings)
-
-
-async def delete(path: str) -> Outcome:
-    """The model minus this file, gated against main before anything leaves disk."""
-    target, relative, refusal = await _editable(path)
-    if refusal is not None:
-        return refusal
-    if not target.is_file():
-        return Outcome(False, "missing", f"no model file at {path!r}")
-
-    repo = model_dir()
-    remaining = {p: body for p, body in files().items() if p != relative}
-    result = edits.check(await vcs.files_at(repo, vcs.MAIN, suffix=".yml"), remaining)
-    if not result.ok:
-        return Outcome(False, "rejected", result.as_message(), errors=result.errors)
-
-    target.unlink()
-    return Outcome(True, path=relative)
+async def delete(store: ModelStore, ref: str, path: str) -> Outcome:
+    try:
+        if refusal := editable(ref):
+            return refusal
+        relative, refused = resolve(path)
+        if not relative:
+            return Outcome(False, "path", refused)
+        current = model_yaml(await store.files(ref, refresh=True))
+        if relative not in current:
+            return Outcome(False, "missing", f"no model file at {path!r}")
+        remaining = {name: body for name, body in current.items() if name != relative}
+        result = edits.check(model_yaml(await store.files(MAIN)), remaining)
+        if not result.ok:
+            return Outcome(False, "rejected", result.as_message(), errors=result.errors)
+        await store.edit(ref, delete=[relative], message=f"delete {relative}")
+        return Outcome(True, path=relative)
+    except StoreError as exc:
+        return Outcome(False, "store", str(exc))

@@ -9,14 +9,15 @@ import asyncio
 
 import pytest
 
+from analyst_agent import transcript as _transcript
 from analyst_agent.agent.turn import run_turn
-from analyst_agent.transcript import ChatStore
+from analyst_agent.core import db
 
 
 @pytest.fixture
 async def store(tmp_path):
-    s = ChatStore(tmp_path / "analyst.db")
-    await s.init()
+    await db.create_tables()
+    s = _transcript
     return s
 
 
@@ -48,10 +49,7 @@ async def test_an_attached_file_is_recorded_on_the_user_event(store):
     that came from nowhere."""
     chat = await store.create()
     events = [
-        e
-        async for e in run_turn(
-            no_agent, chat.id, "what is this?", store, None, ["uploads/orders.csv"]
-        )
+        e async for e in run_turn(no_agent, chat.id, "what is this?", None, ["uploads/orders.csv"])
     ]
 
     assert events[0].type == "user"
@@ -63,13 +61,13 @@ async def test_an_attached_file_is_recorded_on_the_user_event(store):
 
 async def test_a_turn_with_no_files_says_so_rather_than_omitting_the_key(store):
     chat = await store.create()
-    events = [e async for e in run_turn(no_agent, chat.id, "hello", store, None)]
+    events = [e async for e in run_turn(no_agent, chat.id, "hello", None)]
     assert events[0].data == {"text": "hello", "files": []}
 
 
 async def test_a_failed_build_is_a_transcript_entry_rather_than_an_exception(store):
     chat = await store.create()
-    events = [e async for e in run_turn(no_agent, chat.id, "hello", store, None)]
+    events = [e async for e in run_turn(no_agent, chat.id, "hello", None)]
     assert [e.type for e in events] == ["user", "error", "done"]
     assert "no model here" in events[1].data["message"]
 
@@ -84,7 +82,7 @@ async def test_a_streamed_output_event_reaches_the_browser_but_not_the_transcrip
         ("custom", {"type": "tool_end", "data": {"tool": "run_python", "ok": True}}),
     )
 
-    events = [e async for e in run_turn(build, chat.id, "go", store)]
+    events = [e async for e in run_turn(build, chat.id, "go")]
     assert [e.type for e in events] == ["user", "tool_start", "output", "tool_end", "done"]
 
     stored = [e["type"] for e in await store.events(chat.id)]
@@ -103,7 +101,7 @@ async def test_a_tool_end_that_lands_as_the_turn_is_stopped_is_still_recorded(st
         ("custom", {"type": "tool_start", "data": {"tool": "run_query"}}),
     )
 
-    events = [e async for e in run_turn(build, chat.id, "go", store, cancel)]
+    events = [e async for e in run_turn(build, chat.id, "go", cancel)]
     assert [e.type for e in events] == ["user", "tool_start", "tool_end", "done"]
 
     stored = await store.events(chat.id)

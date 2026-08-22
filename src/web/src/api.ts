@@ -51,15 +51,17 @@ export async function json<T>(path: string, init?: RequestInit): Promise<T> {
   return (body ? JSON.parse(body) : {}) as T;
 }
 
-interface CatalogEntity {
+interface ModelEntity {
   name: string;
   view: boolean;
   members: number;
   description?: string;
 }
 
-export const catalog = () =>
-  json<{ cube_url: string; entities: CatalogEntity[] }>("/api/catalog");
+/** One line per entity: the chat's example questions and the header's link. The data page
+ *  reads the same model in full through `sources.model()`. */
+export const modelSummary = () =>
+  json<{ cube_url: string; entities: ModelEntity[] }>("/api/model/summary");
 export const listChats = () => json<Chat[]>("/api/chats");
 export const createChat = () => json<Chat>("/api/chats", { method: "POST", body: "{}" });
 export const chatEvents = (id: string) => json<AgentEvent[]>(`/api/chats/${id}/events`);
@@ -135,24 +137,36 @@ export const deleteChatFile = (chatId: string, path: string) =>
   json(chatFileUrl(chatId, path), { method: "DELETE" });
 
 /**
- * Stream one turn.
+ * Stream one turn, whichever agent is answering it.
  *
  * EventSource is GET-only, so the SSE frames are parsed by hand off a fetch body.
  * Frames are split on a blank line because a single read can contain a partial frame
  * or several whole ones.
  */
-export async function* sendMessage(
-  id: string,
-  question: string,
-  files: string[],
+export async function* streamTurn(
+  path: string,
+  body: unknown,
   signal: AbortSignal,
 ): AsyncGenerator<AgentEvent> {
-  const response = await fetch(`/api/chats/${id}/messages`, {
+  const response = await fetch(path, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ question, files }),
+    body: JSON.stringify(body),
     signal,
   });
+  // A turn that is refused never starts a stream — no Cube deployment, no such chat. Unwrapped
+  // the way `json` does it, because App renders a thrown error as a transcript entry, and
+  // reading the frames off a JSON error body yields no events and so reads as a silent turn.
+  if (!response.ok) {
+    const body = await response.text();
+    let message = `POST ${path} → ${response.status}`;
+    try {
+      message = JSON.parse(body).detail ?? message;
+    } catch {
+      /* not JSON — keep the path and status */
+    }
+    throw new Error(message);
+  }
   if (!response.body) throw new Error("no response body");
 
   const reader = response.body.getReader();
@@ -172,6 +186,13 @@ export async function* sendMessage(
     }
   }
 }
+
+export const sendMessage = (
+  id: string,
+  question: string,
+  files: string[],
+  signal: AbortSignal,
+) => streamTurn(`/api/chats/${id}/messages`, { question, files }, signal);
 
 // --- dashboards ---------------------------------------------------------------------
 

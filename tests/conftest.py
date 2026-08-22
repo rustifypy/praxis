@@ -1,13 +1,13 @@
 from dataclasses import dataclass, field
 
-import httpx
 import pytest
 
 from analyst_agent.core.config import settings
-from analyst_agent.core.deployment import Deployment
+from analyst_agent.core.deployment import MAIN, Deployment
 from analyst_agent.cube.catalog import Catalog
 from analyst_agent.cube.client import CompileResult, CubeError, LoadResult
 from analyst_agent.cube.schema import CubeQuery
+from analyst_agent.modelstore.client import StoreError
 
 
 @pytest.fixture(autouse=True)
@@ -118,7 +118,7 @@ class FakeCube:
 
     def _answering(self) -> None:
         if self.down:
-            raise CubeError(self.down, cause=httpx.ConnectError(self.down))
+            raise CubeError(self.down)
 
     async def catalog(self, *, refresh: bool = False) -> Catalog:
         self._answering()
@@ -135,7 +135,7 @@ class FakeCube:
         self._answering()
         self.loaded.append(query.to_payload())
         if self.fail_load:
-            raise CubeError(self.fail_load, status=400)
+            raise CubeError(self.fail_load)
         return LoadResult(
             rows=list(self.rows), duration_ms=7, resolved_ranges=dict(self.resolved_ranges)
         )
@@ -144,3 +144,39 @@ class FakeCube:
 @pytest.fixture
 def cube(catalog) -> FakeCube:
     return FakeCube(served=catalog)
+
+
+class FakeStore:
+    """Refs as dicts of path -> text. `edit` is the only mutation, as it is on the real one."""
+
+    def __init__(self, **refs: dict[str, str]):
+        self.refs = {name: dict(files) for name, files in refs.items()}
+        self.commits: list[str] = []
+        self.fail = ""
+
+    async def files(self, ref: str = MAIN, *, refresh: bool = False) -> dict[str, str]:
+        if self.fail:
+            raise StoreError(self.fail)
+        return dict(self.refs.get(ref) or {})
+
+    async def file(self, path: str, ref: str = MAIN) -> str:
+        files = self.refs.get(ref) or {}
+        if path not in files:
+            raise StoreError("no such file", status=404)
+        return files[path]
+
+    async def edit(self, ref, write=None, delete=None, message="edit model") -> str:
+        if self.fail:
+            raise StoreError(self.fail)
+        self.refs[ref].update(write or {})
+        for path in delete or []:
+            self.refs[ref].pop(path, None)
+        self.commits.append(message)
+        return "sha"
+
+
+@pytest.fixture
+def model_store():
+    """The FakeStore class, so a test can build the refs it needs without importing across
+    test modules — `tests/` is not a package."""
+    return FakeStore

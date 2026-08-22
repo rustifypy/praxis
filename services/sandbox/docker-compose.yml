@@ -16,11 +16,12 @@ name: analyst-sandbox
 
 services:
   sandbox:
-    image: ${SANDBOX_IMAGE:-analyst-sandbox:dev}
+    image: ${SANDBOX_IMAGE:-analyst-sandbox:1}
     build: .
     environment:
       SANDBOX_TOKEN: ${SANDBOX_TOKEN:?required}
-      SANDBOX_PORT: 8600
+    # To move it, change the left-hand number only. The right-hand one is the port the service
+    # listens on inside the container, and the two are not the same setting.
     ports:
       - "127.0.0.1:${SANDBOX_PORT:-8600}:8600"
     volumes:

@@ -91,17 +91,18 @@ async def test_an_upload_comes_back_with_the_path_the_service_chose(sandbox):
     respx.post(f"{URL}/uploads/c1").mock(
         return_value=httpx.Response(200, json={"path": "uploads/orders-2.csv"})
     )
-    assert await sandbox.upload("c1", "../orders.csv", b"a,b\n") == "uploads/orders-2.csv"
+    landed = await sandbox.upload("c1", "../orders.csv", b"a,b\n")
+    assert landed["path"] == "uploads/orders-2.csv"
 
 
 async def test_an_unconfigured_sandbox_is_refused_before_a_request(monkeypatch):
-    """Optional, unlike Cube: a deployment with no sandbox answers questions and just cannot run
-    Python, so this is something callers check rather than a fatal state."""
+    """No address means no request at all — the route that catches this answers 503, so it must
+    not arrive as a transport failure."""
 
     async def none():
         return Deployment()
 
     monkeypatch.setattr("analyst_agent.sandbox.client.current", none)
-    with pytest.raises(SandboxError) as caught:
+    with pytest.raises(SandboxError, match="no sandbox") as caught:
         await open_sandbox()
-    assert caught.value.unconfigured
+    assert caught.value.status is None

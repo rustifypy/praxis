@@ -54,7 +54,7 @@ def test_the_model_files_are_what_says_a_step_ran():
     assert found.described == ("invoice",)
 
 
-def test_an_empty_model_directory_has_nothing_done():
+def test_an_empty_model_has_nothing_done():
     found = evidence.of({}, {})
     assert not any(found.done(step) for step in STEPS)
 
@@ -160,10 +160,12 @@ def test_the_secret_never_leaves_either():
 
 
 def test_the_label_is_the_database_the_credentials_open():
-    """There is nothing to name, so the connection is called after what it opens."""
+    """There is nothing to name, so the connection is called after what it opens — and after
+    the warehouse type when no variable says which database, since the dropdown's labels are
+    the browser's and nothing here has a prettier name to reach for."""
     body = public(SHOP, steps={}, health={}, found=evidence.of({}, {}))
     assert body["label"] == "chinook"
-    assert label_of(Deployment(driver="postgres")) == "PostgreSQL"
+    assert label_of(Deployment(driver="postgres")) == "postgres"
 
 
 def test_public_ships_what_each_step_would_discard():

@@ -15,13 +15,16 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[1] / "src" / "analyst_agent"
 
 TIERS: dict[str, int] = {
-    # 0 — settings, the database file, the event format, the chat model, the job runner,
-    # the subprocess wrapper. Nothing above it may be named here.
+    # 0 — settings, the database file, the event format, the chat model, the deployment row,
+    # the job runner. Nothing above it may be named here.
     "core": 0,
-    # 1 — the transcript, and one client per service the deployment runs: Cube, the model
-    # store, the sandbox. None of the four knows the others exist.
+    # 1 — the transcript, whether a deployment answers, and one client per service the
+    # deployment runs: Cube, the model store, the sandbox. None of them knows the others exist,
+    # which is why `reachable` speaks HTTP itself rather than borrowing a client: it is asked
+    # about an address that is not on the row yet, and about services that may not be there.
     "cube": 1,
     "modelstore": 1,
+    "reachable": 1,
     "sandbox": 1,
     "transcript": 1,
     # 2 — saved queries.

@@ -1,4 +1,4 @@
-import type { System } from "../sources";
+import type { SourceRow } from "../sources";
 import { Info } from "./Info";
 import { SystemBanners } from "./SystemBanners";
 
@@ -9,7 +9,7 @@ import { SystemBanners } from "./SystemBanners";
  * about a database that exists — its deployment, its pipeline, its model — and none of it has
  * anything to say here.
  */
-export function Connect({ system, onAdd }: { system: System; onAdd: () => void }) {
+export function Connect({ source, onAdd }: { source: SourceRow | null; onAdd: () => void }) {
   return (
     <div className="sources">
       <header className="sources-head">
@@ -23,7 +23,7 @@ export function Connect({ system, onAdd }: { system: System; onAdd: () => void }
         </h1>
       </header>
 
-      <SystemBanners system={system} />
+      <SystemBanners source={source} />
 
       <div className="sources-empty">
         <h2>No database connected</h2>

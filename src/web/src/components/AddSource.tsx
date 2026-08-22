@@ -1,36 +1,111 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
-import type { DriverSpec, SourceRow } from "../sources";
+import type { SourceRow } from "../sources";
+
+/** Rows rather than a map: order is what the person typed, and a blank name is a row being
+ *  filled in. Collapsed to a map only on submit. */
+interface Row {
+  env: string;
+  value: string;
+}
+
+const PREFIX = "CUBEJS_DB_";
+
+/** Values that cannot work from inside a container. The form offers a swap. */
+const LOCAL_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0", "::1"];
 
 /**
- * The connection form, built from the driver specs themselves — so a field Cube
- * documents appears here without any frontend change. This is the only way a database is
- * connected; there is no CLI equivalent to drift from.
+ * The dropdown, and a starting set of variables for each.
+ *
+ * All of it lives here because none of it is a server rule: the key becomes CUBEJS_DB_TYPE,
+ * the rows are whatever was typed, and `POST /source` checks only that every name starts with
+ * CUBEJS_DB_. So a warehouse missing from this list is configured the same way — pick the
+ * closest, then edit the rows. Cube's driver documentation is what lists the real variables.
+ */
+const WAREHOUSES: { key: string; label: string; rows: [string, string][] }[] = [
+  {
+    key: "postgres",
+    label: "PostgreSQL",
+    rows: [
+      ["CUBEJS_DB_HOST", "host.docker.internal"],
+      ["CUBEJS_DB_PORT", "5432"],
+      ["CUBEJS_DB_NAME", ""],
+      ["CUBEJS_DB_USER", ""],
+      ["CUBEJS_DB_PASS", ""],
+    ],
+  },
+  {
+    key: "mysql",
+    label: "MySQL",
+    rows: [
+      ["CUBEJS_DB_HOST", "host.docker.internal"],
+      ["CUBEJS_DB_PORT", "3306"],
+      ["CUBEJS_DB_NAME", ""],
+      ["CUBEJS_DB_USER", ""],
+      ["CUBEJS_DB_PASS", ""],
+    ],
+  },
+  {
+    key: "snowflake",
+    label: "Snowflake",
+    rows: [
+      ["CUBEJS_DB_SNOWFLAKE_ACCOUNT", ""],
+      ["CUBEJS_DB_SNOWFLAKE_WAREHOUSE", ""],
+      ["CUBEJS_DB_NAME", ""],
+      ["CUBEJS_DB_USER", ""],
+      ["CUBEJS_DB_PASS", ""],
+    ],
+  },
+  {
+    key: "bigquery",
+    label: "Google BigQuery",
+    rows: [
+      ["CUBEJS_DB_BQ_PROJECT_ID", ""],
+      ["CUBEJS_DB_BQ_CREDENTIALS", ""],
+    ],
+  },
+  {
+    key: "databricks-jdbc",
+    label: "Databricks",
+    rows: [
+      ["CUBEJS_DB_DATABRICKS_URL", ""],
+      ["CUBEJS_DB_DATABRICKS_TOKEN", ""],
+      ["CUBEJS_DB_DATABRICKS_ACCEPT_POLICY", "true"],
+    ],
+  },
+  { key: "redshift", label: "Amazon Redshift", rows: [] },
+  { key: "athena", label: "Amazon Athena", rows: [] },
+  { key: "clickhouse", label: "ClickHouse", rows: [] },
+  { key: "trino", label: "Trino", rows: [] },
+  { key: "mssql", label: "SQL Server", rows: [] },
+  { key: "duckdb", label: "DuckDB", rows: [] },
+];
+
+/** Masked in the box. A display rule and nothing more — the server stores every value the
+ *  same way, so being wrong about one costs nothing but a visible password. */
+const secret = (env: string) => /PASS|TOKEN|SECRET|CREDENTIALS|KEY$/.test(env);
+
+/**
+ * The connection form: a warehouse type and the CUBEJS_DB_* variables it needs.
+ *
+ * Variables and not labelled fields, because there is no per-driver field list any more — the
+ * portal writes what it is given into the compose file and Cube is what reads them. So a
+ * warehouse nobody here has heard of is configured the same as Postgres.
  *
  * Also the edit form. Passing `editing` switches it to patching the stored connection: the
- * driver is fixed, and a blank field keeps the stored value — which is the only way a
- * password can be changed without the browser ever being sent it.
- *
- * It offers to swap a `localhost` host for `host.docker.internal`, because from inside
- * the container the first cannot work and the mistake costs a whole failed connect
- * cycle. A `path` field is typed rather than picked: a file input yields the file's
- * contents and never its path, and the path is what gets bind-mounted.
+ * type is fixed, and a blank value keeps what is stored — which is the only way a password is
+ * changed without the browser ever being sent it.
  */
-export function AddSource({
-  drivers,
-  localHosts,
-  localhostNote,
+export function ConnectionForm({
   editing,
   onCancel,
   onConnect,
   onSave,
 }: {
-  drivers: DriverSpec[];
-  localHosts: string[];
-  localhostNote: string;
   /** The stored connection when editing, or undefined when connecting for the first time. */
   editing?: SourceRow;
-  onCancel: () => void;
+  /** Omitted by the wizard, which has nothing to cancel back to. */
+  onCancel?: () => void;
   onConnect: (body: {
     description: string;
     driver: string;
@@ -38,52 +113,43 @@ export function AddSource({
   }) => Promise<void>;
   onSave: (body: { description: string; values: Record<string, string> }) => Promise<void>;
 }) {
-  const [driver, setDriver] = useState(editing?.driver ?? "");
+  const [driver, setDriver] = useState(editing?.driver ?? "postgres");
   const [description, setDescription] = useState(editing?.description ?? "");
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [rows, setRows] = useState<Row[]>([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const spec = useMemo(() => drivers.find((d) => d.key === driver), [drivers, driver]);
-
-  // `drivers` is fetched, so the first render has none and no field would appear. Adopt
-  // the first one as soon as the list arrives.
+  // Editing shows the stored names with empty values, since blank is what the server reads as
+  // "unchanged" and the browser is never sent a value. Connecting starts from the template.
   useEffect(() => {
-    if (!driver && drivers.length) setDriver(drivers[0].key);
-  }, [driver, drivers]);
+    if (editing) {
+      const stored = editing.credential_keys.filter((env) => env !== "CUBEJS_DB_TYPE");
+      setRows(stored.map((env) => ({ env, value: "" })));
+    } else {
+      const known = WAREHOUSES.find((w) => w.key === driver);
+      const start: [string, string][] = known?.rows.length ? known.rows : [["", ""]];
+      setRows(start.map(([env, value]) => ({ env, value })));
+    }
+  }, [driver, editing]);
 
-  // Blank when editing: the form is never sent a stored value, and blank is what the
-  // server reads as "unchanged".
-  useEffect(() => {
-    setValues(
-      Object.fromEntries((spec?.fields ?? []).map((f) => [f.env, editing ? "" : f.default])),
-    );
-  }, [spec, editing]);
+  const set = (index: number, row: Partial<Row>) =>
+    setRows((prev) => prev.map((old, i) => (i === index ? { ...old, ...row } : old)));
 
-  // Which fields are needed is the server's answer (`required_envs`); whether a box is empty
-  // is the only part that has to be local. When editing, an empty field means "keep it".
-  const needed = spec?.required_envs ?? [];
-  const missing = editing
-    ? []
-    : needed
-        .filter((env) => !(values[env] ?? "").trim())
-        .map((env) => spec?.fields.find((f) => f.env === env)?.label || env);
-
-  const hostField = spec?.fields.find((f) => f.env === "CUBEJS_DB_HOST");
-  const hostIsLocal =
-    hostField && localHosts.includes((values.CUBEJS_DB_HOST ?? "").trim().toLowerCase());
+  const filled = rows.filter((row) => row.env.trim());
+  const local = filled.find((row) => LOCAL_HOSTS.includes(row.value.trim().toLowerCase()));
 
   const submit = async () => {
     setError("");
     setSaving(true);
     try {
-      if (editing) {
-        // Only what was typed: an untouched field must not be sent as empty.
-        const changed = Object.fromEntries(Object.entries(values).filter(([, v]) => v !== ""));
-        await onSave({ description, values: changed });
-      } else {
-        await onConnect({ description, driver, values });
-      }
+      const values = Object.fromEntries(
+        filled
+          // An untouched row when editing must not be sent as empty, or it would overwrite.
+          .filter((row) => !editing || row.value !== "")
+          .map((row) => [row.env.trim().toUpperCase(), row.value]),
+      );
+      if (editing) await onSave({ description, values });
+      else await onConnect({ description, driver, values });
     } catch (err) {
       setError(String(err instanceof Error ? err.message : err));
     } finally {
@@ -92,121 +158,140 @@ export function AddSource({
   };
 
   return (
-    <div className="drawer-scrim" onClick={onCancel}>
+    <>
+      <p className="drawer-blurb">
+        {editing
+          ? "Leave a value blank to keep what is stored. A deployment's environment is fixed when it is created, so this takes effect once you re-run it from a freshly downloaded file."
+          : "Stored in analyst.db, which is owner-readable only, and rendered into the compose file you run the deployment with."}
+      </p>
+
+      <label>
+        Description
+        <input
+          value={description}
+          placeholder="What lives in here"
+          onChange={(e) => setDescription(e.target.value)}
+        />
+        <small>Shown on this page. Not read by the agent.</small>
+      </label>
+
+      <label>
+        Warehouse
+        <select
+          value={driver}
+          disabled={Boolean(editing)}
+          onChange={(e) => setDriver(e.target.value)}
+        >
+          {WAREHOUSES.map((w) => (
+            <option key={w.key} value={w.key}>
+              {w.label}
+            </option>
+          ))}
+        </select>
+        <small>Becomes CUBEJS_DB_TYPE.</small>
+      </label>
+
+      <div className="envs">
+        <div className="envs-head">
+          <span>Connection variables</span>
+          <small>
+            Whatever {PREFIX}* variables this warehouse reads — Cube's driver documentation is
+            what lists them.
+          </small>
+        </div>
+
+        {rows.map((row, i) => (
+          <div className="env-row" key={i}>
+            <input
+              className="env-name"
+              value={row.env}
+              placeholder={`${PREFIX}HOST`}
+              spellCheck={false}
+              autoCapitalize="characters"
+              onChange={(e) => set(i, { env: e.target.value })}
+            />
+            <input
+              className="env-value"
+              type={secret(row.env) ? "password" : "text"}
+              value={row.value}
+              placeholder={editing && row.env ? "unchanged" : ""}
+              spellCheck={false}
+              autoComplete={secret(row.env) ? "new-password" : "off"}
+              onChange={(e) => set(i, { value: e.target.value })}
+            />
+            <button
+              className="env-drop"
+              title="Remove"
+              onClick={() => setRows((prev) => prev.filter((_, at) => at !== i))}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+
+        <button className="env-add" onClick={() => setRows((prev) => [...prev, { env: "", value: "" }])}>
+          + Add a variable
+        </button>
+      </div>
+
+      {local && (
+        <div className="nudge">
+          A database on this machine is host.docker.internal from inside the container.
+          <button
+            onClick={() =>
+              setRows((prev) =>
+                prev.map((row) =>
+                  row === local ? { ...row, value: "host.docker.internal" } : row,
+                ),
+              )
+            }
+          >
+            Use host.docker.internal
+          </button>
+        </div>
+      )}
+
+      <p className="drawer-blurb">
+        {editing
+          ? "The deployment reads these from the file it was started with, so a change here is applied by re-running it from a freshly downloaded one — a container's environment cannot be edited in place."
+          : "These go into the compose file you run the deployment with, here or on a server. Nothing starts yet."}
+      </p>
+
+      {error && <p className="drawer-error">{error}</p>}
+
+      <footer>
+        {onCancel && <button onClick={onCancel}>Cancel</button>}
+        <button
+          className="primary"
+          disabled={saving || (!editing && filled.length === 0)}
+          onClick={() => void submit()}
+        >
+          {saving ? "Saving…" : editing ? "Save" : "Store the connection"}
+        </button>
+      </footer>
+    </>
+  );
+}
+
+/**
+ * The same form as a drawer, which is how the data page opens it.
+ *
+ * The split exists so the wizard can render the fields inline without a second copy of them:
+ * what a valid connection is lives in `ConnectionForm`, and this is only the chrome around it.
+ */
+export function AddSource(
+  props: React.ComponentProps<typeof ConnectionForm> & { onCancel: () => void },
+) {
+  return (
+    <div className="drawer-scrim" onClick={props.onCancel}>
       <aside className="drawer" onClick={(e) => e.stopPropagation()}>
         <header>
-          <h2>{editing ? "Edit the connection" : "Connect a database"}</h2>
-          <button className="icon" onClick={onCancel} title="Close">
+          <h2>{props.editing ? "Edit the connection" : "Connect a database"}</h2>
+          <button className="icon" onClick={props.onCancel} title="Close">
             ×
           </button>
         </header>
-
-        <p className="drawer-blurb">
-          {editing
-            ? "Leave a field blank to keep what is stored. A container's environment is fixed when it is created, so this takes effect the next time Connect runs."
-            : "One Cube container, started from what you type here. Nothing is written to disk — credentials live in analyst.db, which is owner-readable only."}
-        </p>
-
-        <label>
-          Description
-          <input
-            value={description}
-            placeholder="What lives in here"
-            onChange={(e) => setDescription(e.target.value)}
-          />
-          <small>Shown on this page. Not read by the agent.</small>
-        </label>
-
-        <label>
-          Database
-          <select
-            value={driver}
-            disabled={Boolean(editing)}
-            onChange={(e) => setDriver(e.target.value)}
-          >
-            {drivers.map((d) => (
-              <option key={d.key} value={d.key}>
-                {d.label}
-                {d.extracts_tables ? "" : " — no table extraction yet"}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {spec?.fields.map((field) =>
-          field.boolean ? (
-            <label key={field.env} className="check">
-              <input
-                type="checkbox"
-                checked={(values[field.env] ?? "false") === "true"}
-                onChange={(e) =>
-                  setValues((v) => ({ ...v, [field.env]: String(e.target.checked) }))
-                }
-              />
-              {field.label}
-            </label>
-          ) : (
-            <label key={field.env}>
-              {field.label}
-              {!needed.includes(field.env) && <span className="optional"> optional</span>}
-              <input
-                type={field.secret ? "password" : "text"}
-                value={values[field.env] ?? ""}
-                placeholder={
-                  // A path field cannot say "unchanged": the credential holds the
-                  // container path, so the stored host path is the only useful prompt
-                  // and it comes from `mounts`, not from `credential_keys`.
-                  field.mount_to
-                    ? (editing?.mounts?.[field.mount_to] ?? "/Users/you/service-account.json")
-                    : editing && editing.credential_keys.includes(field.env)
-                      ? "unchanged"
-                      : ""
-                }
-                spellCheck={field.mount_to ? false : undefined}
-                autoComplete={field.secret ? "new-password" : "off"}
-                onChange={(e) => setValues((v) => ({ ...v, [field.env]: e.target.value }))}
-              />
-              {field.help && <small>{field.help}</small>}
-              {field.mount_to && (
-                <small>
-                  A path on the machine running this portal — typed, not chosen, because a
-                  file picker hands the browser the contents and never the location.
-                </small>
-              )}
-            </label>
-          ),
-        )}
-
-        {hostIsLocal && (
-          <div className="nudge">
-            {localhostNote}
-            <button
-              onClick={() => setValues((v) => ({ ...v, CUBEJS_DB_HOST: "host.docker.internal" }))}
-            >
-              Use host.docker.internal
-            </button>
-          </div>
-        )}
-
-        <p className="drawer-blurb">
-          {editing
-            ? "Cube reads these from its own environment file, so a change here is applied by re-running the compose file with the new one — a container's environment cannot be edited in place."
-            : "These go into an environment file you run Cube with, here or on a server. Nothing starts yet."}
-        </p>
-
-        {error && <p className="drawer-error">{error}</p>}
-
-        <footer>
-          <button onClick={onCancel}>Cancel</button>
-          <button
-            className="primary"
-            disabled={saving || missing.length > 0}
-            onClick={() => void submit()}
-            title={missing.length ? `Still needed: ${missing.join(", ")}` : undefined}
-          >
-            {saving ? "Saving…" : editing ? "Save" : "Store the connection"}
-          </button>
-        </footer>
+        <ConnectionForm {...props} />
       </aside>
     </div>
   );

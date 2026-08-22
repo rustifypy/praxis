@@ -11,11 +11,13 @@ import csv
 
 import pytest
 
+from analyst_agent import transcript as _transcript
 from analyst_agent.agent.session import QueryRecord, Session
 from analyst_agent.agent.tools import code as tools
+from analyst_agent.agent.tools import trace
+from analyst_agent.core import db
 from analyst_agent.core.events import Event, emit
 from analyst_agent.sandbox import Run
-from analyst_agent.transcript import ChatStore
 
 CHAT = "beefcafe0001"
 COLUMNS = [
@@ -53,8 +55,8 @@ def data_dir(tmp_path, monkeypatch):
 @pytest.fixture
 async def session(tmp_path, catalog, cube):
     """A Session with a stored result behind it, which is what `export_result` reads."""
-    store = ChatStore(tmp_path / "analyst.db")
-    await store.init()
+    await db.create_tables()
+    store = _transcript
     chat = await store.create("test", kind="question")
     result_id = await store.save_result(chat.id, "turn-1", COLUMNS, ROWS)
 
@@ -62,7 +64,6 @@ async def session(tmp_path, catalog, cube):
         catalog=catalog,
         client=cube,
         grounding=None,
-        store=store,
         chat_id=CHAT,
         turn_id="turn-1",
     )
@@ -82,9 +83,16 @@ async def session(tmp_path, catalog, cube):
 
 @pytest.fixture
 def events(monkeypatch):
-    """What the tools say. Collected here; one test below leaves `emit` alone instead."""
+    """What the tools say. Collected here; one test below leaves `emit` alone instead.
+
+    Two patch points because these tools author two kinds of event: `trace` writes every
+    tool_start and tool_end, and `code` writes `output` and `approval` itself — neither of
+    which is a step's frame.
+    """
     captured: list[dict] = []
-    monkeypatch.setattr(tools, "emit", lambda event: captured.append(event.model_dump()))
+    collect = lambda event: captured.append(event.model_dump())  # noqa: E731
+    monkeypatch.setattr(trace, "emit", collect)
+    monkeypatch.setattr(tools, "emit", collect)
     return captured
 
 
@@ -123,7 +131,7 @@ class FakeSandbox:
 
     async def upload(self, chat_id, filename, data):
         self.uploaded.append((filename, data))
-        return f"uploads/{filename}"
+        return {"path": f"uploads/{filename}"}
 
 
 @pytest.fixture

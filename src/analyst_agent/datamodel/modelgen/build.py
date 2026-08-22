@@ -40,7 +40,7 @@ def primary_key_dimension(table: Table) -> dict | None:
             "primary_key": True,
             "public": False,
         }
-    parts = f", '{KEY_SEPARATOR}', ".join(f"{{CUBE}}.{c}" for c in table.primary_key)
+    parts = f", '{KEY_SEPARATOR}', ".join(f"{{CUBE}}.{column}" for column in table.primary_key)
     return {
         "name": SYNTHETIC_KEY,
         "sql": f"CONCAT({parts})",
@@ -52,32 +52,32 @@ def primary_key_dimension(table: Table) -> dict | None:
 
 def joins(table: Table, schema: Schema, notes: list[str]) -> list[dict]:
     out = []
-    for fk in table.foreign_keys:
-        target = schema.table(fk.ref_table)
+    for foreign_key in table.foreign_keys:
+        target = schema.table(foreign_key.ref_table)
         if target is None:
-            notes.append(f"{table.name} -> {fk.ref_table}: table not in this schema")
+            notes.append(f"{table.name} -> {foreign_key.ref_table}: table not in this schema")
             continue
-        if fk.ref_table == table.name:
+        if foreign_key.ref_table == table.name:
             # A cube cannot join to itself under its own name; that needs an alias cube.
-            notes.append(f"{table.name} -> {fk.ref_table}: self-referencing join skipped")
+            notes.append(f"{table.name} -> {foreign_key.ref_table}: self-referencing join skipped")
             continue
         if not target.primary_key:
-            notes.append(f"{table.name} -> {fk.ref_table}: target has no primary key")
+            notes.append(f"{table.name} -> {foreign_key.ref_table}: target has no primary key")
             continue
         condition = " AND ".join(
-            f"{{CUBE}}.{col} = {{{fk.ref_table}}}.{ref}"
-            for col, ref in zip(fk.columns, fk.ref_columns, strict=False)
+            f"{{CUBE}}.{col} = {{{foreign_key.ref_table}}}.{ref}"
+            for col, ref in zip(foreign_key.columns, foreign_key.ref_columns, strict=False)
         )
-        out.append({"name": fk.ref_table, "sql": condition, "relationship": "many_to_one"})
+        out.append({"name": foreign_key.ref_table, "sql": condition, "relationship": "many_to_one"})
     return out
 
 
 def dimensions(table: Table) -> list[dict]:
     """Every non-key column. Key columns are join plumbing, not slicing dimensions."""
     return [
-        {"name": c.name, "sql": c.name, "type": c.type}
-        for c in table.columns
-        if c.name not in table.key_columns
+        {"name": column.name, "sql": column.name, "type": column.type}
+        for column in table.columns
+        if column.name not in table.key_columns
     ]
 
 
@@ -105,13 +105,15 @@ def emit_cubes(schema: Schema) -> Cubes:
     out = Cubes()
     for table in schema.tables:
         body = cube(table, schema, out.notes)
-        if "joins" in body and not any(d.get("primary_key") for d in body.get("dimensions", [])):
+        if "joins" in body and not any(
+            dimension.get("primary_key") for dimension in body.get("dimensions", [])
+        ):
             # Cube refuses to compile this combination — drop the joins rather than ship it.
             out.notes.append(f"{table.name}: joins dropped, no primary key available")
             body.pop("joins")
         out.bodies[table.name] = body
 
-    composite = [t.name for t in schema.tables if t.has_composite_key]
+    composite = [table.name for table in schema.tables if table.has_composite_key]
     if composite:
         out.notes.append(
             f"synthesised a concatenated key for {', '.join(composite)} — Cube allows one "
@@ -154,7 +156,7 @@ class Menu:
     """'cube.dimension' -> a few real values."""
 
     def for_cube(self, name: str) -> list[MeasureCandidate]:
-        return [m for m in self.measures if m.cube == name]
+        return [measure for measure in self.measures if measure.cube == name]
 
 
 def measure_candidates(schema: Schema) -> list[MeasureCandidate]:
@@ -174,7 +176,7 @@ def measure_candidates(schema: Schema) -> list[MeasureCandidate]:
 
 
 def _public_members(table: Table) -> list[str]:
-    return [c.name for c in table.columns if c.name not in table.key_columns]
+    return [column.name for column in table.columns if column.name not in table.key_columns]
 
 
 def join_paths(schema: Schema, root: Table, depth: int = MAX_PATH_DEPTH) -> dict[str, list[str]]:
@@ -185,10 +187,10 @@ def join_paths(schema: Schema, root: Table, depth: int = MAX_PATH_DEPTH) -> dict
         table, path, level = frontier.pop()
         if level >= depth:
             continue
-        for fk in table.foreign_keys:
-            if fk.ref_table == table.name:
+        for foreign_key in table.foreign_keys:
+            if foreign_key.ref_table == table.name:
                 continue
-            target = schema.table(fk.ref_table)
+            target = schema.table(foreign_key.ref_table)
             if target is None or not target.primary_key:
                 continue
             next_path = f"{path}.{target.name}"
@@ -202,7 +204,10 @@ def join_paths(schema: Schema, root: Table, depth: int = MAX_PATH_DEPTH) -> dict
 def view_roots(schema: Schema) -> list[ViewRoot]:
     """Fact tables first: nothing points at them, so they cannot fan out."""
     referenced = {
-        fk.ref_table for t in schema.tables for fk in t.foreign_keys if fk.ref_table != t.name
+        foreign_key.ref_table
+        for table in schema.tables
+        for foreign_key in table.foreign_keys
+        if foreign_key.ref_table != table.name
     }
     out = [
         ViewRoot(
@@ -211,7 +216,7 @@ def view_roots(schema: Schema) -> list[ViewRoot]:
             paths=join_paths(schema, table),
         )
         for table in schema.tables
-        if any(fk.ref_table != table.name for fk in table.foreign_keys)
+        if any(foreign_key.ref_table != table.name for foreign_key in table.foreign_keys)
     ]
     out.sort(key=lambda r: (not r.is_fact, -len(r.paths)))
     return out

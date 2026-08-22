@@ -1,14 +1,3 @@
-"""One session against Cube — which is reached **through the model store**, never directly.
-
-Cube's port is not published, so the store at `/cube/...` is the only door and this client holds
-the store's write token rather than a Cube JWT. The ref goes in `X-Model-Ref` and the store signs
-it: Cube's secret never reaches this process, which is one credential fewer here and the reason
-`CUBEJS_DEV_MODE` disabling JWT verification is not something the host can exploit.
-
-Every call goes through here, so a caller cannot forget to authenticate. The paths are Cube's own
-and are forwarded verbatim, so `/readyz` and `/v1/load` differ only in what they are.
-"""
-
 import asyncio
 import time
 from dataclasses import dataclass, field
@@ -16,20 +5,15 @@ from dataclasses import dataclass, field
 import httpx
 
 from ..core.config import settings
-from ..core.deployment import MAIN, Deployment, current
+from ..core.deployment import CUBE_PREFIX, MAIN, Deployment, current
 from .catalog import Catalog
 from .schema import CubeQuery
 
-CUBE_PREFIX = "/cube"
-"""Where the store proxies Cube. One constant, because the store's route and this base URL are
-the two halves of one path and a mismatch is a 404 with nothing to say."""
 REF_HEADER = "X-Model-Ref"
-"""Which model to compile. The store signs it into the token it mints — this process never
-holds a credential that could name a ref by itself."""
-
-# How stale a served catalog may be. Bounded staleness rather than invalidation, because
-# nothing watches Cube and the cache that had to be invalidated by hand was keyed on a global.
 CATALOG_TTL_S = 30.0
+
+# Cube-bound, so all of these stay under the store's proxy cap: above it they can never elapse,
+# and a slow query arrives as a 502 instead. Same rule for `settings.query_timeout_s`.
 ADMIN_TIMEOUT_S = 10.0
 POLL_EVERY_S = 2.0
 POLL_TIMEOUT_S = 90.0
@@ -48,27 +32,16 @@ class CompileResult:
 class LoadResult:
     rows: list[dict]
     duration_ms: int
+    # The dateRange Cube resolved, per time dimension. Relative ranges resolve at execution
+    # time, so this is the only thing saying whether a refresh moved a tile's window.
     resolved_ranges: dict[str, list[str]] = field(default_factory=dict)
-    """The dateRange Cube resolved, per time dimension. Relative ranges resolve at execution
-    time, so this is the only thing that says whether a refresh moved a tile's window."""
 
 
 class CubeError(RuntimeError):
-    def __init__(self, message: str, *, status: int | None = None, cause: Exception | None = None):
-        super().__init__(message)
-        self.status = status
-        self.cause = cause
-
-    @property
-    def unreachable(self) -> bool:
-        """Nothing answered at all, as against Cube answering badly. `health.serving` reports a
-        stopped container differently from one serving no model."""
-        return self.cause is not None
+    pass
 
 
 class CubeClient:
-    """Cube, for as long as you hold it. Whoever constructs it closes it."""
-
     def __init__(
         self,
         root: str,
@@ -96,9 +69,6 @@ class CubeClient:
         ref: str = MAIN,
         timeout: float | None = None,
     ) -> "CubeClient":
-        """`ref` selects the model Cube compiles for this session, so a client is per-ref rather
-        than shared. It reaches Cube through the store, which is the only thing that can sign it
-        into a Cube token."""
         return cls(
             f"{deployment.store_url.rstrip('/')}{CUBE_PREFIX}{settings.cube_base_path}",
             deployment.store_token,
@@ -124,7 +94,6 @@ class CubeClient:
         await self._client.aclose()
 
     async def catalog(self, *, refresh: bool = False) -> Catalog:
-        """The served model. Cached for `CATALOG_TTL_S`; concurrent callers wait on one read."""
         async with self._lock:
             age = time.monotonic() - self._catalog_at
             if refresh or self._catalog is None or age >= CATALOG_TTL_S:
@@ -133,8 +102,8 @@ class CubeClient:
             return self._catalog
 
     async def compile(self, query: CubeQuery) -> CompileResult:
-        """Tier 3. Cube generates SQL without executing it. A query Cube rejects comes back as
-        `ok=False` — that is the gate's business; only an unreachable container raises."""
+        # Tier 3. A query Cube rejects comes back as ok=False — that is the gate's business;
+        # only an unreachable container raises.
         status, body, text = await self._send("POST", "/v1/sql", json={"query": query.to_payload()})
         if status != 200 or _error_of(body):
             return CompileResult(ok=False, error=_error_text(body, text, status))
@@ -144,7 +113,6 @@ class CubeClient:
         return CompileResult(ok=True, sql=head, params=params)
 
     async def load(self, query: CubeQuery) -> LoadResult:
-        """Tier 4."""
         started = time.perf_counter()
         status, body, text = await self._send(
             "POST", "/v1/load", json={"query": query.to_payload()}
@@ -152,14 +120,14 @@ class CubeClient:
         # Cube reports some failures as 200 with an `error` key and no `data`, so reading rows off
         # such a body turns a failed query into one that matched nothing.
         if status != 200 or _error_of(body):
-            raise CubeError(_error_text(body, text, status), status=status)
+            raise CubeError(_error_text(body, text, status))
 
         # The window Cube resolved, read off the query it echoes back. Defensively: a tile
         # that cannot label its window is cosmetic, and raising here would fail the query.
         ranges: dict[str, list[str]] = {}
-        for td in (body.get("query") or {}).get("timeDimensions") or []:
-            member = td.get("dimension")
-            window = td.get("dateRange")
+        for time_dimension in (body.get("query") or {}).get("timeDimensions") or []:
+            member = time_dimension.get("dimension")
+            window = time_dimension.get("dateRange")
             if member and isinstance(window, list) and len(window) == 2:
                 ranges[str(member)] = [str(window[0]), str(window[1])]
 
@@ -172,9 +140,8 @@ class CubeClient:
     async def wait_until_compiled(
         self, *, timeout: float = POLL_TIMEOUT_S, every: float = POLL_EVERY_S
     ) -> Catalog:
-        """Poll until Cube serves a model, then return it. A booting container refuses
-        connections and answers slowly, so neither is terminal — a compile error is.
-        """
+        # A booting container refuses connections and answers slowly, so neither is terminal;
+        # a compile error is.
         deadline = asyncio.get_running_loop().time() + timeout
         last = "no response"
         while asyncio.get_running_loop().time() < deadline:
@@ -199,12 +166,10 @@ class CubeClient:
     async def _meta(self, *, timeout: float | None = None) -> dict:
         status, body, text = await self._send("GET", "/v1/meta", timeout=timeout)
         if status != 200 or _error_of(body):
-            raise CubeError(_error_text(body, text, status), status=status)
+            raise CubeError(_error_text(body, text, status))
         return body
 
     def _headers(self) -> dict[str, str]:
-        """The store's token and the ref. No expiry to manage: the Cube JWT is minted per request
-        on the other side, which is what removed the re-mint window this used to carry."""
         headers = {REF_HEADER: self._ref}
         if self._token:
             headers["Authorization"] = f"Bearer {self._token}"
@@ -213,28 +178,25 @@ class CubeClient:
     async def _send(
         self, method: str, path: str, *, json: dict | None = None, timeout: float | None = None
     ) -> tuple[int, dict, str]:
-        """Status, parsed body, raw text. Transport failures become `CubeError` so no caller has
-        to know that `httpx.RequestError` does not subclass `OSError`."""
+        # Transport failures become CubeError so no caller has to know that
+        # `httpx.RequestError` does not subclass OSError.
         try:
-            r = await self._client.request(
+            response = await self._client.request(
                 method,
                 path,
                 json=json,
                 headers=self._headers(),
                 timeout=timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT,
             )
+            body = response.json()
         except httpx.RequestError as exc:
-            raise CubeError(f"{self._root} did not answer: {exc}", cause=exc) from exc
-        try:
-            body = r.json()
+            raise CubeError(f"{self._root} did not answer: {exc}") from exc
         except ValueError:
             body = {}
-        return r.status_code, body if isinstance(body, dict) else {}, r.text
+        return response.status_code, body if isinstance(body, dict) else {}, response.text
 
 
 async def open_client(*, ref: str = MAIN, timeout: float | None = None) -> CubeClient:
-    """A client on the configured deployment, read fresh from the row. What the callers too
-    deep to be handed one use, so an edited address leaves no stale copy anywhere."""
     deployment = await current()
     if deployment is None or not deployment.store_url:
         raise CubeError("no Cube deployment is configured")
@@ -242,7 +204,6 @@ async def open_client(*, ref: str = MAIN, timeout: float | None = None) -> CubeC
 
 
 async def served_catalog(*, ref: str = MAIN, timeout: float = ADMIN_TIMEOUT_S) -> Catalog:
-    """The served model, read once. The admin screens want exactly this and nothing else."""
     async with await open_client(ref=ref, timeout=timeout) as cube:
         return await cube.catalog()
 

@@ -1,14 +1,3 @@
-"""Four-tier query gate.
-
-1. schema    — pydantic, in CubeQuery
-2. semantic  — local, against the cached catalog (this module)
-3. compile   — POST /v1/sql, Cube's own compiler, nothing executed
-4. execute   — POST /v1/load
-
-Failures return text for the agent to act on, never exceptions. `run` is all four tiers;
-`check`/`execute` expose the seam for callers that must compile without executing.
-"""
-
 from dataclasses import dataclass, field
 
 from pydantic import ValidationError
@@ -27,47 +16,43 @@ class GateResult:
     rows: list[dict] | None = None
     duration_ms: int | None = None
     query: CubeQuery | None = None
-    """The parsed, limit-capped query, set once tier 1 passes. `execute` reads it rather than
-    re-parsing the payload."""
     resolved_ranges: dict[str, list[str]] = field(default_factory=dict)
-    """Tier 4 only — see `client.LoadResult.resolved_ranges`."""
 
     def as_message(self) -> str:
         parts = []
         if self.errors:
-            parts.append("QUERY REJECTED:\n" + "\n".join(f"- {e}" for e in self.errors))
+            parts.append("QUERY REJECTED:\n" + "\n".join(f"- {error}" for error in self.errors))
         if self.warnings:
-            parts.append("Warnings:\n" + "\n".join(f"- {w}" for w in self.warnings))
+            parts.append("Warnings:\n" + "\n".join(f"- {warning}" for warning in self.warnings))
         return "\n\n".join(parts)
 
 
 def parse(payload: dict) -> tuple[CubeQuery | None, list[str]]:
-    """Tier 1. A filter is a Filter or a FilterGroup, so pydantic reports failures for both;
-    the dead branch is dropped before it reaches the agent's retry.
-    """
+    # Tier 1.
     try:
         return CubeQuery.model_validate(payload), []
-    except ValidationError as e:
-        out: list[str] = []
-        for err in e.errors():
-            raw = [str(p) for p in err["loc"]]
-            path = [p for p in raw if not p.startswith("function-after[")]
-            # A leaf filter naming `member` was never going to satisfy FilterGroup;
-            # complaining that FilterGroup rejects `member` only misdirects the retry.
-            leaf_field = bool(path) and path[-1] in ("member", "operator", "values")
-            if leaf_field and "FilterGroup" in " ".join(raw):
+    except ValidationError as exc:
+        messages: list[str] = []
+        for error in exc.errors():
+            raw_path = [str(part) for part in error["loc"]]
+            path = [part for part in raw_path if not part.startswith("function-after[")]
+            # A filter is a Filter or a FilterGroup, so pydantic reports against both. A leaf
+            # naming `member` was never going to satisfy FilterGroup, and reporting that branch
+            # only misdirects the agent's retry.
+            names_leaf_field = bool(path) and path[-1] in ("member", "operator", "values")
+            if names_leaf_field and "FilterGroup" in " ".join(raw_path):
                 continue
-            text = f"{'.'.join(path)}: {err['msg']}" if path else err["msg"]
-            if text not in out:
-                out.append(text)
-        return None, out
+            text = f"{'.'.join(path)}: {error['msg']}" if path else error["msg"]
+            if text not in messages:
+                messages.append(text)
+        return None, messages
 
 
 def semantic_check(query: CubeQuery, catalog: Catalog) -> GateResult:
-    """Tier 2. Every check the cached catalog can answer, in one pass."""
+    # Tier 2 — every check the cached catalog can answer, in one pass. Both of these walk the
+    # filter tree, and several checks below want them.
     errors: list[str] = []
     warnings: list[str] = []
-    # Both walk the filter tree, and several checks below want them.
     referenced = query.referenced_members()
     leaf_filters = list(query.iter_filters())
 
@@ -87,52 +72,53 @@ def semantic_check(query: CubeQuery, catalog: Catalog) -> GateResult:
             doc = catalog.get(member_id)
             if doc and doc.kind != expected:
                 errors.append(f"'{member_id}' is a {doc.kind}, not a {expected}")
-    for td in query.timeDimensions:
-        doc = catalog.get(td.dimension)
+    for time_dimension in query.timeDimensions:
+        doc = catalog.get(time_dimension.dimension)
         if doc and doc.type != "time":
-            errors.append(f"timeDimensions.dimension '{td.dimension}' is type {doc.type}, not time")
+            errors.append(
+                f"timeDimensions.dimension '{time_dimension.dimension}' is type {doc.type}, "
+                "not time"
+            )
 
     # Is the filter operator legal for that member's kind and type?
-    for f in leaf_filters:
-        doc = catalog.get(f.member)
-        if doc and doc.valid_operators and f.operator not in doc.valid_operators:
+    for leaf in leaf_filters:
+        doc = catalog.get(leaf.member)
+        if doc and doc.valid_operators and leaf.operator not in doc.valid_operators:
             errors.append(
-                f"operator '{f.operator}' is invalid for {f.member} ({doc.kind}, {doc.type}). "
-                f"Valid: {', '.join(doc.valid_operators)}"
+                f"operator '{leaf.operator}' is invalid for {leaf.member} "
+                f"({doc.kind}, {doc.type}). Valid: {', '.join(doc.valid_operators)}"
             )
 
     # Recursive, so it stays a function.
     _check_where_having(query.filters, catalog, errors)
 
     # Does the time dimension offer the requested granularity?
-    for td in query.timeDimensions:
-        doc = catalog.get(td.dimension)
-        if doc and td.granularity and doc.granularities:
-            if td.granularity not in doc.granularities:
+    for time_dimension in query.timeDimensions:
+        doc = catalog.get(time_dimension.dimension)
+        if doc and time_dimension.granularity and doc.granularities:
+            if time_dimension.granularity not in doc.granularities:
                 errors.append(
-                    f"granularity '{td.granularity}' unavailable on {td.dimension}. "
-                    f"Available: {', '.join(doc.granularities)}"
+                    f"granularity '{time_dimension.granularity}' unavailable on "
+                    f"{time_dimension.dimension}. Available: {', '.join(doc.granularities)}"
                 )
 
     # Reaching across entities with no view covering them may not be joinable.
-    known = [m for m in referenced if catalog.get(m)]
-    cubes = {catalog.get(m).cube for m in known}
+    known = [member_id for member_id in referenced if catalog.get(member_id)]
+    cubes = {catalog.get(member_id).cube for member_id in known}
     if len(cubes) > 1 and not catalog.views_containing(known):
         warnings.append(
             f"members span {len(cubes)} entities ({', '.join(sorted(cubes))}) with no single "
             "view containing them all — verify they are joinable before trusting the result."
         )
 
-    for f in leaf_filters:
-        if f.operator in ("inDateRange", "notInDateRange"):
+    for leaf in leaf_filters:
+        if leaf.operator in ("inDateRange", "notInDateRange"):
             warnings.append(
-                f"'{f.operator}' on {f.member} blocks pre-aggregation matching. "
+                f"'{leaf.operator}' on {leaf.member} blocks pre-aggregation matching. "
                 "Prefer timeDimensions.dateRange."
             )
 
-    # `is not None`, so this fires on a limit the agent actually asked for. While the
-    # schema defaulted it, every query carried this warning and the prompt tells the
-    # agent to report warnings to the user.
+    # `is not None`, so this fires only on a limit the agent actually asked for.
     if query.limit is not None and not query.order:
         warnings.append(
             "limit set without order — results may be silently truncated. Set an explicit order."
@@ -141,7 +127,7 @@ def semantic_check(query: CubeQuery, catalog: Catalog) -> GateResult:
 
 
 async def check(payload: dict, catalog: Catalog, client: CubeClient, max_rows: int) -> GateResult:
-    """Tiers 1-3. An ok result carries the parsed query and Cube's SQL, and executed nothing."""
+    # Tiers 1-3. An ok result carries the parsed query and Cube's SQL, and executed nothing.
     query, errors = parse(payload)
     if query is None:
         return GateResult(ok=False, errors=errors)
@@ -150,7 +136,7 @@ async def check(payload: dict, catalog: Catalog, client: CubeClient, max_rows: i
     if not checked.ok:
         return checked
 
-    # Applied after semantic_check so the warning above sees what the agent asked for.
+    # After semantic_check, so the limit-without-order warning sees what the agent asked for.
     # An absent limit still caps at max_rows — the row ceiling is not optional.
     query.limit = max_rows if query.limit is None else min(query.limit, max_rows)
 
@@ -166,28 +152,27 @@ async def check(payload: dict, catalog: Catalog, client: CubeClient, max_rows: i
 
 
 async def execute(checked: GateResult, client: CubeClient) -> GateResult:
-    """Tier 4. Takes the `GateResult` so tiers 2-3's SQL and warnings survive into the
-    executed result rather than being compiled twice."""
+    # Tier 4. Takes the GateResult so tiers 2-3's SQL and warnings survive rather than being
+    # compiled a second time.
     if not checked.ok or checked.query is None:
         raise ValueError("execute() takes a GateResult that passed check()")
     try:
         loaded = await client.load(checked.query)
-    except CubeError as e:
-        return GateResult(ok=False, errors=[f"Execution failed: {e}"], sql=checked.sql)
-
-    return GateResult(
-        ok=True,
-        warnings=checked.warnings,
-        sql=checked.sql,
-        rows=loaded.rows,
-        duration_ms=loaded.duration_ms,
-        query=checked.query,
-        resolved_ranges=loaded.resolved_ranges,
-    )
+        return GateResult(
+            ok=True,
+            warnings=checked.warnings,
+            sql=checked.sql,
+            rows=loaded.rows,
+            duration_ms=loaded.duration_ms,
+            query=checked.query,
+            resolved_ranges=loaded.resolved_ranges,
+        )
+    except CubeError as exc:
+        return GateResult(ok=False, errors=[f"Execution failed: {exc}"], sql=checked.sql)
 
 
 async def run(payload: dict, catalog: Catalog, client: CubeClient, max_rows: int) -> GateResult:
-    """All four tiers. What a chat turn wants: one query, executed or explained."""
+    # All four tiers — what a chat turn wants: one query, executed or explained.
     checked = await check(payload, catalog, client, max_rows)
     if not checked.ok:
         return checked
@@ -195,8 +180,6 @@ async def run(payload: dict, catalog: Catalog, client: CubeClient, max_rows: int
 
 
 def _check_where_having(nodes: list[FilterNode], catalog: Catalog, errors: list[str]) -> None:
-    """Cube forbids dimension and measure filters in the same logical operator:
-    they compile to WHERE and HAVING respectively."""
     for node in nodes:
         if not isinstance(node, FilterGroup):
             continue
@@ -207,9 +190,9 @@ def _check_where_having(nodes: list[FilterNode], catalog: Catalog, errors: list[
                 if doc:
                     kinds.add(doc.kind)
         if {"measure", "dimension"} <= kinds:
-            op = "and" if node.and_ else "or"
+            operator = "and" if node.and_ else "or"
             errors.append(
-                f"'{op}' group mixes measure and dimension filters — Cube forbids this "
+                f"'{operator}' group mixes measure and dimension filters — Cube forbids this "
                 "(WHERE vs HAVING). Split them into separate top-level filters."
             )
         _check_where_having(node.children, catalog, errors)

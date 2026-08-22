@@ -5,7 +5,7 @@ The workspace only ever talks to two URLs from here: Cube's, and the store's.
 
 | container | what it is |
 |---|---|
-| `cube` | stock `cubejs/cube`, configured by `cube.js` to pull its data model from the store |
+| `cube` | ours (`cube/Dockerfile`): `cubejs/cube` with `cube.js` baked in, pulling the model from the store |
 | `model-store` | the data model: files, refs and history, over HTTP. Built from `store/` |
 | `cubestore` | Cube's queue and cache driver. Production mode refuses to run a query without it |
 

@@ -1,6 +1,7 @@
 import pytest
 
-from analyst_agent.dashboards.store import DashboardStore
+from analyst_agent.core import db
+from analyst_agent.dashboards import store as dashboards
 
 QUERY = {"measures": ["revenue.net_revenue"], "dimensions": ["revenue.status"]}
 CHART = {"type": "bar", "x": "revenue.status", "y": ["revenue.net_revenue"]}
@@ -8,10 +9,9 @@ COLUMNS = [{"id": "revenue.status", "label": "Status", "kind": "dimension"}]
 
 
 @pytest.fixture
-async def store(tmp_path):
-    s = DashboardStore(tmp_path / "analyst.db")
-    await s.init()
-    return s
+async def store():
+    await db.create_tables()
+    return dashboards
 
 
 @pytest.fixture
@@ -179,7 +179,7 @@ async def test_deleting_a_dashboard_takes_its_tiles_runs_and_results(store, boar
     await store.save_tile_result(run.id, tile.id, COLUMNS, [{"x": 1}])
     await store.save_layout(board.id, {"order": [tile.id]})
 
-    await store.delete(board.id)
+    await store.delete_dashboard(board.id)
 
     assert await store.get(board.id) is None
     assert await store.tiles(board.id, include_deleted=True) == []

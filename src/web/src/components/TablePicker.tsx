@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import * as api from "../sources";
-import type { CatalogInfo, Closure, SchemaInfo } from "../sources";
+import type { TableCache, Closure, SchemaInfo } from "../sources";
 
 /**
  * Choose a schema and the tables to model.
@@ -20,7 +20,7 @@ export function TablePicker({
   onRun,
   onReread,
 }: {
-  catalog: CatalogInfo;
+  catalog: TableCache;
   busy: boolean;
   /** Later stages this run would throw away — their output is rewritten from scratch. */
   discards: string[];

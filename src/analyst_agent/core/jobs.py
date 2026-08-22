@@ -1,9 +1,3 @@
-"""One job at a time, held in memory, watched over SSE.
-
-Nothing here knows what a job *is*: `web.jobs` hands it a coroutine, and the model pipeline
-is merely today's only caller.
-"""
-
 import asyncio
 import contextlib
 import fcntl
@@ -16,18 +10,15 @@ from dataclasses import dataclass, field
 from .config import settings
 
 BUFFER = 400
-"""Events kept for a reconnecting browser. A step emits a handful; describing four
-hundred tables emits four hundred, and only the tail is worth replaying."""
 LOCK_NAME = "jobs.lock"
 
 
 class Busy(RuntimeError):
-    """Another job holds the lock. Carries what it is, so the message can say so."""
+    pass
 
 
 @contextlib.contextmanager
 def hold(description: str):
-    """Take the machine-wide job lock, or raise `Busy` naming the current holder."""
     path = settings.dir_path / LOCK_NAME
     path.parent.mkdir(parents=True, exist_ok=True)
     handle = path.open("a+")
@@ -49,11 +40,7 @@ def hold(description: str):
 
 @dataclass
 class JobLine:
-    """One line of a job's narration. `JobLine` and not `Event` — `core.events.Event` is a
-    turn's wire format, and `asyncio.Event` is used in this same file."""
-
     type: str
-    """job_start | step_start | progress | log | step_end | job_end"""
     data: dict = field(default_factory=dict)
     seq: int = 0
     at: float = 0.0
@@ -63,7 +50,6 @@ class JobLine:
 class Job:
     id: str
     steps: list[str]
-    """Which steps this job will run, in order, so the UI can draw the whole path."""
     started_at: float
     events: list[JobLine] = field(default_factory=list)
     done: bool = False
@@ -81,13 +67,11 @@ class Job:
             "started_at": self.started_at,
             "done": self.done,
             "error": self.error,
-            "events": [e.__dict__ for e in self.events],
+            "events": [line.__dict__ for line in self.events],
         }
 
 
 class Runner:
-    """Owns the current job. One instance on the app, created at startup."""
-
     def __init__(self):
         self.job: Job | None = None
         self._seq = 0
@@ -96,45 +80,43 @@ class Runner:
     def busy(self) -> bool:
         return self.job is not None and not self.job.done
 
-    def emit(self, type: str, **data) -> JobLine:
-        """Append an event and hand it to every watcher. Never blocks on a slow reader."""
+    def emit(self, line_type: str, **data) -> JobLine:
         job = self.job
         if job is None:
-            return JobLine(type=type, data=data)
+            return JobLine(type=line_type, data=data)
         self._seq += 1
-        event = JobLine(type=type, data=data, seq=self._seq, at=time.time())
-        job.events.append(event)
+        line = JobLine(type=line_type, data=data, seq=self._seq, at=time.time())
+        job.events.append(line)
         del job.events[:-BUFFER]
         for queue in list(job.watchers):
             try:
-                queue.put_nowait(event)
+                queue.put_nowait(line)
             except asyncio.QueueFull:
                 pass
-        return event
+        return line
 
     async def watch(self) -> AsyncIterator[JobLine]:
-        """Every event of the current job: the buffer first, then live ones."""
         job = self.job
         if job is None:
             return
         queue: asyncio.Queue = asyncio.Queue(maxsize=BUFFER)
-        # Registered before the buffer is read, so nothing emitted in between is lost.
-        # That can duplicate an event, which `seen` filters on the way out.
+        # Registered before the buffer is read, so nothing emitted in between is lost. That
+        # can duplicate a line, which `last_seen` filters on the way out.
         job.watchers.add(queue)
         try:
-            seen = 0
-            for event in list(job.events):
-                seen = event.seq
-                yield event
+            last_seen = 0
+            for line in list(job.events):
+                last_seen = line.seq
+                yield line
             if job.done:
                 return
             while True:
-                event = await queue.get()
-                if event.seq <= seen:
+                line = await queue.get()
+                if line.seq <= last_seen:
                     continue
-                seen = event.seq
-                yield event
-                if event.type == "job_end":
+                last_seen = line.seq
+                yield line
+                if line.type == "job_end":
                     return
         finally:
             job.watchers.discard(queue)
@@ -150,14 +132,12 @@ class Runner:
         steps: list[str],
         work: Callable[[Job], Awaitable[None]],
     ) -> Job:
-        """Take the lock, publish a Job, and run `work` in the background."""
         if self.busy:
             raise Busy(self.job.current or "starting")
 
-        description = ", ".join(steps)
-        # Taken here, before returning, so a second request is refused rather than
+        # Entered manually, before returning, so a second request is refused rather than
         # queued behind a lock it would block the event loop waiting for.
-        guard = hold(description)
+        guard = hold(", ".join(steps))
         guard.__enter__()
 
         job = Job(id=uuid.uuid4().hex, steps=list(steps), started_at=time.time())

@@ -45,8 +45,8 @@ make install
 make web                      # build the frontend, then open the portal
 ```
 
-Then: **Data** in the rail → Connect a database. The portal hands you an environment file;
-save it as `services/semantic/.env`, run `docker compose up -d` there, and paste its address back.
+Then: **Data** in the rail → Connect a database. The portal hands you a compose file per
+service; save each one anywhere, `docker compose up -d`, and paste the addresses back.
 Then walk the four stages, and the Model panel shows what Cube compiled. Switch to **Chat** and
 ask questions; the header there names the database you are querying and how much of it is
 modelled. **Boards** sits between the two — pin a question you'll ask again and it becomes a
@@ -128,15 +128,14 @@ kind it is from what Cube actually resolved.
 
 ## The deployment
 
-**The portal runs nothing.** It holds the credentials, mints the secrets, and renders an
-environment file; you run the deployment wherever you want it and tell the portal its address.
-The only container the portal starts is the code sandbox.
+**The portal runs nothing at all.** It holds the credentials, mints the secrets, and renders a
+compose file; you run each deployment wherever you want it and tell the portal its address.
 
-`services/semantic/` is that deployment — one hand-written compose file, three services:
+`services/semantic/` is one of them — one compose file, three services:
 
 | container | what it is |
 |---|---|
-| `cube` | stock `cubejs/cube`, configured by `cube.js` to pull its data model over HTTP |
+| `cube` | ours: `cubejs/cube` with `cube.js` baked in, which pulls the data model over HTTP |
 | `model-store` | the data model — files, refs and history, as a git repo behind an API — **and the gateway**: it proxies Cube and signs its tokens |
 | `cubestore` | Cube's queue and cache driver. Production mode refuses to query without it |
 
@@ -146,9 +145,10 @@ here: the store's. **Cube's port is not published** — queries go through the s
 file and there is exactly one authenticated door in. The code sandbox is a separate deployment
 in `services/sandbox/`, optional and sharing nothing with this one.
 **One deployment, one row in the `deployment` table** — `id = 1` is a CHECK, not a convention —
-holding the credentials, the API secret and the store's tokens. `deployenv.render` is the one
-place that decides what a deployment needs; the compose file is served verbatim and never
-generated.
+holding the credentials, the API secret and the store's tokens. `deployenv` is the one place
+that decides what a deployment needs, and it renders the hand-over **from this same compose
+file** — values substituted, `build:` stripped — so what you run is not a second copy that can
+drift from the tested one. There is no `.env`, and nothing is written to disk.
 
 Connecting is two steps, because the portal cannot do the middle one:
 
