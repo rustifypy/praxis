@@ -178,7 +178,7 @@ async def ref_diff(ref: str) -> dict:
         diff = await store.diff(ref)
     # Every ref is compiled by the same Cube, so impact is answerable for any of them — there is
     # no "check it out first" left.
-    report = await controller.impact(ref) if ref != MAIN else None
+    report = await controller.broken_by(ref) if ref != MAIN else None
     return {
         "ref": ref,
         "changed": diff.get("changed") or [],
@@ -209,7 +209,7 @@ async def merge_ref(
     """
     state.idle(request.app)
     controller.editable(ref)
-    report = await controller.impact(ref)
+    report = await controller.broken_by(ref)
     if not report.ok and not force:
         raise HTTPException(409, report.as_message())
     try:

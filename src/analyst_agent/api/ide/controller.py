@@ -34,7 +34,9 @@ async def store():
         raise HTTPException(502, str(exc)) from None
 
 
-async def impact(ref: str) -> impact.Impact:
+async def broken_by(ref: str) -> impact.Impact:
+    """Which saved queries this ref would break. Not `impact` — that is the module it calls, and
+    a function of that name shadows it from inside its own body."""
     try:
         return impact.check(await served_catalog(ref=ref), await boards.saved_queries())
     except StoreError as exc:

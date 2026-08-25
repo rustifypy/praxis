@@ -741,6 +741,37 @@ async def test_the_served_model_still_answers_when_cube_is_down(api, monkeypatch
     assert body["unloaded"] == ["cubes/orders.yml"], "a readable file is not reported as lost"
 
 
+async def test_the_ref_diff_reports_what_would_break(
+    api, monkeypatch, model_store, opening, catalog
+):
+    """Drives the route rather than the workspace, because the two things it needs — the served
+    catalog and the saved queries — are read in the controller and nothing else covered that.
+
+    The regression this exists for: the helper was called `impact` and so shadowed the `impact`
+    module it calls, from inside its own body. Ruff cannot see it, the unit tests never called it,
+    and the route answered 500 for every branch anyone asked about.
+    """
+    from analyst_agent.api.ide import controller
+
+    store = model_store(main={"cubes/orders.yml": "cubes: []"}, feature={})
+
+    async def diff(ref, base="main"):
+        return {"changed": [{"status": "A", "path": "views/revenue.yml"}], "patch": "diff --git…"}
+
+    async def served(ref="main", **kwargs):
+        return catalog
+
+    store.diff = diff
+    monkeypatch.setattr(controller, "open_store", opening(store))
+    monkeypatch.setattr(controller, "served_catalog", served)
+
+    answered = await api.get("/api/ide/refs/feature/diff")
+    assert answered.status_code == 200, answered.text
+    body = answered.json()
+    assert body["changed"] == [{"status": "A", "path": "views/revenue.yml"}]
+    assert body["impact"] == {"checked": 0, "broken": []}
+
+
 async def test_the_ref_list_counts_changed_files_and_never_counts_main(
     api, monkeypatch, model_store, opening
 ):
