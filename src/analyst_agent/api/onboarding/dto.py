@@ -1,4 +1,4 @@
-"""What the pipeline sends and receives.
+"""What onboarding sends and receives: the credentials, the addresses, and each stage.
 
 Two of these mirror a shape another tier builds, and the reason is different in each case:
 
@@ -99,3 +99,25 @@ class Cancelled(BaseModel):
     """Whether there was a job to cancel. False is not an error — the button may be late."""
 
     cancelled: bool
+
+
+# --- connecting --------------------------------------------------------------
+
+
+class NewConnection(BaseModel):
+    description: str = ""
+    driver: str
+    values: dict[str, str] = Field(default_factory=dict)
+
+
+class EditConnection(BaseModel):
+    description: str | None = None
+    values: dict[str, str] = Field(default_factory=dict)
+
+
+class Addresses(BaseModel):
+    store_url: str = ""
+    sandbox_url: str = ""
+
+
+# --- the body every route here answers with ----------------------------------

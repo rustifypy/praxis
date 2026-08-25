@@ -12,7 +12,7 @@ running deployment rather than about a directory that happens to sit alongside.
 
 import pytest
 
-from analyst_agent.api.reachable import CHECK_TIMEOUT_S, LIVE_TIMEOUT_S
+from analyst_agent.api.onboarding.reachable import CHECK_TIMEOUT_S, LIVE_TIMEOUT_S
 from analyst_agent.core.config import settings
 from analyst_agent.core.deployenv import (
     CUBE_TIMEOUT_S,

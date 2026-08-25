@@ -190,8 +190,8 @@ class FakeSandbox:
 
 @pytest.fixture
 def fake_sandbox(monkeypatch):
-    from analyst_agent.api.chat_management import controller as chat_controller
     from analyst_agent.api.chat import controller as workspace_controller
+    from analyst_agent.api.chat_management import controller as chat_controller
 
     fake = FakeSandbox()
 
@@ -206,8 +206,8 @@ def fake_sandbox(monkeypatch):
 @pytest.fixture
 def no_sandbox(monkeypatch):
     """A deployment with none configured — which is every deployment until one is run."""
-    from analyst_agent.api.chat_management import controller as chat_controller
     from analyst_agent.api.chat import controller as workspace_controller
+    from analyst_agent.api.chat_management import controller as chat_controller
     from analyst_agent.sandbox import SandboxError
 
     async def refused(*args, **kwargs):
@@ -364,8 +364,7 @@ CHINOOK = {
 def answering(monkeypatch):
     """Both services reachable, so a test can get past step two of connecting. The addresses in
     these tests answer nothing, and `PUT /deployment` stores only what passed."""
-    from analyst_agent.api import connection as routes
-    from analyst_agent.api import reachable
+    from analyst_agent.api.onboarding import reachable, routes
 
     async def reached(deployment, service, url):
         return reachable.Reached(True, "ok")
@@ -611,12 +610,12 @@ async def test_every_path_the_browser_calls_is_a_real_route():
     behaviour test of their own — so a rename that misses one shows up as a 404 in the browser
     rather than here. Resolved against the routers rather than requested, so it asserts the
     surface without standing up a deployment."""
-    from analyst_agent.api import connection, model, pipeline
+    from analyst_agent.api import model, onboarding
 
     surface = {
         (method, route.path)
-        for module in (connection, model, pipeline)
-        for route in module.router.routes
+        for router in (onboarding.router, onboarding.pipeline, model.router)
+        for route in router.routes
         for method in route.methods
     }
     called = {

@@ -32,9 +32,6 @@ async def run_turn(
     cancel: asyncio.Event | None = None,
     files: list[str] | None = None,
 ) -> AsyncIterator[Event]:
-    # Shared by the query chat and the model editor: what may reach a transcript is subtle, and
-    # two copies would drift. `files` ride on the user event rather than one of their own — an
-    # upload happens between turns and would have no turn to belong to.
     turn_id = uuid.uuid4().hex
     buffer = {"thinking": "", "text": ""}
 
@@ -47,9 +44,6 @@ async def run_turn(
                 buffer[kind] = ""
                 await transcript.append(chat_id, turn_id, block)
 
-    # The user event is inside the try as well: a transcript that cannot be written is a failed
-    # turn like any other, and the handler below is what turns one into an event rather than an
-    # exception escaping into the stream.
     try:
         user_event = Event(type="user", data={"text": question, "files": files or []})
         await transcript.append(chat_id, turn_id, user_event)

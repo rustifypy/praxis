@@ -7,7 +7,7 @@ it reports a working model as unstarted.
 
 import json
 
-from analyst_agent.api.connection import public
+from analyst_agent.api.onboarding.controller import public
 from analyst_agent.core.deployment import Deployment
 from analyst_agent.modelstore.definitions import Definition
 from analyst_agent.modelstore.modelgen import evidence

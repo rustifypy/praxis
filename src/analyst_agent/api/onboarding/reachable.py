@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from ..core.deployment import CONTRACT, MAIN, Deployment
+from ...core.deployment import CONTRACT, MAIN, Deployment
 
 # Cube has no address of its own and no health route through the store, so the cheapest thing
 # that proves the store took the token *and* Cube is behind it is asking for main's metadata.

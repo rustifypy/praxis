@@ -16,7 +16,7 @@ from ..core import access
 from ..core.config import settings
 from ..core.transcript import checkpointer
 from ..sandbox import SandboxError
-from . import chat, chat_management, connection, dashboard, mcp, model, pipeline
+from . import chat, chat_management, dashboard, mcp, model, onboarding
 from .support import state
 
 STATIC = Path(__file__).parent / "static"
@@ -60,8 +60,8 @@ app.include_router(chat.results)
 app.include_router(dashboard.router)
 # What they run on: the connection, the deployment serving it, the pipeline that builds the
 # model, and the model itself.
-app.include_router(connection.router)
-app.include_router(pipeline.router)
+app.include_router(onboarding.router)
+app.include_router(onboarding.pipeline)
 app.include_router(model.router)
 # What something else gets to call.
 app.include_router(mcp.router)

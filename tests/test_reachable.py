@@ -9,7 +9,7 @@ import httpx
 import pytest
 import respx
 
-from analyst_agent.api import reachable
+from analyst_agent.api.onboarding import reachable
 from analyst_agent.core.deployment import CONTRACT, Deployment
 
 STORE = "http://localhost:8000"
