@@ -28,8 +28,8 @@ writing JSON queries fails loudly with a fixable error.
 
 | Tier | What | Cost |
 |---|---|---|
-| 1 | Pydantic schema (`cube/schema.py`) | free, local |
-| 2 | Member existence, operator/type match, WHERE-vs-HAVING rule, granularity, scope (`cube/gate.py`) | free, local |
+| 1 | Pydantic schema (`modelstore/schema.py`) | free, local |
+| 2 | Member existence, operator/type match, WHERE-vs-HAVING rule, granularity, scope (`modelstore/gate.py`) | free, local |
 | 3 | `POST /v1/sql` — Cube compiles to SQL, executes nothing | 1 HTTP call, no warehouse cost |
 | 4 | `POST /v1/load` — execute with row and time caps | warehouse |
 
@@ -77,7 +77,7 @@ did not run.
 The **data** is not in that trace. Each query's rows render as their own block below the
 answer they support — a formatted, sortable table with a chart above it where the query's
 shape suits one, and CSV beside it. Both the header and the chart are derived from the
-query in Python (`cube/shape.py`, `cube/visualize.py`), so they are free, testable, and
+query in Python (`modelstore/shape.py`, `modelstore/visualize.py`), so they are free, testable, and
 cannot describe a column nobody fetched; **no chart is a normal outcome** and means the
 table is the better answer. Full result sets live in a `results` table keyed by a handle,
 which is what `Show all` and the CSV read.
@@ -131,24 +131,27 @@ kind it is from what Cube actually resolved.
 **The portal runs nothing at all.** It holds the credentials, mints the secrets, and renders a
 compose file; you run each deployment wherever you want it and tell the portal its address.
 
-`services/semantic/` is one of them — one compose file, three services:
+The semantic layer is one of them — one compose file, three published images:
 
 | container | what it is |
 |---|---|
-| `cube` | ours: `cubejs/cube` with `cube.js` baked in, which pulls the data model over HTTP |
-| `model-store` | the data model — files, refs and history, as a git repo behind an API — **and the gateway**: it proxies Cube and signs its tokens |
+| `modelstore` | the data model — files, refs and history, as a git repo behind an API — **and the gateway**: it serves Cube and signs its tokens. Built from its own repository |
+| `cube-api` | stock `cubejs/cube`, with `cube.py` supplied through compose `configs`. One process serves every branch at once |
 | `cubestore` | Cube's queue and cache driver. Production mode refuses to query without it |
 
 The same file serves a laptop and a server, because the portal only ever talks to **one** URL
 here: the store's. **Cube's port is not published** — queries go through the store at
-`/cube/...`, which mints Cube's token itself, so `CUBEJS_API_SECRET` never leaves that compose
-file and there is exactly one authenticated door in. The code sandbox is a separate deployment
-in `services/sandbox/`, optional and sharing nothing with this one.
+`/refs/{branch}/query`, which mints a token naming the branch *and* its revision, so
+`CUBEJS_API_SECRET` never leaves that compose file and there is exactly one authenticated door
+in. Nothing runs in dev mode, so there is no port here that must never be exposed. The code
+sandbox is a separate deployment, optional and sharing nothing with this one — its own published
+image, released from its own repository like the store.
+
 **One deployment, one row in the `deployment` table** — `id = 1` is a CHECK, not a convention —
-holding the credentials, the API secret and the store's tokens. `deployenv` is the one place
-that decides what a deployment needs, and it renders the hand-over **from this same compose
-file** — values substituted, `build:` stripped — so what you run is not a second copy that can
-drift from the tested one. There is no `.env`, and nothing is written to disk.
+holding the credentials, the API secret and the store's token. `deployenv` is the one place
+that decides what a deployment needs, and it renders the hand-over with the values substituted
+and every image pinned — the pin is the only compatibility control there is, because the store
+reports no version handshake. There is no `.env`, and nothing is written to disk.
 
 Connecting is two steps, because the portal cannot do the middle one:
 
@@ -216,35 +219,13 @@ Create a branch, then either edit YAML files directly or open the editor chat an
 change. Both paths run through the same two-tier gate before anything is committed — cubes are
 **append-only** (add measures/dimensions/segments, edit `description`/`title`/`meta`/`format`,
 never rename or remove what's there), views are freely rewritable. **Validate** asks Cube what
-compiled on that ref and checks every dashboard tile and certified query against what is
-actually being served. **Merge** does the same check once more, then folds the ref into `main` —
+compiled on that ref and checks every dashboard tile against what is actually being served. **Merge** does the same check once more, then folds the ref into `main` —
 refused if it would break a saved query, unless you force it.
 
 There's no remote and no PR review inside the tool: no pull, no rebase, nothing to sync with.
 
 `ungrouped` is absent from `CubeQuery` on purpose. It would return raw
 un-aggregated rows and void the aggregate-only guarantee.
-
-## Grounding
-
-Markdown with frontmatter, mirroring Cube's own `agents/` convention, under `grounding/` in
-the model store:
-
-- `rules/` — `type: always` loads every turn; `type: agent_requested` loads on
-  demand via `load_grounding`
-- `skills/` — reusable workflows, progressive disclosure by description
-- `certified_queries/` — canonical JSON queries, surfaced by `search_model` when
-  the question resembles the `user_request` pattern
-
-Edit these instead of the system prompt. They are reviewed diffs in git.
-
-**Grounding lives beside the cubes it names**, in the same repo, so it is versioned with the
-model it describes and every ref carries its own. Absent grounding is a real state: the agent
-then answers from the system prompt alone.
-
-**Markdown only**, and the store refuses anything else there. Cube compiles every `*.yml` it is
-handed, from anywhere in the model — one grounding file written as YAML takes the whole thing to
-zero cubes.
 
 ## Commands
 
@@ -253,9 +234,6 @@ uv run analyst                                          # the chat portal
 make web                                                # build the frontend, then serve
 make web-build                                          # the frontend artifact alone
 make test lint
-make store-test                                         # the model store's own suite
-make sandbox-test                                       # the sandbox service's own suite
-make store-check                                        # live: the store against a real Cube
 ```
 
 `analyst` only starts the portal, and takes no arguments — host, port and data directory
@@ -279,7 +257,7 @@ make it conflict on every branch — so a fresh clone has no frontend until you 
   literal comes back as "No data matched" and the agent either retries blind or reports
   zero. A `search_values(member, text)` tool over a `dimensions: [member]` query closes it
   with no vector store.
-- Pin a result as a saved report; 👍 on an answer writes a `certified_queries/` file.
+- Pin a result as a saved report.
 - Click a bar to drill: `drillMembers` is on `/v1/meta` measures and unparsed. Note a drill
   query uses `measureFilter`, which pre-aggregations cannot serve.
 - Swap `LexicalRetriever` for pgvector once the model outgrows fuzzy matching.

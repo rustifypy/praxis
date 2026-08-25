@@ -33,10 +33,10 @@ You need a database of your own — nothing is bundled. Point the tool at it fro
 `make web`, then **Data** in the rail, **Connect a database**.
 
 That writes one row to the `deployment` table in `~/.analyst/analyst.db` — credentials, the
-API secret and the model store's two tokens, chmod 600 — and **starts nothing**. The portal
-does not run Cube. It renders an environment file from that row; you save it as `services/semantic/.env`,
-run `docker compose up -d` there, and paste the two addresses back. Connecting is two steps
-because the portal cannot do the middle one.
+API secret and the model store's token, chmod 600 — and **starts nothing**. The portal does not
+run Cube. It renders a compose file from that row; you download it, run `docker compose up -d`
+wherever it should live, and paste the two addresses back. Connecting is two steps because the
+portal cannot do the middle one.
 
 Docker is needed only for the **code sandbox** and for running that compose file locally. A
 machine without it can still connect, build a model and ask questions — it just cannot run
@@ -84,7 +84,7 @@ intended.
 Ruff, line length 100. Beyond that, two habits this codebase holds to:
 
 **Inline single-caller helpers.** A private function with one call site is a hop the
-reader has to follow for no benefit. The pipeline in `datamodel/modelgen/` is procedural on
+reader has to follow for no benefit. The pipeline in `modelstore/modelgen/` is procedural on
 purpose — it reads top to bottom. Helpers earn their place at two or more callers, and
 especially when they exist so two code paths cannot drift apart.
 
@@ -111,11 +111,11 @@ starting set of rows for each entry, and it is prefill rather than schema — no
 against it and a type missing from it is typed in and works.
 
 A warehouse needing a different Cube build or an architecture pin (Databricks wants
-`analyst-cube:1-jdk` and `platform: linux/amd64`) is an edit to the compose file the user was
-handed. The portal has no opinion: the templates in `deployenv` carry static tags, the same way
-they carry static ports.
+`cubejs/cube:<version>-jdk` and `platform: linux/amd64`) is an edit to the compose file the user
+was handed. The portal has no opinion: the templates in `deployenv` carry pinned images, the same
+way they carry static ports.
 
-**Extracting tables** — add a `Dialect` to `datamodel/modelgen/read.py` with SQL returning
+**Extracting tables** — add a `Dialect` to `modelstore/modelgen/read.py` with SQL returning
 `KEY_COLUMNS` (and optionally `STAT_COLUMNS`). Those SELECTs run as probe cubes through
 Cube's own driver, so no new database client is needed. `DIALECTS` is the single list of
 drivers that can extract tables; a driver missing from it still gets tables, columns and types
@@ -127,7 +127,7 @@ go on when deciding which numbers are worth aggregating.
 
 ## Changing model generation
 
-`datamodel/modelgen/` has one module per stage. `steps.action` is the only way to run one — a
+`modelstore/modelgen/` has one module per stage. `steps.action` is the only way to run one — a
 caller chooses *which* actions and in what order, never how, so the order rule and what a
 failed step records cannot drift across callers. Before changing it, know the three
 invariants:
@@ -147,7 +147,7 @@ reason, a predicate. The id shows up in the rejection line, so failures stay cou
 
 ## Changing the model editor
 
-`datamodel/editing/{edits,impact,workspace}.py`, `agent/tools/editor.py` and `web/model.py`
+`modelstore/editing/{edits,impact,workspace}.py`, `agent/tools/editor.py` and `web/model.py`
 let a ref of the model be edited safely. There is no local model directory and no git
 subprocess: the store does refs, diff and merge over HTTP, and one Cube compiles every ref
 independently, so a ref is not switched *to* — it is asked *about*. Two invariants hold before

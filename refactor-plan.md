@@ -1,3 +1,11 @@
+> **Done.** Executed in six commits, `f6fe873`..`14c7a73`. Kept for the record of what was
+> decided and what was overruled mid-flight; the durable rationale now lives where a reader will
+> actually meet it — the tier table and its prose in `CLAUDE.md`, the **Store** entry in
+> `CONTEXT.md`, and the supersession banner on `docs/adr/0002`. Two things went differently from
+> the plan below: `reachable.py` moved whole to `web/` instead of being split in two (Step 3), and
+> `impact.check` takes dicts rather than a `SavedQuery` type, because the type would have had to
+> live on the side that is not allowed to define it (Step 5).
+
 # Refactor: two integrations, one model-store package, no dashboards package
 
 The rule this refactor installs, replacing the six-tier table in `CLAUDE.md`:

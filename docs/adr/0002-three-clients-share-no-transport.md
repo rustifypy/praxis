@@ -1,5 +1,23 @@
 # The three service clients share no transport module
 
+> **Superseded in part — there are two clients now, not three.** `cube/client.py` and
+> `modelstore/client.py` were merged into one `ModelStore`. That is *not* the option refused
+> below, which was a shared transport module *underneath* clients that stay separate. The reason
+> is narrower and was not considered here: Cube and the store are not two services sharing a
+> helper, they are **one address**. `store_url` serves both, the store proxies Cube at
+> `/refs/{ref}/…` and mints its JWT, so the two clients were two connection pools and two error
+> types for one deployment.
+>
+> What the merge kept is the finding that mattered: the query half still **returns** rather than
+> raising on a status, because Cube's rejection is the gate's material, so `_ask` and `_send` are
+> still two methods and not one parameterised base. `StoreError.missing` kept its three callers;
+> `CubeError` was deleted rather than unified, its discriminators having had none.
+> `StoreError.where` (`store` | `cube`) is new, and is the one thing a caller genuinely needed to
+> ask across the seam — which is the reopen condition named at the end of this document.
+>
+> **`sandbox/client.py` is untouched and the decision below still governs it.** Two clients, two
+> `_send`s, one of them raising on 4xx. Reopen again if a third appears.
+
 `cube/client.py`, `modelstore/client.py` and `sandbox/client.py` each rstrip a URL, build one
 `httpx.AsyncClient`, compose a bearer header, implement `__aenter__`/`aclose`, and turn
 `httpx.RequestError` into their own error type. Roughly twenty lines, three times over. They stay
