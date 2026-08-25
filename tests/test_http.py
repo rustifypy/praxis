@@ -14,9 +14,9 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
+from analyst_agent.api import server
 from analyst_agent.core.deployment import Deployment
 from analyst_agent.modelstore.client import Ref
-from analyst_agent.web import server
 
 SHOP = Deployment(
     store_url="http://localhost:8000",
@@ -190,8 +190,8 @@ class FakeSandbox:
 
 @pytest.fixture
 def fake_sandbox(monkeypatch):
-    from analyst_agent.web.chat import controller as chat_controller
-    from analyst_agent.web.workspace import controller as workspace_controller
+    from analyst_agent.api.chat import controller as chat_controller
+    from analyst_agent.api.workspace import controller as workspace_controller
 
     fake = FakeSandbox()
 
@@ -206,9 +206,9 @@ def fake_sandbox(monkeypatch):
 @pytest.fixture
 def no_sandbox(monkeypatch):
     """A deployment with none configured — which is every deployment until one is run."""
+    from analyst_agent.api.chat import controller as chat_controller
+    from analyst_agent.api.workspace import controller as workspace_controller
     from analyst_agent.sandbox import SandboxError
-    from analyst_agent.web.chat import controller as chat_controller
-    from analyst_agent.web.workspace import controller as workspace_controller
 
     async def refused(*args, **kwargs):
         raise SandboxError("no sandbox is configured for this deployment")
@@ -254,7 +254,7 @@ async def test_an_upload_is_handed_over_and_its_shape_reported_back(api, fake_sa
 async def test_a_file_over_the_cap_is_refused_before_it_is_handed_over(api, fake_sandbox):
     """Content-Length is the cheap refusal and the running total is the real one — a chunked
     upload sends no length at all."""
-    from analyst_agent.web.workspace import controller as workspace_controller
+    from analyst_agent.api.workspace import controller as workspace_controller
 
     chat = (await api.post("/api/chats", json={})).json()
     over = b"x" * (workspace_controller.MAX_BYTES + 1)
@@ -364,8 +364,8 @@ CHINOOK = {
 def answering(monkeypatch):
     """Both services reachable, so a test can get past step two of connecting. The addresses in
     these tests answer nothing, and `PUT /deployment` stores only what passed."""
-    from analyst_agent.web import connection as routes
-    from analyst_agent.web import reachable
+    from analyst_agent.api import connection as routes
+    from analyst_agent.api import reachable
 
     async def reached(deployment, service, url):
         return reachable.Reached(True, "ok")
@@ -560,7 +560,7 @@ async def test_the_catalog_is_a_503_before_a_deployment_rather_than_a_500(api, m
     with "cannot reach the server" was the data panel that is the only way to configure one.
     """
 
-    from analyst_agent.web.support import state
+    from analyst_agent.api.support import state
 
     async def unconfigured(_app):
         raise HTTPException(503, "no Cube deployment is configured")
@@ -611,7 +611,7 @@ async def test_every_path_the_browser_calls_is_a_real_route():
     behaviour test of their own — so a rename that misses one shows up as a 404 in the browser
     rather than here. Resolved against the routers rather than requested, so it asserts the
     surface without standing up a deployment."""
-    from analyst_agent.web import connection, model, pipeline
+    from analyst_agent.api import connection, model, pipeline
 
     surface = {
         (method, route.path)
@@ -672,7 +672,7 @@ async def test_the_served_model_reports_entities_members_and_which_file_defined_
 ):
     """The data page's whole payload. `file` per entity is read from the store rather than
     guessed from `cubes/<name>.yml`, because a hand-edited model may put a cube anywhere."""
-    from analyst_agent.web import model as routes
+    from analyst_agent.api import model as routes
 
     async def files(ref="main"):
         return {"cubes/everything.yml": "cubes:\n  - name: orders\n  - name: customers\n"}
@@ -706,8 +706,8 @@ async def test_the_served_model_reports_entities_members_and_which_file_defined_
 async def test_the_served_model_still_answers_when_cube_is_down(api, monkeypatch):
     """One half being unreachable must not hide the other: the files are still readable and the
     editor has to keep working, so this is a 200 saying `serving: false`."""
+    from analyst_agent.api import model as routes
     from analyst_agent.modelstore.client import StoreError
-    from analyst_agent.web import model as routes
 
     async def files(ref="main"):
         return {"cubes/orders.yml": "cubes:\n  - name: orders\n"}
@@ -730,7 +730,7 @@ async def test_the_ref_list_counts_changed_files_and_never_counts_main(
 ):
     """Files changed and not commits: it is what a reviewer is about to read. Main has nothing to
     compare against, so it is the one ref with no number."""
-    from analyst_agent.web import model as routes
+    from analyst_agent.api import model as routes
 
     store = model_store(main={"cubes/orders.yml": "cubes: []"}, feature={})
 
@@ -754,8 +754,8 @@ async def test_a_rejected_change_set_is_a_200_carrying_its_reasons(
 ):
     """The editor renders errors in one banner, so a rejection is the *answer* and not a failed
     request. Splitting it across a 400 and a 200 would make one button read two code paths."""
+    from analyst_agent.api import model as routes
     from analyst_agent.modelstore.editing import workspace
-    from analyst_agent.web import model as routes
 
     async def verify(store, ref, *, saved):
         return workspace.Verdict(

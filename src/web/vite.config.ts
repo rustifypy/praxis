@@ -7,7 +7,7 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [react()],
   build: {
-    outDir: "../analyst_agent/web/static",
+    outDir: "../analyst_agent/api/static",
     emptyOutDir: true,
   },
   server: {

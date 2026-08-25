@@ -1,4 +1,4 @@
-from analyst_agent.web import connection as serving
+from analyst_agent.api import connection as serving
 
 SERVED = serving.Serving(cubes=13, views=["sales"], described=13)
 

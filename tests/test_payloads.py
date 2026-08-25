@@ -22,9 +22,9 @@ import os
 import pathlib
 import re
 
+from analyst_agent.api import model as model_routes
 from analyst_agent.modelstore.client import Ref
 from analyst_agent.modelstore.editing import workspace
-from analyst_agent.web import model as model_routes
 
 SNAPSHOT = pathlib.Path(__file__).with_name("payloads.json")
 
@@ -183,8 +183,8 @@ async def collect(api, monkeypatch, catalog, model_store, opening) -> dict:
 
     # Set here rather than in the `api` fixture: only the real lifespan populates it, and it
     # reads the database, which the fixture deliberately does not run.
+    from analyst_agent.api import server
     from analyst_agent.core.access import Access
-    from analyst_agent.web import server
 
     server.app.state.mcp = Access(enabled=True, token="tok-for-the-snapshot")
     server.app.state.mcp_max_rows = 100

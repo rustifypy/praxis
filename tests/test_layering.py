@@ -29,7 +29,7 @@ TIERS: dict[str, int] = {
     # 2 — everything the LLM touches: prompts, the toolsets, one turn.
     "agent": 2,
     # 3 — HTTP. May reach anything; nothing may reach it.
-    "web": 3,
+    "api": 3,
     "__main__": 4,
 }
 

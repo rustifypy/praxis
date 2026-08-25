@@ -7,11 +7,11 @@ it reports a working model as unstarted.
 
 import json
 
+from analyst_agent.api.connection import public
 from analyst_agent.core.deployment import Deployment
 from analyst_agent.modelstore.definitions import Definition
 from analyst_agent.modelstore.modelgen import evidence
 from analyst_agent.modelstore.modelgen.evidence import STEPS, onboarded
-from analyst_agent.web.connection import public
 
 CREDENTIALS = {"CUBEJS_DB_NAME": "chinook", "CUBEJS_DB_PASS": "secret"}
 SHOP = Deployment(

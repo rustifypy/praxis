@@ -239,10 +239,10 @@ async def api(tmp_path, monkeypatch, cube):
     `app.state` is populated directly rather than by running the lifespan, because the real one
     opens `~/.analyst` — everything here is under tmp_path.
     """
+    from analyst_agent.api import server
+    from analyst_agent.api.support import state
     from analyst_agent.core import boards, db, jobs, transcript
     from analyst_agent.core import deployment as connection
-    from analyst_agent.web import server
-    from analyst_agent.web.support import state
 
     # The stores read `settings.db_path`, so pointing the setting is the whole of what keeps
     # these routes off the real ~/.analyst.

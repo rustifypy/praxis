@@ -23,7 +23,7 @@ STATIC = Path(__file__).parent / "static"
 COOKIE = "analyst_token"
 
 # Minted at import and announced only by the launcher, which is why `uvicorn
-# analyst_agent.web.server:app` serves a portal nobody can authenticate against.
+# analyst_agent.api.server:app` serves a portal nobody can authenticate against.
 TOKEN = secrets.token_urlsafe(24)
 
 

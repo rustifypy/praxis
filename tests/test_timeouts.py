@@ -12,6 +12,7 @@ running deployment rather than about a directory that happens to sit alongside.
 
 import pytest
 
+from analyst_agent.api.reachable import CHECK_TIMEOUT_S, LIVE_TIMEOUT_S
 from analyst_agent.core.config import settings
 from analyst_agent.core.deployenv import (
     CUBE_TIMEOUT_S,
@@ -22,7 +23,6 @@ from analyst_agent.modelstore.client import ADMIN_TIMEOUT_S, POLL_REQUEST_TIMEOU
 from analyst_agent.modelstore.modelgen.read import PROBE_QUERY_TIMEOUT_S
 from analyst_agent.sandbox import client
 from analyst_agent.sandbox.client import RUN_TIMEOUT_S, UPLOAD_TIMEOUT_S
-from analyst_agent.web.reachable import CHECK_TIMEOUT_S, LIVE_TIMEOUT_S
 
 # The sets are the list of what crosses the seam, so a new cap has one place to be added.
 CUBE_BOUND = {
