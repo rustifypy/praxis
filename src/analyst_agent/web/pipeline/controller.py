@@ -6,9 +6,10 @@ than a 409 — one job at a time is a fact about the runner, and which status co
 to the route.
 """
 
+from ...core import deployment as connection
 from ...core import jobs as job_runner
 from ...modelstore import modelgen
-from ...modelstore.modelgen import selection
+from ...modelstore.modelgen import selection, steps
 from ...modelstore.modelgen.steps import StepFailed
 from ..support import state
 from .dto import Cancelled, Closure, JobSnapshot, SchemaTables, TableCatalog, TableRow
@@ -17,18 +18,13 @@ from .dto import Cancelled, Closure, JobSnapshot, SchemaTables, TableCatalog, Ta
 async def cached_tables() -> TableCatalog:
     """What the `read` stage cached. **Never touches the database** — this is read on every page
     build and once per checkbox tick."""
-    from ...core import deployment as connection
-
-    current = await connection.state()
-    schemas = {
-        name: modelgen.warehouse.load_schema(raw)
-        for name, raw in (current.get("catalog") or {}).items()
-    }
+    carried = await connection.state()
+    schemas = await steps.cached_introspection(state=carried)
     return TableCatalog(
         read=bool(schemas),
-        truncated=bool(current.get("catalog_truncated")),
-        notes=current.get("catalog_notes") or [],
-        selection=current.get("selection") or {},
+        truncated=bool(carried.get("introspection_truncated")),
+        notes=carried.get("introspection_notes") or [],
+        selection=carried.get("selection") or {},
         schemas=[
             SchemaTables(
                 schema_name=name,
@@ -45,12 +41,10 @@ async def close_over(schema_name: str, tables: list[str] | None) -> Closure | No
     Only the requested schema is rebuilt. This fires on every checkbox tick, and rebuilding every
     schema would reconstruct every `Column` of each one each time.
     """
-    from ...core import deployment as connection
-
-    raw = (await connection.state()).get("catalog") or {}
-    if schema_name not in raw:
+    found = await steps.cached_introspection(schema_name)
+    if schema_name not in found:
         return None
-    schema = modelgen.warehouse.load_schema(raw[schema_name])
+    schema = found[schema_name]
     picked = tables or []
     chosen = sorted(selection.closure(schema, picked))
     return Closure(

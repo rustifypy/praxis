@@ -23,7 +23,7 @@ SHOP = Deployment(
     credentials=CREDENTIALS,
 )
 
-BUILT = {"bodies": {"invoice": {}}, "enrichment": {}, "catalog": {"public": {}}}
+BUILT = {"bodies": {"invoice": {}}, "enrichment": {}, "introspection": {"public": {}}}
 """What the steps leave behind, so `blocked` is not the thing under test."""
 
 
@@ -59,10 +59,10 @@ def test_an_empty_model_has_nothing_done():
     assert not any(found.done(step) for step in STEPS)
 
 
-def test_read_is_the_cached_catalog_and_not_a_recorded_run():
+def test_read_is_the_cached_introspection_and_not_a_recorded_run():
     """It caches a catalog rather than writing model files, so that catalog is its artefact."""
     assert not evidence.of({}, {}).done("read")
-    assert evidence.of({}, {"catalog": {"public": {}}}).done("read")
+    assert evidence.of({}, {"introspection": {"public": {}}}).done("read")
 
 
 def test_a_partly_described_model_still_counts_as_described():
@@ -78,7 +78,7 @@ def test_a_partly_described_model_still_counts_as_described():
 def test_a_step_is_held_up_by_the_state_it_reads_not_by_a_recorded_tick():
     """Cubes on disk whose bodies are gone cannot be described — `steps.describe` reads those
     bodies, so offering it would fail on its inputs however complete the rail looks."""
-    without = evidence.of(model({"a": False}), {"catalog": {"public": {}}})
+    without = evidence.of(model({"a": False}), {"introspection": {"public": {}}})
     assert without.done("cubes")
     assert without.blocked("describe") == "cubes"
     assert evidence.of(model({"a": False}), BUILT).blocked("describe") == ""

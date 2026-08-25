@@ -53,7 +53,7 @@ async def test_read_is_reachable_without_any_step_and_records_none(store, monkey
     async def fake_read(st, report=None):
         return {"schemas": [{"schema": "public", "tables": 3}]}
 
-    monkeypatch.setattr(steps, "read_catalog", fake_read)
+    monkeypatch.setattr(steps, "introspect", fake_read)
     result = await steps.action("read")
     assert result.summary["schemas"][0]["tables"] == 3
     assert await store.steps() == {}, "read has no row in the panel"
@@ -82,7 +82,7 @@ async def test_a_failing_read_records_nothing(store, monkeypatch):
     async def boom(st, report=None):
         raise StepFailed("no schemas")
 
-    monkeypatch.setattr(steps, "read_catalog", boom)
+    monkeypatch.setattr(steps, "introspect", boom)
     with pytest.raises(StepFailed):
         await steps.action("read")
     assert await store.steps() == {}
@@ -120,7 +120,7 @@ async def test_generate_runs_the_actions_in_order(store, monkeypatch):
 
     for name in ("cubes", "describe", "views"):
         monkeypatch.setattr(steps, name, stub(name))
-    monkeypatch.setattr(steps, "read_catalog", stub("read"))
+    monkeypatch.setattr(steps, "introspect", stub("read"))
     # The order rule reads the state each step needs, and the stubs never write it.
     monkeypatch.setattr(store, "state", _built)
 
@@ -140,7 +140,7 @@ async def test_generate_stops_before_the_llm_steps_without_enrich(store, monkeyp
 
     for name in ("cubes", "describe", "views"):
         monkeypatch.setattr(steps, name, stub(name))
-    monkeypatch.setattr(steps, "read_catalog", stub("read"))
+    monkeypatch.setattr(steps, "introspect", stub("read"))
     monkeypatch.setattr(store, "state", _built)
 
     await steps.generate()
@@ -149,4 +149,4 @@ async def test_generate_stops_before_the_llm_steps_without_enrich(store, monkeyp
 
 async def _built() -> dict:
     """What the earlier steps leave behind — `blocked` reads this, not a recorded tick."""
-    return {"catalog": {"public": {}}, "bodies": {"a": {}}, "enrichment": {}}
+    return {"introspection": {"public": {}}, "bodies": {"a": {}}, "enrichment": {}}

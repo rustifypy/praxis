@@ -114,7 +114,7 @@ class Introspection:
         return entries
 
 
-async def read_catalog(deployment: Deployment, timeout: float = BOOT_TIMEOUT_S) -> Introspection:
+async def introspect(deployment: Deployment, timeout: float = BOOT_TIMEOUT_S) -> Introspection:
     if not deployment.credentials:
         raise RuntimeError("no credentials stored — connect a database first")
 

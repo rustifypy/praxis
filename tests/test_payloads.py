@@ -128,7 +128,7 @@ async def collect(api, monkeypatch, catalog, model_store, opening) -> dict:
     # picker reads each schema by is never compared — which is how an alias silently changes.
     await api.stores[2].save_state(
         {
-            "catalog": {
+            "introspection": {
                 "public": {
                     "tables": [
                         {

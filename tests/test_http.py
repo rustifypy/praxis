@@ -459,7 +459,7 @@ async def test_editing_the_connection_discards_nothing(api):
     await api.post("/api/connection", json=CHINOOK)
     _, _, sources = api.stores
     await sources.save_step("cubes", {"status": "done"})
-    await sources.save_state({"catalog": {"public": ["invoice"]}})
+    await sources.save_state({"introspection": {"public": ["invoice"]}})
 
     await api.patch("/api/connection", json={"values": {"CUBEJS_DB_NAME": "somewhere-else"}})
 
@@ -801,7 +801,7 @@ async def test_the_table_picker_reads_what_the_read_stage_cached(api):
     _, _, sources = api.stores
     await sources.save_state(
         {
-            "catalog": {
+            "introspection": {
                 "public": {
                     "tables": [
                         {

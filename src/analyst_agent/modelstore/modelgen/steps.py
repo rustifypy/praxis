@@ -37,31 +37,37 @@ def _say(report: Report | None, stage: str, payload: dict) -> None:
         report(stage, payload)
 
 
-# --- the catalog, read once and cached ---------------------------------------
+# --- introspection, read once and cached -------------------------------------
 
 
-async def read_catalog(report: Report | None = None) -> dict:
+async def introspect(report: Report | None = None) -> dict:
     _say(report, "cubes", {"message": "introspecting — probing the connected deployment"})
     connected = await deployment.current()
     if connected is None:
         raise StepFailed("no database is connected yet")
-    catalog = await read.read_catalog(connected)
-    if not catalog.schemas:
+    found = await read.introspect(connected)
+    if not found.schemas:
         raise StepFailed("the connection exposes no schemas")
 
     await deployment.save_state(
         {
-            "catalog": {name: dump_schema(schema) for name, schema in catalog.schemas.items()},
-            "catalog_notes": catalog.notes,
-            "catalog_truncated": catalog.truncated,
+            "introspection": {name: dump_schema(s) for name, s in found.schemas.items()},
+            "introspection_notes": found.notes,
+            "introspection_truncated": found.truncated,
         },
     )
-    return {"schemas": catalog.summary(), "notes": catalog.notes, "truncated": catalog.truncated}
+    return {"schemas": found.summary(), "notes": found.notes, "truncated": found.truncated}
 
 
-async def cached_catalog() -> dict[str, Schema]:
-    state = await deployment.state()
-    return {schema: load_schema(raw) for schema, raw in (state.get("catalog") or {}).items()}
+async def cached_introspection(
+    only: str | None = None, state: dict | None = None
+) -> dict[str, Schema]:
+    # `only` rebuilds one schema. The picker fires this on every checkbox tick, and decoding
+    # every schema would reconstruct every `Column` of each one each time.
+    raw = (state if state is not None else await deployment.state()).get("introspection") or {}
+    if only is not None:
+        return {only: load_schema(raw[only])} if only in raw else {}
+    return {name: load_schema(dumped) for name, dumped in raw.items()}
 
 
 # --- step 2: cubes -----------------------------------------------------------
@@ -71,18 +77,21 @@ async def cubes(
     schema_name: str,
     tables: list[str] | None = None,
     report: Report | None = None,
+    state: dict | None = None,
 ) -> StepResult:
     # Reading is its own action so the picker has something to show before this runs, but a
     # first run with nothing cached should not fail with "read it first". Decided here rather
     # than by each caller.
-    if not await cached_catalog():
-        await read_catalog(report)
+    state = state if state is not None else await deployment.state()
+    if not await cached_introspection(state=state):
+        await introspect(report)
+        state = await deployment.state()
 
-    catalog = await cached_catalog()
-    if schema_name not in catalog:
-        available = ", ".join(sorted(catalog)) or "none"
+    found = await cached_introspection(state=state)
+    if schema_name not in found:
+        available = ", ".join(sorted(found)) or "none"
         raise StepFailed(f"schema {schema_name!r} was not read — available: {available}")
-    full = catalog[schema_name]
+    full = found[schema_name]
 
     chosen = (
         sorted(table.name for table in full.tables)
@@ -94,7 +103,7 @@ async def cubes(
         raise StepFailed(f"no tables selected from {schema_name!r}")
 
     schema = selection.filter_schema(full, chosen)
-    notes = list((await deployment.state()).get("catalog_notes") or [])
+    notes = list(state.get("introspection_notes") or [])
     cut = selection.cut_joins(full, chosen)
     if cut:
         notes.append(f"joins dropped by the table selection: {', '.join(cut)}")
@@ -143,8 +152,8 @@ async def cubes(
 # --- step 3: describe --------------------------------------------------------
 
 
-async def describe(report: Report | None = None) -> StepResult:
-    schema, bodies = await _built()
+async def describe(report: Report | None = None, state: dict | None = None) -> StepResult:
+    schema, bodies = _built(state if state is not None else await deployment.state())
 
     _say(report, "describe", {"message": "reading sample values"})
     menu = await build.build_menu(schema)
@@ -200,9 +209,9 @@ async def describe(report: Report | None = None) -> StepResult:
 # --- step 4: views -----------------------------------------------------------
 
 
-async def views(report: Report | None = None) -> StepResult:
-    schema, bodies = await _built()
-    state = await deployment.state()
+async def views(report: Report | None = None, state: dict | None = None) -> StepResult:
+    state = state if state is not None else await deployment.state()
+    schema, bodies = _built(state)
     if "enrichment" not in state:
         raise StepFailed("run the describe step first — views are built from its decisions")
     enrichment = decide.Enrichment.model_validate(state["enrichment"])
@@ -252,8 +261,7 @@ def _rejected(what: str, validation: publish.Validation) -> str:
     return f"Cube rejected {what}:\n{validation.compile_error}{where}"
 
 
-async def _built() -> tuple[Schema, dict[str, dict]]:
-    state = await deployment.state()
+def _built(state: dict) -> tuple[Schema, dict[str, dict]]:
     if "schema" not in state or "bodies" not in state:
         raise StepFailed("run the cubes step first — nothing has been read from the database yet")
     return load_schema(state["schema"]), state["bodies"]
@@ -292,19 +300,20 @@ async def action(
 
     # A step may only run once the one before it has succeeded. Enforced here rather than in
     # the browser, which is advice — and shipped to it, so the advice cannot say otherwise.
-    found = evidence.of(definitions.read(await model_files())[0], await deployment.state())
+    carried = await deployment.state()
+    found = evidence.of(definitions.read(await model_files())[0], carried)
     if blocker := found.blocked(name):
         raise StepFailed(f"run {blocker} first")
 
     try:
         if name == "read":
-            result = StepResult(summary=await read_catalog(report))
+            result = StepResult(summary=await introspect(report))
         elif name == "cubes":
-            result = await cubes(schema, tables, report)
+            result = await cubes(schema, tables, report, carried)
         elif name == "describe":
-            result = await describe(report)
+            result = await describe(report, carried)
         elif name == "views":
-            result = await views(report)
+            result = await views(report, carried)
         else:
             # The check above accepts anything in STAGES, so a name added there without a
             # branch here must be refused rather than fall through to `views`.

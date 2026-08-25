@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal, get_args
 
 from ..core.deployment import Deployment
@@ -21,12 +21,13 @@ class Evidence:
     cubes: tuple[str, ...] = ()
     described: tuple[str, ...] = ()
     views: tuple[str, ...] = ()
-    catalog: bool = False
-    state: dict = field(default_factory=dict)
+    introspected: bool = False
+    bodies: bool = False
+    enrichment: bool = False
 
     def done(self, step: str) -> bool:
         if step == "read":
-            return self.catalog
+            return self.introspected
         if step == "cubes":
             return bool(self.cubes)
         if step == "describe":
@@ -39,9 +40,9 @@ class Evidence:
         # Keyed on the state a step *reads* rather than on a recorded tick, and on presence
         # rather than truth: a describe step that proposed nothing stores an empty enrichment,
         # and blocking on its emptiness would refuse a step whose inputs are there.
-        if step == "describe" and "bodies" not in self.state:
+        if step == "describe" and not self.bodies:
             return "cubes"
-        if step == "views" and "enrichment" not in self.state:
+        if step == "views" and not self.enrichment:
             return "describe"
         return ""
 
@@ -64,8 +65,9 @@ def of(definitions: dict[str, Definition], state: dict) -> Evidence:
                 definition.name for definition in definitions.values() if definition.kind == "view"
             )
         ),
-        catalog=bool(state.get("catalog")),
-        state=state,
+        introspected=bool(state.get("introspection")),
+        bodies="bodies" in state,
+        enrichment="enrichment" in state,
     )
 
 
