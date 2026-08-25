@@ -3,9 +3,24 @@ import type { Item } from "../types";
 
 import { Answer } from "./Answer";
 import { FileBlock } from "./FileBlock";
+import { Proposal } from "./Proposal";
 import { ResultBlock } from "./ResultBlock";
 import { Thinking } from "./Thinking";
 import { ToolCall } from "./ToolCall";
+
+/**
+ * How a proposed file becomes reviewable. Supplied only by the model editor.
+ *
+ * The card needs two things this renderer cannot know, because both are properties of the
+ * editor's buffer and staging lives there: what the file currently holds, and what to do when
+ * someone wants to review it. Absent — a question chat — a proposal renders as a card that says
+ * what was offered and does nothing, which is correct: only the editor agent emits one.
+ */
+interface Proposals {
+  textOf: (path: string) => string;
+  reviewed: Set<string>;
+  onReview: (path: string, text: string | null) => void;
+}
 
 /**
  * One event stream, rendered. Both agents' chats use this — the reducer that builds `items`
@@ -14,7 +29,15 @@ import { ToolCall } from "./ToolCall";
  *
  * Rows only: the scroller, the empty state and the composer belong to whoever is placing it.
  */
-export function Transcript({ items, chatId }: { items: Item[]; chatId: string }) {
+export function Transcript({
+  items,
+  chatId,
+  proposals,
+}: {
+  items: Item[];
+  chatId: string;
+  proposals?: Proposals;
+}) {
   return (
     <>
       {items.map((item, i) => {
@@ -91,6 +114,18 @@ export function Transcript({ items, chatId }: { items: Item[]; chatId: string })
             return (
               <div key={i} className="row">
                 <FileBlock chatId={chatId} label={item.label} paths={item.paths} />
+              </div>
+            );
+          case "proposal":
+            return (
+              <div key={i} className="row">
+                <Proposal
+                  path={item.path}
+                  text={item.text}
+                  current={proposals?.textOf(item.path) ?? ""}
+                  reviewed={proposals?.reviewed.has(item.path) ?? false}
+                  onReview={() => proposals?.onReview(item.path, item.text)}
+                />
               </div>
             );
           case "compacted":

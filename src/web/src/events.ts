@@ -107,6 +107,20 @@ export function applyEvent(items: Item[], event: AgentEvent): Item[] {
       return next;
     }
 
+    // Its own block, unlike `approval`, which folds onto the step that is asking. A proposal
+    // outlives the step that made it — it is still waiting for a click after the turn has ended,
+    // and after a reload it is the only record that the change was ever offered.
+    case "proposal":
+      return [
+        ...items,
+        {
+          kind: "proposal",
+          path: event.data.path,
+          text: event.data.text ?? null,
+          ref: event.data.ref ?? "",
+        },
+      ];
+
     case "output": {
       const i = items.findLastIndex((item) => item.kind === "tool" && !item.end);
       if (i === -1) return items;

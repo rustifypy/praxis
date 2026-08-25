@@ -122,7 +122,7 @@ export function Deploy({
               <span>Semantic layer</span>
               <input
                 value={storeUrl}
-                placeholder="http://localhost:8500"
+                placeholder="http://localhost:8000"
                 onChange={(e) => setStoreUrl(e.target.value)}
                 spellCheck={false}
               />

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import * as api from "../api";
-import { applyEvent, buildTranscript } from "../events";
+import { applyEvent } from "../events";
 import * as sourcesApi from "../sources";
 import type { Item } from "../types";
 
@@ -14,19 +14,36 @@ const EXAMPLES = [
 ];
 
 /**
- * The model editor's chat.
+ * The model editor's chat: the third pane, beside the tree and the file.
  *
- * The same reducer and the same blocks as the question chat, because it is the same event
- * stream — this had its own four-type reducer, so the editor's reasoning was emitted and
- * never shown. Only the frame around it is local: a narrow panel, one ref, no uploads.
+ * The same reducer and the same blocks as the question chat, because it is the same event stream
+ * — this had its own four-type reducer once, so the editor's reasoning was emitted and never
+ * shown. Only the frame is local: one branch, no uploads, no chat list.
+ *
+ * **It sends the unsaved buffer with every message.** Staging is the browser's, so the server has
+ * no idea what the model currently looks like; an agent reading only the committed branch would
+ * propose a change that silently reverts whatever was accepted a minute ago.
+ *
+ * **Nothing it says is saved.** The agent proposes; each proposal arrives as a card, and clicking
+ * it opens the diff in the editor pane where hunks are accepted one at a time. This component
+ * never writes to the buffer itself — it hands the proposal up to the editor, which owns it.
+ *
+ * The pane starts empty each session and creates a chat on the first message. Every turn is still
+ * stored and replayable, but a history list would be a fourth column in a three-column layout.
  */
 export function EditorChat({
   modelRef,
-  onChanged,
+  textOf,
+  reviewed,
+  onReview,
 }: {
-  /** The ref this conversation edits. Not `ref` — React reserves that prop name. */
+  /** The branch this conversation edits. Not `ref` — React reserves that prop name. */
   modelRef: string;
-  onChanged: () => void;
+  /** What the editor currently holds for a path, so a proposal card can size its own diff. */
+  textOf: (path: string) => string;
+  /** Paths already opened for review, so a settled card says so. */
+  reviewed: Set<string>;
+  onReview: (path: string, text: string | null) => void;
 }) {
   const [chat, setChat] = useState<string | null>(null);
   const [items, setItems] = useState<Item[]>([]);
@@ -36,23 +53,11 @@ export function EditorChat({
   const abort = useRef<AbortController | null>(null);
   const tail = useRef<HTMLDivElement>(null);
 
-  // The newest conversation about this ref, rather than a fresh one every time the panel
-  // opens: `run_turn` stores an editor turn like any other, and it was being written and
-  // never read back.
+  // A branch switch is a different model, so it is a different conversation.
   useEffect(() => {
-    let current = true;
     setChat(null);
     setItems([]);
-    void (async () => {
-      const chats = await sourcesApi.editChats();
-      const latest = chats.find((c) => c.ref === modelRef);
-      if (!current || !latest) return;
-      setChat(latest.id);
-      setItems(buildTranscript(await api.chatEvents(latest.id)));
-    })();
-    return () => {
-      current = false;
-    };
+    setError("");
   }, [modelRef]);
 
   useEffect(() => {
@@ -72,8 +77,6 @@ export function EditorChat({
       for await (const event of sourcesApi.sendEditMessage(id, text, controller.signal)) {
         setItems((prev) => applyEvent(prev, event));
       }
-      // The file list and the ref's changed count both move underneath the panel above.
-      onChanged();
     } catch (e) {
       // An aborted fetch is the stop button working, not a failure.
       if (!controller.signal.aborted) setError((e as Error).message);
@@ -94,8 +97,8 @@ export function EditorChat({
       {items.length === 0 ? (
         <div className="edchat-empty">
           <p>
-            It reads before it writes, and every write goes through the same gate. It cannot
-            merge.
+            It reads before it proposes, and it saves nothing — every change comes back as a diff
+            for you to accept. It cannot commit or merge.
           </p>
           <div className="edchat-examples">
             {EXAMPLES.map((e) => (
@@ -107,7 +110,11 @@ export function EditorChat({
         </div>
       ) : (
         <div className="edchat-log">
-          <Transcript items={items} chatId={chat ?? ""} />
+          <Transcript
+            items={items}
+            chatId={chat ?? ""}
+            proposals={{ textOf, reviewed, onReview }}
+          />
           <div ref={tail} />
         </div>
       )}
@@ -123,7 +130,7 @@ export function EditorChat({
       >
         <input
           value={question}
-          placeholder="Ask for a change to this model…"
+          placeholder={`Ask for a change to ${modelRef}…`}
           onChange={(e) => setQuestion(e.target.value)}
           disabled={busy}
         />

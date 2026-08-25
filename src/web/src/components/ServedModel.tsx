@@ -1,27 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type { Grounding, ServedEntity, ServedMember, ServedModel as Model } from "../sources";
-import { ArtefactDetail, GroundingSections, matchesArtefact } from "./Grounding";
+import type { ServedEntity, ServedMember, ServedModel as Model } from "../sources";
 import { Section } from "./Section";
 
 /**
- * Everything the agent brings to a question: what Cube compiled, and what grounding has
- * already told it. Not a YAML viewer — the files on disk are what was authored, this is
- * what survived compilation.
+ * What Cube compiled, for one branch. Not a YAML viewer — the files on disk are what was
+ * authored, this is what survived compilation.
  *
  * Master–detail rather than accordions: expanding a cube in place pushed every row below
  * it down the page, so comparing two meant losing your position twice. Views and cubes
  * are separate sections because a view is the curated surface a question should reach and
- * a cube is the table underneath. Grounding follows in the same column rather than in a
- * panel of its own — it is the continuation of the same question, and split in two, one
- * half went unread.
+ * a cube is the table underneath.
  *
- * The one thing to keep straight: **the two halves fail independently.** The model needs
- * the container up and Cube compiling; grounding is markdown on this machine. So a model
- * failure is a banner over empty Views and Cubes, never an early return over the list.
+ * A model failure is a banner over empty Views and Cubes, never an early return over the
+ * list: Cube not serving is a thing to say, not a blank page.
  */
 
-type Picked = { type: "entity"; id: string } | { type: "artefact"; id: string };
+type Picked = { type: "entity"; id: string };
 
 const KINDS = [
   { key: "measure", label: "Measures" },
@@ -39,18 +34,16 @@ function matches(member: ServedMember, needle: string): boolean {
 
 export function ServedModel({
   model,
-  grounding,
   loading,
   onRefresh,
   unavailable,
   onEdit,
 }: {
   model: Model | null;
-  grounding: Grounding | null;
   loading: boolean;
   onRefresh: () => void;
-  /** Why the model side cannot be read at all — a stopped container. Distinct from a
-   *  Cube that answered badly, and it must not take grounding down with it. */
+  /** Why the model cannot be read at all — a stopped container. Distinct from a Cube that
+   *  answered badly. */
   unavailable?: string;
   /** Open the file that defines this entity. Absent on main, where the model is generated
    *  and the panel is a reader. */
@@ -76,18 +69,13 @@ export function ServedModel({
 
   const listed = useMemo(() => [...shown.views, ...shown.cubes], [shown]);
 
-  const artefacts = useMemo(() => {
-    const all = grounding?.artefacts ?? [];
-    return needle ? all.filter((a) => matchesArtefact(a, needle)) : all;
-  }, [grounding, needle]);
-
   /**
    * What the box opens on under a filter, and only under a filter — volunteering the
    * first view on arrival would make Views the one section that is never collapsed.
    * A search does have to land on the strongest match: searching "revenue" and opening
    * the one view that does not mention it is a worse answer than the list already gave.
    * The *list* stays in name order regardless — re-ranking rows while someone types moves
-   * the thing they are reaching for. Entities win over grounding when both match.
+   * the thing they are reaching for.
    */
   const fallback: Picked | null = useMemo(() => {
     if (!needle) return null;
@@ -97,18 +85,13 @@ export function ServedModel({
         e.members.filter((m) => matches(m, needle)).length;
       return { type: "entity", id: [...listed].sort((a, b) => score(b) - score(a))[0].name };
     }
-    return artefacts.length ? { type: "artefact", id: artefacts[0].file } : null;
-  }, [listed, artefacts, needle]);
+    return null;
+  }, [listed, needle]);
 
-  const alive = (pick: Picked) =>
-    pick.type === "entity"
-      ? listed.some((e) => e.name === pick.id)
-      : artefacts.some((a) => a.file === pick.id);
+  const alive = (pick: Picked) => listed.some((e) => e.name === pick.id);
 
   const selected = picked && alive(picked) ? picked : fallback;
   const entity = selected?.type === "entity" ? listed.find((e) => e.name === selected.id) : null;
-  const artefact =
-    selected?.type === "artefact" ? artefacts.find((a) => a.file === selected.id) : null;
 
   /**
    * Shut until asked for, with one exception that is not a preference: a filter must
@@ -131,28 +114,20 @@ export function ServedModel({
   useEffect(() => {
     if (picked && !alive(picked)) setPicked(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [picked, listed, artefacts]);
+  }, [picked, listed]);
 
   // Model size comes from the server: "over cubes only, because a view's members are the
-  // cube's re-exported" is a fact about the model, and it is tested there. Grounding is
-  // counted here because it is a local directory the server does not size.
-  const totals = useMemo(() => {
-    const files = grounding?.artefacts ?? [];
-    return {
-      ...(model?.counts ?? { views: 0, cubes: 0, members: 0, exposed: 0, described: 0 }),
-      grounded: files.length,
-      // The half with a standing cost, which is the only grounding number worth a
-      // headline: these are in the system prompt of every turn.
-      always: files.filter((a) => a.kind === "rule" && a.loading === "always").length,
-    };
-  }, [model, grounding]);
+  // cube's re-exported" is a fact about the model, and it is tested there.
+  const totals = useMemo(
+    () => model?.counts ?? { views: 0, cubes: 0, members: 0, exposed: 0, described: 0 },
+    [model],
+  );
 
   /**
    * Why Views and Cubes are empty, or null when they are not.
    *
-   * These were four early returns, each of which also hid grounding — which is on local
-   * disk and had nothing to do with any of them. Now they are the sections' empty copy,
-   * and the list always renders.
+   * These were four early returns. Now they are the sections' empty copy, so the list
+   * always renders and the reason is beside it.
    */
   const modelNote =
     unavailable ??
@@ -166,7 +141,7 @@ export function ServedModel({
             ? "Cube answered, but is serving no cubes."
             : null);
 
-  if (!model && !grounding && loading) return <p className="served-empty">Reading…</p>;
+  if (!model && loading) return <p className="served-empty">Reading…</p>;
 
   return (
     <div className="served">
@@ -182,15 +157,7 @@ export function ServedModel({
                 ? "no views"
                 : `${totals.views} view${totals.views === 1 ? "" : "s"} expose ${totals.exposed}`}
             </>
-          )}{" "}
-          ·{" "}
-          {grounding === null
-            ? "grounding unread"
-            : totals.grounded === 0
-              ? "no grounding"
-              : `${totals.grounded} grounding file${totals.grounded === 1 ? "" : "s"}${
-                  totals.always ? `, ${totals.always} in every prompt` : ""
-                }`}
+          )}
         </span>
         <input
           className="served-filter"
@@ -210,7 +177,7 @@ export function ServedModel({
         <p className="banner bad">
           Cube did not answer <code>/v1/meta</code>: {model.error || "no response"}. Either
           it is still booting, or the model failed to compile. The container output says
-          which. Grounding below is unaffected — it is read from disk, not from Cube.
+          which.
         </p>
       )}
 
@@ -223,7 +190,7 @@ export function ServedModel({
             count={shown.views.length}
             open={isOpen("views")}
             onToggle={() => toggle("views")}
-            info="A view is the curated surface: it re-exports members from one or more cubes under names chosen for the business, with the joins already decided. The grounding rules point the agent here first, because a query inside a single view cannot pick a wrong join path."
+            info="A view is the curated surface: it re-exports members from one or more cubes under names chosen for the business, with the joins already decided. A question is best asked here, because a query inside a single view cannot pick a wrong join path."
             empty={
               <p className="served-empty">
                 {modelNote ??
@@ -263,27 +230,14 @@ export function ServedModel({
             ))}
           </Section>
 
-          <GroundingSections
-            all={grounding?.artefacts ?? []}
-            shown={artefacts}
-            selected={selected?.type === "artefact" ? selected.id : null}
-            onPick={(file) => setPicked({ type: "artefact", id: file })}
-            note={grounding && grounding.artefacts.length === 0 ? grounding.root : ""}
-            isOpen={isOpen}
-            onToggle={toggle}
-          />
         </div>
 
         <div className="served-detail">
           {entity ? (
             <Detail entity={entity} needle={needle} onEdit={onEdit} />
-          ) : artefact ? (
-            <ArtefactDetail artefact={artefact} root={grounding?.root ?? ""} />
           ) : (
             <p className="served-empty">
-              {filter
-                ? `Nothing matches “${filter}”.`
-                : "Open a section and pick a view, cube or grounding file."}
+              {filter ? `Nothing matches “${filter}”.` : "Open a section and pick a view or cube."}
             </p>
           )}
         </div>

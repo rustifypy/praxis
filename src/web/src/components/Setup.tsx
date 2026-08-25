@@ -1,20 +1,26 @@
 import { useEffect, useState } from "react";
 
 import * as api from "../sources";
-import type { Reached, Service, SourceRow } from "../sources";
-import { ConnectionForm } from "./AddSource";
+import type { JobState, Reached, Service, SourceRow } from "../sources";
+import { ConnectionForm, warehouseName } from "./AddSource";
+import { BuildModel } from "./BuildModel";
 
 /**
- * First-run setup: credentials, then one deployment at a time.
+ * First-run setup: credentials, one deployment at a time, then the model.
  *
  * **It owns the whole screen** rather than sitting in the rail. Until it finishes there is no
  * model, so chat cannot answer and a board cannot refresh — a rail offering three dead modes
  * beside the one live one is an invitation to click them.
  *
- * **Entered whenever setup is unfinished, not once.** `source.onboarded` is derived from the row
- * (both addresses set), so the step that stores credentials does not end first-run: someone who
- * downloads the file, goes to run it, and comes back an hour later arrives here at the step they
- * left, not at a page of panels with no sequence.
+ * **Entered whenever setup is unfinished, not once.** `source.onboarded` is computed server-side
+ * from the row *and* the store, so neither storing credentials nor pasting an address ends
+ * first-run: someone who downloads the file, goes to run it, and comes back an hour later arrives
+ * at the step they left, not at a page of panels with no sequence.
+ *
+ * **Setup ends with a built model, which is why there are four steps.** The pipeline used to live
+ * on the data page as a stepper you had to find; a portal whose chat cannot answer until you
+ * discover an admin screen is not set up. So the last step builds it, and `onboarded` is not true
+ * until the store holds cubes.
  *
  * **One service at a time**, deliberately. Handing over both files and then taking both
  * addresses makes a failure ambiguous about which deployment is wrong — and the semantic layer
@@ -25,14 +31,23 @@ import { ConnectionForm } from "./AddSource";
  */
 export function Setup({
   source,
+  job,
+  onJob,
+  onBuilding,
   onChanged,
 }: {
   source: SourceRow | null;
+  /** The running pipeline job, followed by the page that owns the event stream. */
+  job: JobState | null;
+  onJob: (job: JobState) => void;
+  /** Whether the model is still being built. `onboarded` goes true the moment cubes land, which
+   *  is mid-sequence — so the page keeps this screen up until the whole thing has finished. */
+  onBuilding: (building: boolean) => void;
   onChanged: () => void;
 }) {
-  // Which step is live is a fact about the row, not a cursor: credentials stored → semantic →
-  // sandbox. Nothing here can be "on step 3" while the row says otherwise.
-  const step = !source ? 1 : !source.store_url ? 2 : 3;
+  // Which step is live is a fact about the row and the store, not a cursor: credentials stored →
+  // semantic → sandbox → model. Nothing here can be "on step 4" while the row says otherwise.
+  const step = !source ? 1 : !source.store_url ? 2 : !source.sandbox_url ? 3 : 4;
 
   return (
     <div className="setup">
@@ -41,15 +56,16 @@ export function Setup({
         <p>
           The portal runs nothing itself. You give it a connection, it gives you
           a file per deployment, and you run those wherever you like — this
-          machine or a server. Then it needs the addresses back.
+          machine or a server. Then it needs the addresses back, and it builds
+          your data model.
         </p>
       </header>
 
       <ol className="setup-steps">
-        <Step n={1} now={step} title="The database">
+        <Step n={1} now={step} title="Your database or warehouse">
           {source ? (
             <p className="setup-done">
-              <strong>{source.label}</strong> · {source.driver}
+              <strong>{source.label}</strong> · {warehouseName(source.driver)}
               {" — stored, and the deployment secrets are minted."}
             </p>
           ) : (
@@ -62,7 +78,7 @@ export function Setup({
             <Handover
               service="semantic"
               blurb="Cube, the model store that holds your data model, and Cube Store. Everything the agent answers comes through it."
-              placeholder="http://localhost:8500"
+              placeholder="http://localhost:8000"
               stored={source.store_url}
               onSaved={onChanged}
             />
@@ -80,6 +96,25 @@ export function Setup({
               stored={source.sandbox_url}
               onSaved={onChanged}
             />
+          )}
+        </Step>
+
+        {/* The last step, and the only one that touches the database itself: the three above
+            store credentials and check addresses, and none of them has opened a connection. */}
+        <Step n={4} now={step} title="The data model">
+          {source && step >= 4 && (
+            <>
+              <p className="stage-hint">
+                One cube per table, with its keys and joins — this is what a question is answered
+                from. It reads your schemas first, so choosing tables is instant.
+              </p>
+              <BuildModel
+                job={job}
+                rebuilding={false}
+                onJob={onJob}
+                onRunning={onBuilding}
+              />
+            </>
           )}
         </Step>
       </ol>

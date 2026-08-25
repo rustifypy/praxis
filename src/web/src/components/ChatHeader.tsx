@@ -8,9 +8,8 @@ import { healthOf, servingNote } from "../sources";
  * rendering `CUBE_URL` as a bare `127.0.0.1:4001`, which says nothing about the database
  * behind it or whether it is built.
  *
- * The chip is a link out, not a disclosure. What can be asked about, and the grounding the
- * agent already believes, are the wrong depth for a dropdown over a live transcript — they
- * live on the data page, one deliberate click away.
+ * The chip is a link out, not a disclosure. What can be asked about is the wrong depth for a
+ * dropdown over a live transcript — it lives on the data page, one deliberate click away.
  */
 export function ChatHeader({
   source,

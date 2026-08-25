@@ -658,7 +658,7 @@ textarea {
   /* A source switcher, so it is sized to the longest row in it — a name, a summary and
      a CUBE_URL. It was 880px wide when it carried the model browser; hanging a panel
      that size over a transcript to answer "which database am I on" was the whole
-     problem. The model and grounding are on the source page now. */
+     problem. The model is on the source page now. */
   width: min(460px, calc(100vw - 340px));
   max-height: min(60vh, 520px);
   overflow-y: auto;
@@ -1539,7 +1539,7 @@ textarea {
 }
 
 /* ---------- what a script wrote, below the answer ----------
-   `wrote-`, not `file-` or `artifact-`: "artefact" already means a grounding file on the
+   `wrote-`, not `file-` or `artifact-`: "artefact" reads as something authored on the
    sources page, and one word for two things is how the `.dot` trap was sprung. Same frame as
    `.res` because it plays the same part — evidence sitting under the claim. */
 
@@ -2447,31 +2447,6 @@ textarea {
   }
 }
 
-.sources {
-  overflow-y: auto;
-  padding: 32px 40px 64px;
-  max-width: 940px;
-  width: 100%;
-  margin: 0 auto;
-}
-
-.sources-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 20px;
-}
-
-.sources-head h1 {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  font-size: 21px;
-  letter-spacing: -0.01em;
-}
-
 /* ---------- explanations, one click out of the reading path ---------- */
 
 .info {
@@ -2740,23 +2715,6 @@ textarea {
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
-}
-
-.sources-empty {
-  padding: 48px 0;
-  text-align: center;
-}
-
-.sources-empty h2 {
-  margin: 0 0 6px;
-  font-size: 17px;
-}
-
-.sources-empty p {
-  margin: 0 auto 18px;
-  max-width: 46ch;
-  color: var(--muted);
-  font-size: 13.5px;
 }
 
 .detail-what {
@@ -3188,11 +3146,6 @@ button.danger.solid {
   display: block;
 }
 
-.sources-foot {
-  color: var(--faint);
-  font-size: 12px;
-}
-
 /* ---------- the running job ---------- */
 
 .job {
@@ -3397,9 +3350,245 @@ button.danger.solid {
   cursor: pointer;
 }
 
-/* --- the connection variables ------------------------------------------------------- */
+/* --- connecting a database ------------------------------------------------------------ */
 /* Its own rules rather than the drawer's, because this form renders in two places: the
-   drawer on the data page and inline in the first-run wizard. */
+   drawer on the data page and inline in the first-run wizard. Nothing here may assume a
+   drawer's width — the wizard's column is wider, and the field grid uses what it is given. */
+
+/* Wider than the drawer's default, because the picker is cards and a pasted service account
+   key is six rows of JSON. */
+.drawer.wide {
+  width: min(560px, 100%);
+}
+
+/* The form's own spacing, so it reads the same in the drawer and in the wizard's step — one
+   lays its children out with a flex gap and the other does not. `flex: 1` keeps the footer's
+   `margin-top: auto` working now that the footer is inside this rather than in the drawer. */
+.conn-form {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* The gap above is the only spacing between rows, so the paragraphs keep no margin of their
+   own. Written specifically enough to beat `.setup-body p`, which the wizard applies to
+   everything inside a step and which would otherwise double the space around these two. */
+.conn-form p.drawer-blurb,
+.conn-form p.drawer-error {
+  margin: 0;
+}
+
+/* The form renders its own footer, and in the wizard there is no drawer rule to align it. */
+.conn-form footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+.conn-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.conn-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.conn-group-name {
+  color: var(--faint);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* auto-fill rather than a fixed column count: the same grid has to look deliberate in the
+   drawer and in the wizard's wider column, and a warehouse added to the list must not force
+   the number to be picked again. */
+.conn-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px;
+}
+
+.conn-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--raised);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.14s var(--ease),
+    background 0.14s var(--ease);
+}
+
+.conn-card:hover {
+  border-color: var(--muted);
+}
+
+.conn-card.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.conn-card strong {
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.conn-card small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+/* Two columns where there is room: host and port, user and password read as pairs, and a
+   one-per-row form of eight fields reads as longer than it is. The pastes below break out. */
+.conn-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px 12px;
+}
+
+.conn-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: relative;
+  min-width: 0;
+}
+
+/* A paste is the full width whatever the grid is doing: a certificate wrapped into a 200px
+   column is unreadable, and a key is JSON whose indentation is the only structure it has. */
+.conn-field:has(textarea) {
+  grid-column: 1 / -1;
+}
+
+.conn-label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.conn-label em {
+  color: var(--faint);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.conn-field input,
+.conn-field select,
+.conn-field textarea {
+  min-height: var(--control);
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  min-width: 0;
+}
+
+.conn-field textarea {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.conn-field input:focus,
+.conn-field select:focus,
+.conn-field textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.conn-field.bad input,
+.conn-field.bad textarea {
+  border-color: var(--bad);
+}
+
+.conn-field small {
+  color: var(--faint);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.conn-bad {
+  color: var(--bad) !important;
+}
+
+/* The colour of a warning and not of an error, because it does not stop the button: a blank
+   password is right whenever the database lets that user in without one. */
+.conn-iffy {
+  color: var(--warn) !important;
+}
+
+/* At the end of the label's own row, and only rendered once there is something to reveal. */
+.conn-reveal {
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.conn-reveal:hover {
+  color: var(--ink);
+}
+
+.conn-fold {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.conn-fold-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* The summary is what makes a shut fold honest: it says which settings are inside it, so
+   nothing is hidden behind a word as vague as "more". */
+.conn-fold-head small {
+  color: var(--faint);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conn-fold .conn-fields,
+.conn-fold .envs {
+  padding-top: 10px;
+}
+
+/* --- the settings the picker has no field for ----------------------------------------- */
 
 .envs {
   display: flex;
@@ -4045,123 +4234,6 @@ button.danger.solid {
   padding-bottom: 4px;
 }
 
-/* ---------- grounding ---------- */
-
-/* Three kinds, coloured like views and cubes are. Rules take the accent because the
-   `always` half of them is in every prompt — the only grounding with a standing cost. */
-.served-section.rules .served-section-head h4 {
-  color: var(--accent);
-}
-
-.served-section.skills .served-section-head h4,
-.served-section.certified .served-section-head h4 {
-  color: var(--muted);
-}
-
-/* The row's one badge. Marking `agent_requested` too would put a badge on every row and
-   leave the expensive half indistinguishable from the free one. */
-.ground-always {
-  flex: none;
-  padding: 0 6px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  color: var(--accent);
-  font-size: 10.5px;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  cursor: help;
-}
-
-/* Wrapped rather than truncated: this path is the diagnosis when grounding is empty, so
-   hiding its middle defeats it. Block because it renders as a span inside a paragraph. */
-.ground-path {
-  display: block;
-  margin-top: 6px;
-  font-size: 12.5px;
-  color: var(--muted);
-}
-
-.ground-path code {
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: var(--code-bg);
-  font-family: var(--mono);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-
-/* The artefact body, treated like a chat answer — these are written to be read. */
-.ground-body {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-  font-size: 13.5px;
-  line-height: 1.6;
-}
-
-.ground-body > :first-child {
-  margin-top: 0;
-}
-
-.ground-body > :last-child {
-  margin-bottom: 0;
-}
-
-.ground-body ul,
-.ground-body ol {
-  margin: 8px 0;
-  padding-left: 20px;
-}
-
-.ground-body li {
-  margin: 4px 0;
-}
-
-.ground-body code,
-.ground-body pre {
-  background: var(--code-bg);
-  border-radius: 6px;
-  font-family: var(--mono);
-  font-size: 12.5px;
-}
-
-.ground-body code {
-  padding: 1px 5px;
-}
-
-/* Certified queries are a fenced JSON block wide enough to force a sideways scroll, and
-   the detail box is `overflow-y: auto` — which computes `overflow-x` to `auto` as well,
-   so without this the whole box scrolls sideways instead of the code inside it. */
-.ground-body pre {
-  padding: 10px 12px;
-  overflow-x: auto;
-}
-
-.ground-body pre code {
-  padding: 0;
-  background: none;
-}
-
-.ground-body table {
-  display: block;
-  width: 100%;
-  margin: 10px 0;
-  border-collapse: collapse;
-  overflow-x: auto;
-  font-size: 12.5px;
-}
-
-.ground-body th,
-.ground-body td {
-  padding: 5px 9px;
-  border: 1px solid var(--line);
-  text-align: left;
-}
-
-.ground-body th {
-  background: var(--panel);
-}
-
 /* ---------- dashboards ----------
    All new names, all prefixed. `.nav*` above is deliberately *reused* by DashboardNav —
    that vocabulary is the shared sidebar chrome, and a `.nav-row-meta` beside the existing
@@ -4700,6 +4772,12 @@ button.danger.solid {
   font-size: 12px;
 }
 
+/* Saved locally and waiting to be committed, which is a state to be reassured about rather than
+   warned about — it has already been through Cube. */
+.editor-dirty.ok {
+  color: var(--ok);
+}
+
 .editor-notice {
   margin: 0 0 10px;
   padding: 8px 10px;
@@ -4707,38 +4785,6 @@ button.danger.solid {
   border-radius: 6px;
   color: var(--muted);
   font-size: 12px;
-}
-
-.editor-body {
-  display: flex;
-  gap: 10px;
-  align-items: stretch;
-  min-height: 320px;
-}
-
-.editor-pane {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-.editor-pane textarea {
-  flex: 1;
-  min-height: 320px;
-  resize: vertical;
-  padding: 8px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel);
-  color: inherit;
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre;
-  overflow-wrap: normal;
-  overflow-x: auto;
 }
 
 .editor-actions {
@@ -4786,11 +4832,6 @@ button.danger.solid {
   white-space: pre;
 }
 
-.editor-hint {
-  color: var(--muted);
-  font-size: 12px;
-}
-
 .editor-broken {
   margin: 4px 0 0;
   padding-left: 18px;
@@ -4802,8 +4843,13 @@ button.danger.solid {
 
 /* --- the editor chat ---------------------------------------------------------------- */
 
+/* A pane in the editor's grid now rather than a panel under a list, so it is a column with the
+   ask pinned to the bottom and the log taking what is left. */
 .edchat {
-  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 10px;
 }
 
 .edchat-empty {
@@ -4829,9 +4875,11 @@ button.danger.solid {
   border-radius: 999px;
 }
 
-/* The log scrolls, not the whole panel — the composer below it must stay put. */
+/* The log scrolls, not the whole pane — the composer below it must stay put. `min-height: 0` is
+   what makes `flex: 1` shrink inside a grid cell rather than growing the cell. */
 .edchat-log {
-  max-height: 380px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding-right: 4px;
 }
@@ -4858,6 +4906,10 @@ button.danger.solid {
 }
 
 .edchat-ask input {
+  min-width: 0;
+}
+
+.edchat-ask input {
   flex: 1;
 }
 
@@ -4875,31 +4927,6 @@ button.danger.solid {
   min-height: var(--control);
   line-height: 1.2;
   font-size: 12px;
-}
-
-/* Shut by default, so the panel ends at the model rather than at a chat box. */
-.editor-assist {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-}
-
-.editor-assist-head {
-  border: 0;
-  background: none;
-  padding: 0;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.editor-assist-head:hover {
-  color: inherit;
-}
-
-/* Already inside .editor-assist's rule, so it does not draw a second divider. */
-.editor-assist .edchat {
-  border-top: 0;
-  padding-top: 4px;
 }
 
 /* ---------- agent access (MCP) ---------- */
@@ -5013,7 +5040,7 @@ button.danger.solid {
   color: var(--muted);
 }
 
-/* Same treatment as a grounding fence: the config is wide, and it must scroll in its own box
+/* The config is wide, and it must scroll in its own box
    rather than widen the page. */
 .mcp-field pre,
 .mcp-field code {
@@ -5264,4 +5291,353 @@ button.danger.solid {
    without it that button would be restyled by a rule meant for the step's own action. */
 .setup-body > button.primary {
   margin-top: 2px;
+}
+
+/* ── The model editor ─────────────────────────────────────────────────────────────────────────
+   Three panes under one bar. The layout is a grid rather than flex because the middle pane holds
+   CodeMirror, which grows to whatever height it is given: `1fr` on the row and `min-height: 0`
+   on the panes are what keeps a 400-line cube file from pushing the branch bar off the screen.
+
+   Every class here is new. `.tree`, `.proposal`, `.cm-host` and the `.editor-*` additions were
+   checked against the whole stylesheet first — `.dot` and `.panel` are both names this codebase
+   has had claimed by markup rather than by CSS, so grepping the stylesheet alone is not enough. */
+
+.editor-branch {
+  color: var(--faint);
+  font-size: 14px;
+}
+
+/* Said next to the buttons, because the alternative is someone losing accepted work to a
+   reload and finding out afterwards. */
+.editor-warn {
+  margin: 0 0 8px;
+  color: var(--warn);
+  font-size: 12px;
+}
+
+.editor-tabs {
+  display: flex;
+  gap: 2px;
+  margin: 10px 0 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.editor-tabs button {
+  padding: 6px 12px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.editor-tabs button.on {
+  border-bottom-color: var(--accent);
+  color: var(--ink);
+}
+
+.editor-panes {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr) 300px;
+  gap: 1px;
+  height: 560px;
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--line);
+  overflow: hidden;
+}
+
+/* One column short when the chat is absent — on main there is nothing it could propose that
+   could be saved, so it is not rendered at all rather than disabled. */
+/* Two panes on main, where the chat is not rendered at all — there is nothing it could propose
+   that could be saved there. `:has` rather than a class, so the layout follows what is actually
+   in the DOM instead of a second flag that could disagree with it. */
+.editor-panes:has(> :nth-child(2):last-child) {
+  grid-template-columns: 190px minmax(0, 1fr);
+}
+
+.editor-panes > * {
+  min-height: 0;
+  background: var(--bg);
+  overflow: auto;
+}
+
+.editor-file {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.editor-blank {
+  padding: 24px;
+  font-size: 13px;
+}
+
+/* ── The file tree ───────────────────────────────────────────────────────────────────────── */
+
+.tree {
+  padding: 10px 8px;
+  font-size: 12.5px;
+}
+
+.tree-group {
+  margin-bottom: 14px;
+}
+
+.tree-group h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--ink);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tree-count {
+  color: var(--faint);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.tree-blurb {
+  margin: 2px 0 6px;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.tree-group ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* `>` is not needed here — a tree row holds no component of its own — but the button is styled
+   by name rather than by container so that adding one later cannot inherit this. */
+.tree-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 6px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-file:hover {
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.tree-file.on {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+/* Filled means unsaved, hollow means saved-but-uncommitted. On the file and not only in the bar,
+   because "what have I changed" is a question about the tree and the bar can only count. */
+.tree-mark {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.tree-mark.dirty {
+  background: var(--warn);
+}
+
+.tree-mark.staged {
+  border: 1px solid var(--ok);
+}
+
+.tree-empty {
+  padding: 2px 6px;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.tree-new {
+  display: flex;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.tree-new button {
+  flex: 1;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+/* ── CodeMirror ──────────────────────────────────────────────────────────────────────────────
+   The host fills what the pane gives it; everything inside is themed from `CodeEditor.tsx` so the
+   editor's colours come from the same tokens as the rest of the page. */
+
+.cm-host {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.cm-host .cm-editor {
+  height: 100%;
+}
+
+.cm-host .cm-editor.cm-focused {
+  outline: none;
+}
+
+/* ── A proposal card in the transcript ───────────────────────────────────────────────────── */
+
+.proposal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  background: var(--raised);
+  font-size: 12px;
+}
+
+.proposal.done {
+  border-left-color: var(--line);
+  opacity: 0.7;
+}
+
+.proposal-what code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.proposal-count .added {
+  color: var(--ok);
+}
+
+.proposal-count .removed {
+  color: var(--bad);
+}
+
+.proposal button {
+  padding: 2px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--raised);
+  color: var(--ink);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+/* ── The merge dialog ────────────────────────────────────────────────────────────────────────
+   `.modal` gives it the scrim, the box and the footer row; only the width and the scrolling body
+   are its own, because a patch is taller than a confirmation. */
+
+.merge-modal {
+  width: min(760px, calc(100vw - 40px));
+}
+
+.merge-body {
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.merge-files {
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.merge-files li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.merge-files code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.merge-status {
+  flex: none;
+  width: 16px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-align: center;
+}
+
+.merge-status.s-A {
+  color: var(--ok);
+}
+
+.merge-status.s-D {
+  color: var(--bad);
+}
+
+/* In the footer beside the buttons, because it is a property of the merge rather than a setting.
+   `.editor-spacer` in the markup is what keeps the two buttons together at the right-hand end. */
+.merge-drop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.merge-drop code {
+  font-family: var(--mono);
+  color: var(--ink);
+}
+
+/* ── Building the model ──────────────────────────────────────────────────────────────────── */
+
+.build {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Inside the picker's footer, beside the count. A decision that belongs with the button that
+   acts on it rather than in a settings row somewhere above. */
+.build-enrich {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  max-width: 320px;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.build-enrich input {
+  margin-top: 2px;
+}
+
+.build-enrich small {
+  display: block;
+  color: var(--faint);
+  font-size: 11px;
 }

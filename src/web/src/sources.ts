@@ -25,51 +25,19 @@ export const ACTION_LABEL: Record<string, string> = {
   read: "Read the database",
 };
 
-const STEP_BLURB: Record<StepName, string> = {
-  cubes: "Read the tables, then emit one cube each with its keys and joins.",
-  describe:
-    "One model call per table: descriptions, measures and disambiguation notes.",
-  views:
-    "Business-facing views over the join paths, validated across every join.",
-};
-
 /**
  * What the pipeline looks like to a person: four stages, not three.
  *
- * `read` has no row in `steps` because it caches a catalog rather than producing model
- * files — a backend distinction that has no business leaking into the UI. Folding it into
- * "Build cubes" would promise three steps and then offer a button that does a fourth thing.
+ * `read` has no row in `steps` because it caches a catalog rather than producing model files — a
+ * backend distinction that has no business leaking into the UI.
  *
  * There is no Connect stage: connecting is a form, and the row it writes either opened the
  * database or did not. A stage records something that ran, and a connection is a condition.
  *
- * The order, the states and what blocks what all arrive on `SourceRow.stages`, from
- * `store.STAGES`. Only the copy below is the browser's: a label is presentation, a sequence
- * is the workflow, and two sequences let two screens name different next steps.
+ * The order is `evidence.STAGES` server-side and `BuildModel`'s queue here — nothing ships a rail
+ * of stage states any more, because the two screens that run the pipeline both follow the job.
  */
 export type StageName = StepName | "read";
-
-export const STAGE_LABEL: Record<StageName, string> = {
-  ...STEP_LABEL,
-  read: "Read tables",
-};
-
-export const STAGE_BLURB: Record<StageName, string> = {
-  ...STEP_BLURB,
-  read: "One throwaway container introspects every schema at once, so choosing tables afterwards is instant and touches no database.",
-  cubes:
-    "Pick the tables to model, then emit one cube each with its keys and joins.",
-};
-
-export interface StageState {
-  name: StageName;
-  state: "done" | "error" | "todo";
-  /** The step that must succeed first, or "" when nothing is holding it up. */
-  blocked_by: StepName | "";
-  /** How much of the stage is done, when "done" is not the whole story — "9 of 11
-   *  described". Empty for every stage that is simply run or not. */
-  note: string;
-}
 
 /** From `serving.state`. The copy for each is below, in SERVING_NOTE — the state is the
  *  server's answer, the wording is ours.
@@ -113,8 +81,11 @@ export interface SourceRow {
    *  this is something it was told rather than something it arranged — and it is the difference
    *  between "nothing has been run yet" and "it is down". */
   deployed: boolean;
-  /** Whether setup finished: both addresses. A different question from `deployed`, because the
-   *  sandbox step is required — and it is what decides whether the wizard is still owed. */
+  /** Whether setup finished: both addresses **and** a model in the store. A different question
+   *  from `deployed`, and the thing that decides whether the wizard is still owed — the wizard's
+   *  last step is what builds the model, so two answering addresses and an empty store is the
+   *  state it is entered in, not the state it is finished in. Computed server-side, never a
+   *  column: `CREATE TABLE IF NOT EXISTS` cannot add one. */
   onboarded: boolean;
   /** Structured, so a dot's colour comes from a boolean rather than from wording. The same
    *  shape the wizard's check returns — one question asked of a stored address rather than a
@@ -126,26 +97,13 @@ export interface SourceRow {
   /** Why `serving` is what it is. A null `serving` has two unrelated causes — the container
    *  is stopped, and Cube refuses to compile the model — so it cannot be read as either. */
   serving_state: ServingState;
-  /** Cube is serving a model this portal did not build — a colleague's, or one restored from
-   *  the store. Every stage reads "todo" and that is honest, so the rail says so rather than
-   *  presenting a working model as an unstarted one. */
-  adopted: boolean;
-  /** The cubes and views the model store holds, by name. What the rail is read off, so a
-   *  disagreement with `serving` is visible rather than inferred. */
+  /** The cubes and views the model store holds, by name. What says a stage produced something,
+   *  so a disagreement with `serving` is visible rather than inferred. */
   cubes: string[];
   views: string[];
-  /** Per step, the later steps re-running it would discard. Computed server-side so the
-   *  confirmation and the deletion come from one rule. */
-  invalidates: Record<StepName, StepName[]>;
-  /** Where every stage stands and what is holding it up, in order. Server-side, because
-   *  `steps.action` enforces the same rule and only one of the two can be authoritative. */
-  stages: StageState[];
-  /** The first stage not done, or null once all four are. The primary action every screen
-   *  offers, so the header and the stage panel cannot name different ones. */
-  next_stage: StageName | null;
   /** Why the model store did not answer, or "". Its own field rather than a failed request,
-   *  because this page is where you find out something is down — and the rail below reads as
-   *  "nothing built" whenever it is set, which would be a lie left unexplained. */
+   *  because the data page is where you find out something is down, and everything the page
+   *  says about the model reads as "nothing built" whenever it is set. */
   store_error: string;
   /** Why the sandbox is unavailable, or "". Never fatal — every service runs wherever its
    *  owner put it, so this machine's own state is not a precondition for anything. Probed
@@ -241,31 +199,6 @@ export interface ModelCounts {
   described: number;
 }
 
-/** One markdown file under the model's `grounding/`, as the agent loads it. */
-export interface GroundingArtefact {
-  kind: "rule" | "skill" | "certified";
-  /** From frontmatter, and what `load_grounding` is called with. */
-  name: string;
-  /** Path under the grounding directory — the file to go and edit. */
-  file: string;
-  description: string;
-  /** Rules only. `always` is in every system prompt; `agent_requested` is offered by
-   *  name and its body loads on demand. The difference is the whole cost model. */
-  loading: string;
-  /** Certified queries only: the phrasings it was written to match. */
-  user_request: string;
-  body: string;
-}
-
-export interface Grounding {
-  /** The model store this was read from, so when grounding is unexpectedly empty the
-   *  address it came from is the answer. */
-  root: string;
-  /** Whether the store answered at all. False is an outage, not an empty model. */
-  exists: boolean;
-  artefacts: GroundingArtefact[];
-}
-
 export interface Closure {
   tables: string[];
   /** Pulled in by foreign key because the picked tables reference them. */
@@ -298,8 +231,14 @@ const post = (path: string, body?: unknown) =>
 /** The connection, or null before one has been made. */
 export const connection = () => json<SourceRow | null>("/api/connection");
 export const tables = () => json<TableCache>("/api/pipeline/tables");
-export const model = () => json<ServedModel>("/api/model");
-export const grounding = () => json<Grounding>("/api/model/grounding");
+
+/** The compiled model for one branch.
+ *
+ *  Takes a branch because one Cube compiles every ref independently: this is how you check that
+ *  the view you just saved exposes the members you meant, without merging it into main first.
+ *  Defaults to main, which is what every chat and every dashboard reads. */
+export const model = (ref = "main") =>
+  json<ServedModel>(`/api/model?ref=${encodeURIComponent(ref)}`);
 
 /** Probe now rather than waiting out the server's 15s health cache. */
 export const probe = () => post("/api/connection/probe") as Promise<SourceRow>;
@@ -314,7 +253,9 @@ export const connect = (body: {
 }) => post("/api/connection", body) as Promise<SourceRow>;
 
 /** The stored connection. Credentials only — the addresses are `deployed`. Nothing is
- *  invalidated: a changed host may be the same database moved, so `resetPipeline` is explicit. */
+ *  invalidated: a changed host may be the same database moved and a changed name may expose the
+ *  same tables, so which happened is not derivable from the values. Rebuilding the model is the
+ *  explicit action for the case where it was a different database. */
 export const edit = (body: { description?: string; values?: Record<string, string> }) =>
   json<SourceRow>("/api/connection", { method: "PATCH", body: JSON.stringify(body) });
 
@@ -351,15 +292,6 @@ export const deployed = (body: { store_url?: string; sandbox_url?: string }) =>
     body: JSON.stringify(body),
   });
 
-/** Discard what the pipeline recorded and the catalog it cached, for when the connection now
- *  points somewhere else. The served model keeps answering until a rebuild replaces it. */
-export const resetPipeline = () =>
-  json<SourceRow>("/api/pipeline", { method: "DELETE" });
-
-/** Mint all four secrets again. Both deployments must be re-run from freshly downloaded files
- *  afterwards, and until they are, nothing answers. */
-export const rotate = () => post("/api/deployment/secrets") as Promise<SourceRow>;
-
 export const closure = (schema_name: string, tables: string[]) =>
   post("/api/pipeline/tables/closure", { schema_name, tables }) as Promise<Closure>;
 
@@ -392,9 +324,9 @@ export interface Refs {
 }
 
 export interface BrokenQuery {
-  /** "tile" or "certified". */
+  /** "tile". */
   kind: string;
-  /** The dashboard it sits on, or the grounding file it lives in. */
+  /** The dashboard it sits on. */
   where: string;
   title: string;
   members: string[];
@@ -418,6 +350,50 @@ export interface ModelValidation {
   impact: Impact | null;
 }
 
+/** The outcome of a merge, plus main's own compile afterwards — two clean branches can merge
+ *  into a model that does not compile, and this is the moment to know. `deleted` is whether the
+ *  branch went with it, which is best-effort server-side. */
+export interface Merged extends ModelValidation {
+  merged: string;
+  deleted: boolean;
+}
+
+/**
+ * A branch's files as this machine holds them, and what the draft has done to them.
+ *
+ * `dirty` and `deleted` are the draft against what the store last handed over — computed on the
+ * server, because the server owns the bytes now and a second answer here could only disagree.
+ */
+export interface ModelFiles {
+  ref: string;
+  editable: boolean;
+  files: string[];
+  dirty: string[];
+  deleted: string[];
+  /** The store revision the draft was taken from. */
+  rev: number;
+}
+
+/**
+ * What Validate learned, without anything being published.
+ *
+ * `ok` is the gate passing *and* Cube compiling. `member_errors` and `impact` never make it
+ * false: a model that compiles with a measure that fails at query time still beats one that will
+ * not compile, and a tile this would break is the merge's business to refuse.
+ */
+export interface CheckResult {
+  ref: string;
+  ok: boolean;
+  /** Gate refusals — append-only violations, malformed YAML, a view Cube would reject. */
+  errors: string[];
+  warnings: string[];
+  compiled: boolean;
+  compile_error: string;
+  member_errors: Record<string, string>;
+  /** Null when nothing compiled, so there was no catalog to check saved queries against. */
+  impact: Impact | null;
+}
+
 export interface RefDiff {
   ref: string;
   changed: { status: string; path: string }[];
@@ -430,44 +406,70 @@ export const refs = () => json<Refs>("/api/model/refs");
 export const createRef = (name: string) =>
   post("/api/model/refs", { name }) as Promise<Refs>;
 
+export const deleteRef = (ref: string) =>
+  json<Refs>(`/api/model/refs/${encodeURIComponent(ref)}`, { method: "DELETE" });
+
 export const refDiff = (ref: string) => json<RefDiff>(`/api/model/refs/${ref}/diff`);
 
-/** `force` lands a ref that breaks saved queries — refused otherwise, server-side. */
-export const mergeRef = (ref: string, force = false) =>
+/** Land a branch on main. `force` lands one that breaks saved queries — refused otherwise,
+ *  server-side — and `deleteAfter` removes the branch in the same call, best-effort: the merge
+ *  has happened by then, so a failed cleanup is a stale name in a dropdown and not a failure. */
+export const mergeRef = (ref: string, force = false, deleteAfter = false) =>
   post(
-    `/api/model/refs/${ref}/merge${force ? "?force=true" : ""}`,
-  ) as Promise<ModelValidation & { merged: string }>;
+    `/api/model/refs/${ref}/merge?force=${force}&delete_after=${deleteAfter}`,
+  ) as Promise<Merged>;
+
+/** Every model file the editor may open on a branch, checked out if it never has been. */
+export const modelFiles = (ref: string) =>
+  json<ModelFiles>(`/api/model/files?ref=${encodeURIComponent(ref)}`);
 
 export const modelFile = (path: string, ref: string) =>
   json<{ path: string; ref: string; text: string }>(
     `/api/model/files/${path}?ref=${encodeURIComponent(ref)}`,
   );
 
-/** Tiers 1-2 then the commit. A rejection arrives as the thrown error's message. */
-export const writeModelFile = (path: string, text: string, ref: string) =>
-  json<{ path: string; ref: string; warnings: string[] }>(
+/** Save one file into the branch's draft. Local: nothing is deployed and nothing compiles. */
+export const saveFile = (path: string, ref: string, text: string) =>
+  json<{ ref: string; path: string; dirty: string[] }>(`/api/model/files/${path}`, {
+    method: "PUT",
+    body: JSON.stringify({ ref, text }),
+  });
+
+/** Drop one file from the branch's draft. 404 when it was not there. */
+export const deleteFile = (path: string, ref: string) =>
+  json<{ ref: string; path: string; deleted: string[] }>(
     `/api/model/files/${path}?ref=${encodeURIComponent(ref)}`,
-    {
-      method: "PUT",
-      body: JSON.stringify({ text }),
-    },
+    { method: "DELETE" },
   );
 
-/** Tier 3 — asks Cube itself. It does not load the edit; the commit already did. */
-export const validateModel = (ref: string) =>
-  post(`/api/model/validate?ref=${encodeURIComponent(ref)}`) as Promise<ModelValidation>;
+/** Put the draft back to what the store last handed over — one file, or all of it. */
+export const discardDraft = (ref: string, path?: string) =>
+  post("/api/model/discard", { ref, path: path ?? null }) as Promise<ModelFiles>;
+
+/**
+ * Validate: would Cube accept this branch's draft? **Nothing is published.**
+ *
+ * The whole draft goes at once, because a change spanning two files cannot compile a file at a
+ * time. The server writes it to a throwaway ref, asks Cube, and deletes the ref — so this is the
+ * only thing that can tell you a change actually compiles.
+ *
+ * It answers 200 even when the model is refused: a rejection is the answer to the question, and
+ * `ok` is what says which. Only a bad request throws.
+ */
+export const checkChanges = (ref: string) =>
+  post("/api/model/check", { ref }) as Promise<CheckResult>;
+
+/** Publish: land the branch's draft as one commit. This is the deploy — Cube is serving it
+ *  within seconds. The gate runs again server-side, so a refusal is still possible. */
+export const commitChanges = (body: { ref: string; message?: string }) =>
+  post("/api/model/commit", body) as Promise<{
+    ref: string;
+    written: string[];
+    deleted: string[];
+    warnings: string[];
+  }>;
 
 // --- the editor chat -----------------------------------------------------------------
-
-export interface EditChat {
-  id: string;
-  title: string;
-  /** The ref this conversation edits, fixed when it was created. */
-  ref: string;
-  updated_at: number;
-}
-
-export const editChats = () => json<EditChat[]>("/api/model/chats");
 
 export const createEditChat = (ref: string) =>
   post("/api/model/chats", { ref }) as Promise<{
@@ -476,6 +478,13 @@ export const createEditChat = (ref: string) =>
     ref: string;
   }>;
 
+/**
+ * Ask the editor agent for a change.
+ *
+ * Nothing about the model travels with it: the agent reads the branch's draft, which is where
+ * every unpublished edit already lives. Anything typed and not yet saved is invisible to it,
+ * which is why Save comes before asking for a change to the same file.
+ */
 export const sendEditMessage = (chatId: string, question: string, signal: AbortSignal) =>
   streamTurn(`/api/model/chats/${chatId}/messages`, { question }, signal);
 
@@ -540,37 +549,4 @@ export function healthOf(source: SourceRow): {
     return { tone: "bad", label: source.health.detail || source.health.status };
   }
   return { tone: "ok", label: "connected" };
-}
-
-/** A step's summary as one readable line. Lists are joined; counts are labelled. */
-export function summarise(
-  step: StepName,
-  record: StepRecord | undefined,
-): string {
-  const summary = record?.summary;
-  if (!summary) return "";
-  const parts: string[] = [];
-  const say = (key: string, singular: string, plural = `${singular}s`) => {
-    const value = summary[key];
-    if (typeof value === "number" && value > 0) {
-      parts.push(`${value} ${value === 1 ? singular : plural}`);
-    }
-  };
-  if (step === "cubes") {
-    say("cubes", "cube");
-    say("keys", "key");
-    say("joins", "join");
-  }
-  if (step === "describe") {
-    say("described_cubes", "cube described", "cubes described");
-    say("described_members", "member");
-    say("measures", "measure");
-    say("dropped", "dropped", "dropped");
-  }
-  if (step === "views") {
-    const names = summary.names;
-    if (Array.isArray(names) && names.length) return names.join(", ");
-    say("views", "view");
-  }
-  return parts.join(" · ");
 }

@@ -1,5 +1,9 @@
 # The model store, and Cube as a client of it
 
+> **Superseded.** This planned the model store that used to live in `services/semantic/`. That
+> store is gone: the semantic layer is now an external deployment built elsewhere. See
+> `docs/adr/0004` for what replaced it and what the portal gave up. Kept for the reasoning.
+
 Untracked on purpose — a working document, not part of the package.
 
 ## Where the build stands (2026-08-20)
@@ -14,7 +18,7 @@ Phases 1–4 done; phase 5 steps 1–3 done. **560 tests pass, lint, layering an
 | `sources/evidence.py` | the rail read off model files (17 tests) |
 | `modelstore/` | the portal's client, tier 1, `files()` cached against `version` (11 tests) |
 | `sources/definitions.py` | `Definition`, `parse`, `read` — moved out of `editing/edits.py`, see below |
-| `sources/grounding.py`, `web/state.py`, `web/sources.py`, `modelgen/steps.py` | every reader of the model goes through `modelstore.model_files` |
+| `web/state.py`, `web/sources.py`, `modelgen/steps.py` | every reader of the model goes through `modelstore.model_files` |
 | `modelgen/publish.py` | `install` is the candidate flow. `write()` and `docker.restart()` gone from it |
 | `src/web/` | four stages, no lifecycle verbs, `adopted` and `store_error` banners, `note` on the rail |
 
@@ -243,8 +247,8 @@ GET    /log?ref=&limit=
 and the read token sits in a container we may not control.
 
 **The store holds policy about files, not policy about models.** It enforces a path allowlist
-(`cubes/**.yml`, `views/**.yml`, `grounding/**.md`) and valid YAML, and it **refuses a `*.yml` anywhere but
-`cubes/` and `views/`** — because a stray `grounding/probe.yml` takes a whole model to zero cubes, and that
+(`cubes/**.yml`, `views/**.yml`) and valid YAML, and it **refuses a `*.yml` anywhere but
+`cubes/` and `views/`** — because a stray `*.yml` elsewhere takes a whole model to zero cubes, and that
 guard should protect every client rather than living in one. What counts as a *valid edit* — cubes
 append-only, views freely rewritable — stays in the portal's `edits.py`, because that is the portal's
 opinion, not a property of storage.
@@ -437,7 +441,6 @@ dashboards show the banner they already show.
 | `sources/docker.py` | two `docker run`s; − lifecycle verbs, − Cube Store, − model mount |
 | `sources/vcs.py` | **moved to the store** |
 | `sources/registry.py` | − `MODEL_ROOT`, `model_dir`, `scaffold_dirs` |
-| `sources/grounding.py` | reads via the client, cached on `version` |
 | `sources/editing/workspace.py` | `PATCH /files` instead of the filesystem |
 | `sources/editing/edits.py` | main's blobs via `GET /files?ref=main` |
 | `sources/evidence.py` *(new)* | the rail from the store's files |
@@ -487,7 +490,7 @@ Each phase leaves the app working, and the first two touch no portal code.
    store stopped while Cube keeps serving both metadata and queries.
 3. **Deployment row.** `CubeClient` and health take it; `connect` deleted; `settings` pruned; `docker.py`
    starts two containers. The portal still reads its local model directory.
-4. **Switch the readers** — `grounding`, `evidence`, `edits`, the editor tools, `web/model_edit`.
+4. **Switch the readers** — `evidence`, `edits`, the editor tools, `web/model_edit`.
 5. **Switch the writers** — `publish.install` to the candidate-ref flow, `workspace` to `PATCH /files`;
    delete the local model directory.
 6. **Onboarding.**
@@ -500,10 +503,6 @@ behaviour is proven, and everything else assumes it.
 **The store is in the query path.** `schemaVersion` runs per request, so a store outage must degrade to a
 stale model rather than an outage. Cache with a short TTL, return the last known value on error, and prove
 it in phase 2.
-
-**Grounding is read every chat turn.** Today that is a disk read; now it is a network call. Cache the file
-set keyed on `GET /version`, the same bounded-staleness pattern `CubeClient.catalog` already uses, or every
-turn pays a round trip.
 
 **The store's volume is now the model, and it is the new single point of data loss.** Today the model sits
 in a git repo in the user's own working directory. In a container volume it is much easier to lose. The

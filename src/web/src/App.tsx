@@ -8,7 +8,6 @@ import { Dashboard } from "./components/Dashboard";
 import { DashboardNav } from "./components/DashboardNav";
 import type { ComposerHandle } from "./components/Composer";
 import { Composer } from "./components/Composer";
-import { Connect } from "./components/Connect";
 import { Rail } from "./components/Rail";
 import type { Mode } from "./components/Rail";
 import { McpPage } from "./components/McpPage";
@@ -65,6 +64,9 @@ export default function App() {
   const [dashboards, setDashboards] = useState<DashboardRow[]>([]);
   const [source, setSource] = useState<SourceRow | null>(null);
   const [job, setJob] = useState<JobState | null>(null);
+  // Whether the setup wizard is still building the model — reported by `BuildModel`, because the
+  // gap between one stage finishing and the next starting is invisible from here.
+  const [building, setBuilding] = useState(false);
   // The connection drawer: "new" to connect one, "edit" to change its credentials.
   const [drawer, setDrawer] = useState<"new" | "edit" | null>(null);
 
@@ -294,10 +296,16 @@ export default function App() {
   // `booted` is what keeps this from flashing over an install that *is* configured — `source`
   // is null for the first paint of every session, and a wizard that appears for 200ms every
   // time you open the portal is worse than one that appears a moment late.
-  if (booted && !source?.onboarded) {
+  // `building` is what keeps the wizard up through the whole pipeline. `onboarded` goes true the
+  // moment cubes land, which is mid-sequence — and unmounting there would take the queue of
+  // remaining stages with it, so descriptions and views would never run.
+  if (booted && (!source?.onboarded || building)) {
     return (
       <Setup
         source={source}
+        job={job}
+        onJob={setJob}
+        onBuilding={setBuilding}
         onChanged={() => {
           void refreshSource();
         }}
@@ -392,17 +400,18 @@ export default function App() {
           <McpPage />
         </main>
       ) : view === "data" ? (
+        // `source` is non-null here by construction: setup owns the whole screen until it is
+        // finished, and finishing it requires a connection. There is no "nothing connected yet"
+        // state on this page any more, which is what the wizard replaced.
         <main className="main">
-          {source ? (
+          {source && (
             <SourceDetail
               source={source}
               job={job}
-              busy={Boolean(job && !job.done)}
+              onJob={setJob}
               onRefresh={() => void refreshSource()}
               onEdit={() => setDrawer("edit")}
             />
-          ) : (
-            <Connect source={source} onAdd={() => setDrawer("new")} />
           )}
         </main>
       ) : (
