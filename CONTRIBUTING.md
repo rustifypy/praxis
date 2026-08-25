@@ -42,8 +42,8 @@ Docker is needed only for the **code sandbox** and for running that compose file
 machine without it can still connect, build a model and ask questions — it just cannot run
 Python.
 
-The portal is the only surface for this — `POST /api/connection` is the sole writer of that row,
-and `web/pipeline.py` the sole caller of `steps.action`. Keep it that way: a second surface means
+The portal is the only surface for this — `POST /api/onboarding/connection` is the sole writer of
+that row, and `api/onboarding/` the sole caller of `steps.action`. Keep it that way: a second surface means
 the connection form, its validation and the pipeline's confirmations get written twice, which is
 exactly how two implementations of one rule start disagreeing.
 
@@ -104,7 +104,7 @@ writing.
 Two independent pieces, and you can do the first without the second.
 
 **Connecting** — nothing. The connection form takes arbitrary `CUBEJS_DB_*` variables and
-`POST /api/connection` checks only that every name carries that prefix, so a warehouse this
+`POST /api/onboarding/connection` checks only that every name carries that prefix, so a warehouse this
 repo has never heard of connects and serves a hand-written model with no code at all. There is
 no per-driver field table any more: `WAREHOUSES` in `ConnectionForm` is a dropdown with a
 starting set of rows for each entry, and it is prefill rather than schema — nothing validates
@@ -147,7 +147,7 @@ reason, a predicate. The id shows up in the rejection line, so failures stay cou
 
 ## Changing the model editor
 
-`modelstore/editing/{edits,impact,workspace}.py`, `agent/tools/editor.py` and `web/model.py`
+`modelstore/editing/{edits,impact,workspace}.py`, `agent/tools/editor.py` and `api/ide/`
 let a ref of the model be edited safely. There is no local model directory and no git
 subprocess: the store does refs, diff and merge over HTTP, and one Cube compiles every ref
 independently, so a ref is not switched *to* — it is asked *about*. Two invariants hold before

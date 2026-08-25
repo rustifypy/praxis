@@ -27,8 +27,8 @@ The word points at two sizes of thing, and both are correct. **A Store** is the 
 three containers in a **Semantic deployment**, the one holding the model. **`modelstore`** is what
 this side calls everything reached through it: the client, the served model, and the generating and
 editing of it. So the deployment is addressed as `semantic` (the wire key, the compose file, the
-`GET /api/deployment/semantic/compose` route) while the package is `modelstore`. Neither name is
-wrong; expecting one word to mean one size of thing is.
+`GET /api/onboarding/deployment/semantic/compose` route) while the package is `modelstore`.
+Neither name is wrong; expecting one word to mean one size of thing is.
 
 **Sandbox**:
 Where the agent runs Python. Optional to the code, required by onboarding.

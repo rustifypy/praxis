@@ -48,7 +48,7 @@ there is** — neither service reports a version handshake to check. `deployenv`
 and `SANDBOX_IMAGE` are the lines to move on an upgrade, and a mismatch surfaces as an error at the
 first call, never at startup.
 
-**The frontend build is not committed.** Vite hashes chunk names, so committing `web/static/`
+**The frontend build is not committed.** Vite hashes chunk names, so committing `api/static/`
 collides on every branch; a fresh clone has no frontend and `analyst` answers 503 until
 `make web-build`. It still builds *into* the package because `uv_build` ships only
 `src/analyst_agent`. `npm run dev` in `src/web/` gives hot reload against a running `analyst`.
@@ -69,7 +69,7 @@ runner, the deployment row and the hand-over it renders — is tier 0.
 | 1 | `modelstore/` | the model store, Cube behind it, the model it serves, and everything that generates or edits that model |
 | 1 | `sandbox/` | where the agent runs Python |
 | 2 | `agent/` | everything the LLM touches: prompts, the toolsets, one turn |
-| 3 | `web/` | HTTP. May reach anything; nothing may reach it |
+| 3 | `api/` | HTTP, grouped by what someone is trying to do: `mcp`, `chat`, `chat_management`, `onboarding`, `ide`, `dashboard`. May reach anything; nothing may reach it |
 
 `core.llm.build_model` and `core.events.emit` are what make the rule matter: nearly every package
 needs them, so putting either in a feature package would make that feature a dependency of its
@@ -77,7 +77,7 @@ peers. `core/llm.py` is an external integration too and stays at tier 0 anyway �
 rather than a client, and every tier needs it. That exception is named here so nobody "fixes" it.
 
 Three ways a feature is kept from crossing a tier:
-- **What a lower tier can't look up, it takes as an argument.** `web/dashboards.controller` is
+- **What a lower tier can't look up, it takes as an argument.** `api/dashboard.controller` is
   *handed* a `Bound` and a `Catalog`; it never opens the deployment row. `editing.impact` is *handed*
   the saved queries it checks against, which is what keeps `modelstore` from knowing dashboards
   exist — `test_layering.FORBIDDEN` is the assertion, and it reads both spellings of an import
@@ -103,13 +103,13 @@ one tier and the model at another described a deployment that no longer exists.
 
 Two things at tier 0 look like they belong elsewhere and do not. **`core/boards.py`** is the
 dashboard rows: accessors over four tables `core.db.SCHEMA` already owns, plus geometry that reads
-nothing but `Tile`. They cannot go to `web/` however much a dashboard looks like a page — the agent
+nothing but `Tile`. They cannot go to `api/` however much a dashboard looks like a page — the agent
 creates boards, adds tiles and saves layouts, and `agent` sits below `web`. Same argument for
 `core/transcript.py`: the event log *is* the transcript, and the agent authors it. **`core/deployenv.py`**
 renders the compose hand-over for *both* services, so inside `modelstore/` the sandbox's deployment
 file would be generated from within the model store's package.
 
-**`web/reachable.py` is in `web/` although it asks about both integrations.** It speaks HTTP itself
+**`api/onboarding/reachable.py` is in `api/` although it asks about both integrations.** It speaks HTTP itself
 rather than borrowing either client, because it is asked about an address that is *not on the row
 yet* and a service that may not exist. `connection.py` is its only caller and renders both answers
 into one panel, so the two halves must classify a timeout, a refusal and a wrong service
@@ -175,7 +175,7 @@ leftover candidate → create `candidate` from the target ref → replace the wh
 refuses stays readable at `candidate` and nothing serving moves until it compiles. This replaced
 unlinking every `*.yml` in the served model — the single worst trap the codebase used to have.
 
-### Editing on a ref — `modelstore/editing/`, `agent/tools/editor.py`, `web/model.py`
+### Editing on a ref — `modelstore/editing/`, `agent/tools/editor.py`, `api/ide/`
 Changing a model by hand on a ref of its own, then merging to main.
 
 **A ref being edited has a draft on this machine, and the draft is the current model.**
@@ -211,9 +211,9 @@ a model missing a file compiles and one carrying a stale file beside its replace
 and it skips the commit when every write reported `changed: false`, since the store 409s an empty
 one. Merge is **fast-forward only**, into main and nowhere else.
 
-### Dashboards — `core/boards.py`, `modelstore/charts.py`, `web/dashboards/`
+### Dashboards — `core/boards.py`, `modelstore/charts.py`, `api/dashboard/`
 The same machinery pointed at a repeated question. A tile stores the **query, not the rows**. Read
-`web/dashboards/__init__.py` before touching this; its three invariants: **the row is the truth and a
+`api/dashboard/__init__.py` before touching this; its three invariants: **the row is the truth and a
 tool event carries only intent** (undo comes from `layouts` being append-only, not from state on the
 event); **a refresh is atomic** (every tile compiles before any executes, and the same pass runs on
 open); **a refresh re-executes, never rewrites** (whether a window moves is a property of the stored
@@ -249,10 +249,21 @@ is its own transcript block from the `results` table. Header and chart are pure 
 catalog, rows) in `modelstore/shape.py` / `modelstore/charts.py` — derived, never asked for; `chart_for`
 returning `None` (no chart) is a normal, correct answer.
 
-**The HTTP surface is four nouns** in the order work happens: `/api/connection`, `/api/deployment`,
-`/api/pipeline`, `/api/model`, plus `/api/chats`, `/api/dashboards`, `/api/results`, `/api/mcp`. A
-fifth prefix is a claim there's a fifth thing. **"Catalog" appears nowhere** — the name means
-`modelstore.catalog.Catalog` (the served model), and the warehouse's tables are `/api/pipeline/tables`.
+**The HTTP surface is six product areas**, each a package under `api/` and a prefix on the wire:
+`/api/onboarding` (connect → hand over → build), `/api/ide` (the model and its branches),
+`/api/chats` (a chat in use), `/api/dashboard`, `/api/mcp`. A seventh prefix is a claim there is a
+seventh thing someone is trying to do.
+
+Two of the six do not get a prefix of their own, for reasons worth keeping. `chat_management`
+shares `/api/chats` with `chat` — making and naming a chat is a different product surface from
+using one, but it is the same noun, and nothing in it goes deeper than `/{chat_id}` so neither can
+shadow the other. And a result stays at `/api/results/{id}`: it belongs to a chat, but the browser
+addresses it by id alone from a `tool_end` event, so it is a permalink rather than a sub-resource.
+
+`onboarding` runs two routers because `POST /pipeline/{stage}` is as broad as a path parameter
+gets — under a shared `/api/onboarding` prefix it would have answered for `/connection`. **"Catalog" appears nowhere** — the name means
+`modelstore.catalog.Catalog` (the served model), and the warehouse's tables are
+`/api/onboarding/pipeline/tables`.
 
 The browser is separate products, so separate modes (`Rail.tsx` — chat / boards / data / agents),
 read off the hash and nowhere else.
@@ -285,7 +296,7 @@ copy here, with the store's own `compose.yml` as its reference — they can drif
 deliberately, and `MODELSTORE_IMAGE` is the line to move when the store is upgraded. Pinning is
 the only compatibility control there is: **the store reports no contract**, so `CONTRACT` is the
 sandbox's alone and `reachable.semantic` checks none.
-`GET /api/deployment/{service}/compose` is the only route that returns credential *values* (that is
+`GET /api/onboarding/deployment/{service}/compose` is the only route that returns credential *values* (that is
 its whole purpose) and answers `Content-Disposition: attachment`.
 
 Connecting is **two steps** because the portal can't do the middle one: `POST /connection` stores
@@ -294,7 +305,7 @@ receives `store_url` and `sandbox_url` and checks each before storing. Four cond
 conflating them is the mistake the glossary exists to prevent: `deployed` (an address is stored) →
 `onboarded` (both are, plus a model) → *reachable* (something answers and it's the right thing) →
 *serving* (Cube is compiling a model). Only the first two are properties of the row; the other two
-cost a request. `web/reachable.py` holds both reachability questions — see `docs/adr/0001`.
+cost a request. `api/onboarding/reachable.py` holds both reachability questions — see `docs/adr/0001`.
 
 ## Storage — one file, one schema
 
