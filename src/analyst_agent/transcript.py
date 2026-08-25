@@ -20,6 +20,10 @@ from .core import db
 from .core.config import settings
 from .core.events import Event
 
+# TODO: this file does not survive the refactor. Not to the chat controller though — `agent/turn.py`
+# and the query and code tools all append here, and `agent` sits below `web`. It goes to `core/`,
+# beside the other accessors over tables `core.db` already owns.
+
 
 @dataclass
 class Chat:
