@@ -1,7 +1,7 @@
 import pytest
 
+from analyst_agent.core import boards as dashboards
 from analyst_agent.core import db
-from analyst_agent.dashboards import store as dashboards
 
 QUERY = {"measures": ["revenue.net_revenue"], "dimensions": ["revenue.status"]}
 CHART = {"type": "bar", "x": "revenue.status", "y": ["revenue.net_revenue"]}

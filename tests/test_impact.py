@@ -2,8 +2,8 @@
 
 import pytest
 
+from analyst_agent.core import boards as _dashboards
 from analyst_agent.core import db
-from analyst_agent.dashboards import store as _dashboards
 from analyst_agent.modelstore.editing import impact
 
 REVENUE = {"measures": ["revenue.net_revenue"], "dimensions": ["revenue.status"]}

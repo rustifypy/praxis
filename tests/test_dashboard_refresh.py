@@ -6,9 +6,9 @@ them (`outgrown`, `deltas`, `layout.validate`) were covered and their only calle
 
 import pytest
 
+from analyst_agent.core import boards as _dashboards
 from analyst_agent.core import db
-from analyst_agent.dashboards import refresh as runner
-from analyst_agent.dashboards import store as _dashboards
+from analyst_agent.web.dashboards import controller as runner
 
 QUERY = {"measures": ["orders.net_revenue"], "dimensions": ["orders.status"]}
 BAR = {"type": "bar", "x": "orders.status", "y": ["orders.net_revenue"]}

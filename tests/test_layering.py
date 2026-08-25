@@ -55,8 +55,13 @@ def _edges() -> dict[str, set[str]]:
             # `level` 1 is this module's own directory, 2 its parent, and so on.
             base = here[: len(here) - (node.level - 1)]
             target = ".".join([*base, node.module or ""]).strip(".")
-            if target:
-                edges.setdefault(owner, set()).add(target)
+            if not target:
+                continue
+            seen = edges.setdefault(owner, set())
+            seen.add(target)
+            # `from ...core import boards` names a module too, and recording only `core` is
+            # how a forbidden edge hides: the two spellings have to read the same here.
+            seen.update(f"{target}.{alias.name}" for alias in node.names)
     return edges
 
 

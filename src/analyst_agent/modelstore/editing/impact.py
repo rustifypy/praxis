@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 
 from pydantic import ValidationError
 
-from ...dashboards import store
+from ...core import boards  # noqa: F401 — cut in the next commit; see test_layering.FORBIDDEN
 from ..catalog import Catalog
 from ..schema import CubeQuery
 
@@ -59,8 +59,8 @@ async def check(catalog: Catalog) -> Impact:
     # members against the ref's: "is what this tile reads still here" catches breakage
     # whatever caused it — a renamed view, a changed alias, an include quietly dropped.
     impact = Impact()
-    for board in await store.list_dashboards():
-        for tile in await store.tiles(board.id):
+    for board in await boards.list_dashboards():
+        for tile in await boards.tiles(board.id):
             impact.checked += 1
             absent, nearest = missing_members(tile.query, catalog)
             if absent:

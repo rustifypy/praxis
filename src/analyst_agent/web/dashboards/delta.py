@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
-from ..modelstore.shape import Column
-from .store import TileResult
+from ...core.boards import TileResult
+from ...modelstore.shape import Column
 
 
 @dataclass

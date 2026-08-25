@@ -1,10 +1,10 @@
 from dataclasses import dataclass, field
 
-from ..modelstore import gate
-from ..modelstore.catalog import Catalog
-from ..modelstore.schema import CubeQuery
-from ..modelstore.shape import Column, columns_of
-from ..modelstore.visualize import (
+from . import gate
+from .catalog import Catalog
+from .schema import CubeQuery
+from .shape import Column, columns_of
+from .visualize import (
     MAX_BARS,
     MAX_HBARS,
     MAX_POINTS,

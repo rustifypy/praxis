@@ -1,4 +1,4 @@
-from analyst_agent.dashboards import tiles
+from analyst_agent.modelstore import charts as tiles
 from analyst_agent.modelstore.schema import CubeQuery
 from analyst_agent.modelstore.shape import Column
 from analyst_agent.modelstore.visualize import MAX_HBARS, MAX_SERIES, MAX_SLICES
