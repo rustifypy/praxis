@@ -1,102 +1,32 @@
-"""The model: what Cube serves, and the refs it is edited on.
+"""The sixteen editor routes.
 
-One noun, four sections — what is served, refs, files, and the editor's own chat. They are one
-module because they are one prefix and one thing: `GET /api/model` is what the data page renders
-and `POST /api/model/commit` is what changes it, and a reader looking for either should not have
-to guess which file it is in.
-
-Editing invariants live in `modelstore/editing/`; the two that constrain *these routes* are that
-the gate runs before the write (because the write is the deploy) and that a workspace failure is
-an `Outcome` rather than an exception — one escaping here would 500 the route.
-
-**An unpublished edit lives in the ref's draft, on this machine.** A save is a file write and
-reaches nothing; `check` compiles the draft on a throwaway ref and `commit` publishes it. That is
-why neither takes a change set any more — the draft *is* the change set — and why `commit` runs
-the gate a second time: a draft can be edited between the two.
+**Answers 200 for a model the gate or Cube refuses.** A rejection is the answer to the question,
+not a failed request — the editor renders the reasons in one banner, and splitting them across a
+400 and a 200 would make one button read two code paths. Only a bad *request* is a status code:
+main is not editable, a path is not a model file, a delete names nothing, or the store is
+unreachable.
 """
 
-from contextlib import asynccontextmanager, suppress
+from contextlib import suppress
 from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict
 
-from ..agent.turn import stream_edit_turn
-from ..core import boards, transcript
-from ..core.deployment import MAIN
-from ..modelstore import StoreError, definitions, model_files, served_catalog
-from ..modelstore.client import open_store
-from ..modelstore.editing import drafts, impact, workspace
-from ..modelstore.modelgen import publish
-from .support import state
-from .support.stream import turn_stream
+from ...agent.turn import stream_edit_turn
+from ...core import boards, transcript
+from ...core.deployment import MAIN
+from ...modelstore import StoreError, definitions, model_files, served_catalog
+from ...modelstore.client import open_store
+from ...modelstore.editing import drafts, workspace
+from ...modelstore.modelgen import publish
+from ..support import state
+from ..support.stream import turn_stream
+from . import controller
+from .controller import STATUS
+from .dto import Draft, FileBody, Message, NewRef, Question
 
 router = APIRouter(prefix="/api/model")
-
-
-class NewRef(BaseModel):
-    name: str
-
-
-class Message(BaseModel):
-    ref: str = MAIN
-
-
-class Draft(BaseModel):
-    """Which ref a save, a check, a discard or a publish is about.
-
-    `extra="forbid"` so a renamed field in the browser fails loudly here instead of acting on the
-    default ref.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    ref: str
-    message: str = "edit model"
-    # Discard only. None is the whole draft; a path is one file.
-    path: str | None = None
-
-
-class FileBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    ref: str
-    text: str
-
-
-# --- shared -------------------------------------------------------------------
-
-
-# The kinds are the workspace's; the codes are HTTP's.
-STATUS = {"ref": 409, "path": 400, "missing": 404, "rejected": 400, "store": 502}
-
-
-def _editable(ref: str) -> str:
-    # One rule, in `workspace`, so the routes and the editor's tools cannot disagree about what
-    # is editable.
-    if refusal := workspace.editable(ref):
-        raise HTTPException(STATUS[refusal.kind], refusal.reason)
-    return ref
-
-
-@asynccontextmanager
-async def _store():
-    try:
-        async with await open_store() as store:
-            yield store
-    except StoreError as exc:
-        raise HTTPException(502, str(exc)) from None
-
-
-async def _impact(ref: str) -> impact.Impact:
-    try:
-        return impact.check(await served_catalog(ref=ref), await boards.saved_queries())
-    except StoreError as exc:
-        raise HTTPException(409, f"cannot read the model to check impact: {exc}") from None
-
-
-# --- what is served -----------------------------------------------------------
 
 
 @router.get("")
@@ -206,7 +136,7 @@ async def summary(request: Request, refresh: bool = False) -> dict:
 
 @router.get("/refs")
 async def list_refs() -> dict:
-    async with _store() as store:
+    async with controller.store() as store:
         out = []
         for ref in await store.refs():
             name = ref.name
@@ -219,7 +149,7 @@ async def list_refs() -> dict:
 @router.post("/refs")
 async def create_ref(body: NewRef, request: Request) -> dict:
     state.idle(request.app)
-    async with _store() as store:
+    async with controller.store() as store:
         taken = [ref.name for ref in await store.refs()]
         if error := workspace.validate_ref(body.name, taken):
             raise HTTPException(400, error)
@@ -231,7 +161,7 @@ async def create_ref(body: NewRef, request: Request) -> dict:
 async def delete_ref(ref: str, request: Request) -> dict:
     """Drop the ref and the working copy of it. 404 when there was no such ref."""
     state.idle(request.app)
-    _editable(ref)
+    controller.editable(ref)
     try:
         async with await open_store() as store:
             await workspace.forget(store, ref)
@@ -244,11 +174,11 @@ async def delete_ref(ref: str, request: Request) -> dict:
 
 @router.get("/refs/{ref}/diff")
 async def ref_diff(ref: str) -> dict:
-    async with _store() as store:
+    async with controller.store() as store:
         diff = await store.diff(ref)
     # Every ref is compiled by the same Cube, so impact is answerable for any of them — there is
     # no "check it out first" left.
-    report = await _impact(ref) if ref != MAIN else None
+    report = await controller.impact(ref) if ref != MAIN else None
     return {
         "ref": ref,
         "changed": diff.get("changed") or [],
@@ -278,8 +208,8 @@ async def merge_ref(
     not.
     """
     state.idle(request.app)
-    _editable(ref)
-    report = await _impact(ref)
+    controller.editable(ref)
+    report = await controller.impact(ref)
     if not report.ok and not force:
         raise HTTPException(409, report.as_message())
     try:
@@ -321,7 +251,7 @@ async def list_files(ref: str = MAIN) -> dict:
     against its origin, computed on this side rather than in the browser: the server owns the
     bytes now, so two answers to "what have I changed" would be one too many.
     """
-    async with _store() as store:
+    async with controller.store() as store:
         await workspace.ensure(store, ref)
     pending = drafts.changes(ref)
     origin = drafts.origin_at(ref)
@@ -341,7 +271,7 @@ async def read_file(path: str, ref: str = MAIN) -> dict:
     relative, refused = workspace.resolve(path)
     if not relative:
         raise HTTPException(400, refused)
-    async with _store() as store:
+    async with controller.store() as store:
         await workspace.ensure(store, ref)
     text = drafts.read(ref, relative)
     if text is None:
@@ -356,11 +286,11 @@ async def save_file(path: str, body: FileBody) -> dict:
     Refused on main and on a path Cube would ignore — the same two rules a publish enforces, run
     here so a file that could never land cannot be typed into a draft either.
     """
-    _editable(body.ref)
+    controller.editable(body.ref)
     relative, refused = workspace.resolve(path)
     if not relative:
         raise HTTPException(400, refused)
-    async with _store() as store:
+    async with controller.store() as store:
         await workspace.ensure(store, body.ref)
     drafts.save(body.ref, relative, body.text)
     return {"ref": body.ref, "path": relative, "dirty": sorted(drafts.changes(body.ref).write)}
@@ -369,11 +299,11 @@ async def save_file(path: str, body: FileBody) -> dict:
 @router.delete("/files/{path:path}")
 async def delete_file(path: str, ref: str = MAIN) -> dict:
     """Drop one file from the ref's draft. 404 when it was not there to drop."""
-    _editable(ref)
+    controller.editable(ref)
     relative, refused = workspace.resolve(path)
     if not relative:
         raise HTTPException(400, refused)
-    async with _store() as store:
+    async with controller.store() as store:
         await workspace.ensure(store, ref)
     if not drafts.remove(ref, relative):
         raise HTTPException(404, f"no model file at {relative!r} on {ref!r}")
@@ -383,7 +313,7 @@ async def delete_file(path: str, ref: str = MAIN) -> dict:
 @router.post("/discard")
 async def discard_draft(body: Draft) -> dict:
     """Put the draft back to what the store last handed over — one file, or all of it."""
-    _editable(body.ref)
+    controller.editable(body.ref)
     if body.path:
         relative, refused = workspace.resolve(body.path)
         if not relative:
@@ -407,7 +337,7 @@ async def check_changes(body: Draft) -> dict:
     A clean draft validates the ref exactly as it is committed, which is what the Validate action
     posts.
     """
-    async with _store() as store:
+    async with controller.store() as store:
         verdict = await workspace.verify(store, body.ref, saved=await boards.saved_queries())
     if verdict.kind and verdict.kind != "rejected":
         raise HTTPException(STATUS[verdict.kind], verdict.reason)
@@ -433,7 +363,7 @@ async def commit_changes(body: Draft, request: Request) -> dict:
 
     Every refusal is a status code here, unlike `check`. This one is a write that did not happen.
     """
-    async with _store() as store:
+    async with controller.store() as store:
         outcome = await workspace.publish(store, body.ref, body.message)
     if not outcome.ok:
         raise HTTPException(STATUS[outcome.kind], outcome.reason)
@@ -452,19 +382,9 @@ async def commit_changes(body: Draft, request: Request) -> dict:
 
 @router.post("/chats")
 async def create_edit_chat(body: Message) -> dict:
-    ref = _editable(body.ref)
+    ref = controller.editable(body.ref)
     chat = await transcript.create(f"Editing {ref}", "model", ref)
     return {"id": chat.id, "title": chat.title, "ref": ref}
-
-
-class Question(BaseModel):
-    """One message to the editor agent.
-
-    Nothing about the model travels with it any more: the agent reads the ref's draft, which is
-    where every unpublished edit already lives.
-    """
-
-    question: str
 
 
 @router.post("/chats/{chat_id}/messages")

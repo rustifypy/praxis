@@ -610,11 +610,12 @@ async def test_every_path_the_browser_calls_is_a_real_route():
     behaviour test of their own — so a rename that misses one shows up as a 404 in the browser
     rather than here. Resolved against the routers rather than requested, so it asserts the
     surface without standing up a deployment."""
-    from analyst_agent.api import model, onboarding
+    from analyst_agent.api import onboarding
+    from analyst_agent.api.ide import routes as ide
 
     surface = {
         (method, route.path)
-        for router in (onboarding.router, onboarding.pipeline, model.router)
+        for router in (onboarding.router, onboarding.pipeline, ide.router)
         for route in router.routes
         for method in route.methods
     }
@@ -671,7 +672,7 @@ async def test_the_served_model_reports_entities_members_and_which_file_defined_
 ):
     """The data page's whole payload. `file` per entity is read from the store rather than
     guessed from `cubes/<name>.yml`, because a hand-edited model may put a cube anywhere."""
-    from analyst_agent.api import model as routes
+    from analyst_agent.api.ide import routes
 
     async def files(ref="main"):
         return {"cubes/everything.yml": "cubes:\n  - name: orders\n  - name: customers\n"}
@@ -705,7 +706,7 @@ async def test_the_served_model_reports_entities_members_and_which_file_defined_
 async def test_the_served_model_still_answers_when_cube_is_down(api, monkeypatch):
     """One half being unreachable must not hide the other: the files are still readable and the
     editor has to keep working, so this is a 200 saying `serving: false`."""
-    from analyst_agent.api import model as routes
+    from analyst_agent.api.ide import routes
     from analyst_agent.modelstore.client import StoreError
 
     async def files(ref="main"):
@@ -729,7 +730,7 @@ async def test_the_ref_list_counts_changed_files_and_never_counts_main(
 ):
     """Files changed and not commits: it is what a reviewer is about to read. Main has nothing to
     compare against, so it is the one ref with no number."""
-    from analyst_agent.api import model as routes
+    from analyst_agent.api.ide import controller
 
     store = model_store(main={"cubes/orders.yml": "cubes: []"}, feature={})
 
@@ -741,7 +742,7 @@ async def test_the_ref_list_counts_changed_files_and_never_counts_main(
 
     store.diff = diff
     store.refs = refs
-    monkeypatch.setattr(routes, "open_store", opening(store))
+    monkeypatch.setattr(controller, "open_store", opening(store))
 
     body = (await api.get("/api/model/refs")).json()
     assert body["main"] == "main"
@@ -753,7 +754,7 @@ async def test_a_rejected_change_set_is_a_200_carrying_its_reasons(
 ):
     """The editor renders errors in one banner, so a rejection is the *answer* and not a failed
     request. Splitting it across a 400 and a 200 would make one button read two code paths."""
-    from analyst_agent.api import model as routes
+    from analyst_agent.api.ide import controller
     from analyst_agent.modelstore.editing import workspace
 
     async def verify(store, ref, *, saved):
@@ -767,7 +768,7 @@ async def test_a_rejected_change_set_is_a_200_carrying_its_reasons(
             compile_error="Member not found: orders.nope",
         )
 
-    monkeypatch.setattr(routes, "open_store", opening(model_store(edit={})))
+    monkeypatch.setattr(controller, "open_store", opening(model_store(edit={})))
     monkeypatch.setattr(workspace, "verify", verify)
 
     answered = await api.post("/api/model/check", json={"ref": "edit"})

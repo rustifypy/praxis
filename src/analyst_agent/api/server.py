@@ -16,7 +16,7 @@ from ..core import access
 from ..core.config import settings
 from ..core.transcript import checkpointer
 from ..sandbox import SandboxError
-from . import chat, chat_management, dashboard, mcp, model, onboarding
+from . import chat, chat_management, dashboard, ide, mcp, onboarding
 from .support import state
 
 STATIC = Path(__file__).parent / "static"
@@ -62,7 +62,7 @@ app.include_router(dashboard.router)
 # model, and the model itself.
 app.include_router(onboarding.router)
 app.include_router(onboarding.pipeline)
-app.include_router(model.router)
+app.include_router(ide.router)
 # What something else gets to call.
 app.include_router(mcp.router)
 

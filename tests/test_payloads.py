@@ -22,7 +22,8 @@ import os
 import pathlib
 import re
 
-from analyst_agent.api import model as model_routes
+from analyst_agent.api.ide import controller as ide_controller
+from analyst_agent.api.ide import routes as model_routes
 from analyst_agent.modelstore.client import Ref
 from analyst_agent.modelstore.editing import workspace
 
@@ -200,7 +201,7 @@ async def collect(api, monkeypatch, catalog, model_store, opening) -> dict:
     monkeypatch.setattr(model_routes, "served_catalog", served)
     out["model: served"] = (await api.get("/api/model")).json()
 
-    monkeypatch.setattr(model_routes, "open_store", opening(Listing()))
+    monkeypatch.setattr(ide_controller, "open_store", opening(Listing()))
     out["model: refs"] = (await api.get("/api/model/refs")).json()
     out["model: files on a ref"] = (await api.get("/api/model/files?ref=feature")).json()
 
