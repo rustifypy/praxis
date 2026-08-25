@@ -26,10 +26,10 @@ from . import controller
 from .controller import STATUS
 from .dto import Draft, FileBody, Message, NewRef, Question
 
-router = APIRouter(prefix="/api/model")
+router = APIRouter(prefix="/api/ide")
 
 
-@router.get("")
+@router.get("/model")
 async def served_model(ref: str = MAIN) -> dict:
     """The compiled model for one ref — every entity, every member, and the file each came from.
 
@@ -109,7 +109,7 @@ async def served_model(ref: str = MAIN) -> dict:
     }
 
 
-@router.get("/summary")
+@router.get("/model/summary")
 async def summary(request: Request, refresh: bool = False) -> dict:
     """One line per entity, for the chat page: the example questions and the header's link.
 

@@ -80,86 +80,146 @@
     },
     {
       "method": "GET",
-      "path": "/api/connection",
-      "name": "get_connection",
-      "answers": ""
-    },
-    {
-      "method": "PATCH",
-      "path": "/api/connection",
-      "name": "edit",
-      "answers": "object"
-    },
-    {
-      "method": "POST",
-      "path": "/api/connection",
-      "name": "connect",
-      "answers": "object"
-    },
-    {
-      "method": "POST",
-      "path": "/api/connection/probe",
-      "name": "probe_now",
-      "answers": "object"
-    },
-    {
-      "method": "GET",
-      "path": "/api/dashboards",
+      "path": "/api/dashboard",
       "name": "list_dashboards",
       "answers": "array"
     },
     {
       "method": "POST",
-      "path": "/api/dashboards",
+      "path": "/api/dashboard",
       "name": "create_dashboard",
       "answers": "object"
     },
     {
       "method": "DELETE",
-      "path": "/api/dashboards/{dashboard_id}",
+      "path": "/api/dashboard/{dashboard_id}",
       "name": "delete_dashboard",
       "answers": "object"
     },
     {
       "method": "GET",
-      "path": "/api/dashboards/{dashboard_id}",
+      "path": "/api/dashboard/{dashboard_id}",
       "name": "read_dashboard",
       "answers": "object"
     },
     {
       "method": "PATCH",
-      "path": "/api/dashboards/{dashboard_id}",
+      "path": "/api/dashboard/{dashboard_id}",
       "name": "rename_dashboard",
       "answers": "object"
     },
     {
       "method": "POST",
-      "path": "/api/dashboards/{dashboard_id}/layout",
+      "path": "/api/dashboard/{dashboard_id}/layout",
       "name": "set_layout",
       "answers": "object"
     },
     {
       "method": "POST",
-      "path": "/api/dashboards/{dashboard_id}/refresh",
+      "path": "/api/dashboard/{dashboard_id}/refresh",
       "name": "refresh_dashboard",
       "answers": "object"
-    },
-    {
-      "method": "PUT",
-      "path": "/api/deployment",
-      "name": "deployed",
-      "answers": "object"
-    },
-    {
-      "method": "GET",
-      "path": "/api/deployment/{service}/compose",
-      "name": "compose",
-      "answers": ""
     },
     {
       "method": "GET",
       "path": "/api/healthz",
       "name": "healthz",
+      "answers": "object"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ide/chats",
+      "name": "create_edit_chat",
+      "answers": "object"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ide/chats/{chat_id}/messages",
+      "name": "send_edit_message",
+      "answers": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/ide/check",
+      "name": "check_changes",
+      "answers": "object"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ide/commit",
+      "name": "commit_changes",
+      "answers": "object"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ide/discard",
+      "name": "discard_draft",
+      "answers": "object"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ide/files",
+      "name": "list_files",
+      "answers": "object"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/ide/files/{path:path}",
+      "name": "delete_file",
+      "answers": "object"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ide/files/{path:path}",
+      "name": "read_file",
+      "answers": "object"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/ide/files/{path:path}",
+      "name": "save_file",
+      "answers": "object"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ide/model",
+      "name": "served_model",
+      "answers": "object"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ide/model/summary",
+      "name": "summary",
+      "answers": "object"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ide/refs",
+      "name": "list_refs",
+      "answers": "object"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ide/refs",
+      "name": "create_ref",
+      "answers": "object"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/ide/refs/{ref}",
+      "name": "delete_ref",
+      "answers": "object"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ide/refs/{ref}/diff",
+      "name": "ref_diff",
+      "answers": "object"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ide/refs/{ref}/merge",
+      "name": "merge_ref",
       "answers": "object"
     },
     {
@@ -182,133 +242,73 @@
     },
     {
       "method": "GET",
-      "path": "/api/model",
-      "name": "served_model",
-      "answers": "object"
-    },
-    {
-      "method": "POST",
-      "path": "/api/model/chats",
-      "name": "create_edit_chat",
-      "answers": "object"
-    },
-    {
-      "method": "POST",
-      "path": "/api/model/chats/{chat_id}/messages",
-      "name": "send_edit_message",
+      "path": "/api/onboarding/connection",
+      "name": "get_connection",
       "answers": ""
     },
     {
-      "method": "POST",
-      "path": "/api/model/check",
-      "name": "check_changes",
+      "method": "PATCH",
+      "path": "/api/onboarding/connection",
+      "name": "edit",
       "answers": "object"
     },
     {
       "method": "POST",
-      "path": "/api/model/commit",
-      "name": "commit_changes",
+      "path": "/api/onboarding/connection",
+      "name": "connect",
       "answers": "object"
     },
     {
       "method": "POST",
-      "path": "/api/model/discard",
-      "name": "discard_draft",
-      "answers": "object"
-    },
-    {
-      "method": "GET",
-      "path": "/api/model/files",
-      "name": "list_files",
-      "answers": "object"
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/model/files/{path:path}",
-      "name": "delete_file",
-      "answers": "object"
-    },
-    {
-      "method": "GET",
-      "path": "/api/model/files/{path:path}",
-      "name": "read_file",
+      "path": "/api/onboarding/connection/probe",
+      "name": "probe_now",
       "answers": "object"
     },
     {
       "method": "PUT",
-      "path": "/api/model/files/{path:path}",
-      "name": "save_file",
+      "path": "/api/onboarding/deployment",
+      "name": "deployed",
       "answers": "object"
     },
     {
       "method": "GET",
-      "path": "/api/model/refs",
-      "name": "list_refs",
-      "answers": "object"
-    },
-    {
-      "method": "POST",
-      "path": "/api/model/refs",
-      "name": "create_ref",
-      "answers": "object"
+      "path": "/api/onboarding/deployment/{service}/compose",
+      "name": "compose",
+      "answers": ""
     },
     {
       "method": "DELETE",
-      "path": "/api/model/refs/{ref}",
-      "name": "delete_ref",
-      "answers": "object"
-    },
-    {
-      "method": "GET",
-      "path": "/api/model/refs/{ref}/diff",
-      "name": "ref_diff",
-      "answers": "object"
-    },
-    {
-      "method": "POST",
-      "path": "/api/model/refs/{ref}/merge",
-      "name": "merge_ref",
-      "answers": "object"
-    },
-    {
-      "method": "GET",
-      "path": "/api/model/summary",
-      "name": "summary",
-      "answers": "object"
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/pipeline/job",
+      "path": "/api/onboarding/pipeline/job",
       "name": "cancel_job",
       "answers": "Cancelled"
     },
     {
       "method": "GET",
-      "path": "/api/pipeline/job",
+      "path": "/api/onboarding/pipeline/job",
       "name": "read_job",
       "answers": "JobSnapshot"
     },
     {
       "method": "GET",
-      "path": "/api/pipeline/job/stream",
+      "path": "/api/onboarding/pipeline/job/stream",
       "name": "stream_job",
       "answers": ""
     },
     {
       "method": "GET",
-      "path": "/api/pipeline/tables",
+      "path": "/api/onboarding/pipeline/tables",
       "name": "read_tables",
       "answers": "TableCatalog"
     },
     {
       "method": "POST",
-      "path": "/api/pipeline/tables/closure",
+      "path": "/api/onboarding/pipeline/tables/closure",
       "name": "read_closure",
       "answers": "Closure"
     },
     {
       "method": "POST",
-      "path": "/api/pipeline/{stage}",
+      "path": "/api/onboarding/pipeline/{stage}",
       "name": "run_stage",
       "answers": "JobSnapshot"
     },

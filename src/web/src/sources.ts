@@ -4,7 +4,7 @@
  * builds the model, and the model itself.
  *
  * A job is subscribed to rather than posted: starting a stage answers immediately and the
- * narration arrives on `/api/pipeline/job/stream`, so a three-minute describe does not hold a
+ * narration arrives on `/api/onboarding/pipeline/job/stream`, so a three-minute describe does not hold a
  * request open and a page refresh re-attaches instead of losing the progress.
  */
 
@@ -229,8 +229,8 @@ const post = (path: string, body?: unknown) =>
 
 
 /** The connection, or null before one has been made. */
-export const connection = () => json<SourceRow | null>("/api/connection");
-export const tables = () => json<TableCache>("/api/pipeline/tables");
+export const connection = () => json<SourceRow | null>("/api/onboarding/connection");
+export const tables = () => json<TableCache>("/api/onboarding/pipeline/tables");
 
 /** The compiled model for one branch.
  *
@@ -238,10 +238,10 @@ export const tables = () => json<TableCache>("/api/pipeline/tables");
  *  the view you just saved exposes the members you meant, without merging it into main first.
  *  Defaults to main, which is what every chat and every dashboard reads. */
 export const model = (ref = "main") =>
-  json<ServedModel>(`/api/model?ref=${encodeURIComponent(ref)}`);
+  json<ServedModel>(`/api/ide/model?ref=${encodeURIComponent(ref)}`);
 
 /** Probe now rather than waiting out the server's 15s health cache. */
-export const probe = () => post("/api/connection/probe") as Promise<SourceRow>;
+export const probe = () => post("/api/onboarding/connection/probe") as Promise<SourceRow>;
 
 /** Store the credentials and mint the secrets. **Starts nothing** — the environment file this
  *  makes available is what someone runs, and the address comes back through `edit`. The steps
@@ -250,14 +250,14 @@ export const connect = (body: {
   description: string;
   driver: string;
   values: Record<string, string>;
-}) => post("/api/connection", body) as Promise<SourceRow>;
+}) => post("/api/onboarding/connection", body) as Promise<SourceRow>;
 
 /** The stored connection. Credentials only — the addresses are `deployed`. Nothing is
  *  invalidated: a changed host may be the same database moved and a changed name may expose the
  *  same tables, so which happened is not derivable from the values. Rebuilding the model is the
  *  explicit action for the case where it was a different database. */
 export const edit = (body: { description?: string; values?: Record<string, string> }) =>
-  json<SourceRow>("/api/connection", { method: "PATCH", body: JSON.stringify(body) });
+  json<SourceRow>("/api/onboarding/connection", { method: "PATCH", body: JSON.stringify(body) });
 
 /** The two deployments the portal renders a compose file for. */
 export type Service = "semantic" | "sandbox";
@@ -267,7 +267,7 @@ export type Service = "semantic" | "sandbox";
  *  A download and not a fetched string: it carries the warehouse password and all four secrets,
  *  and the only thing to do with it is run it somewhere. Rendering it into the page would put
  *  those values in the DOM to no purpose. */
-export const composeUrl = (service: Service) => `/api/deployment/${service}/compose`;
+export const composeUrl = (service: Service) => `/api/onboarding/deployment/${service}/compose`;
 
 /** Whether a deployment answers. One shape for both questions the server asks — the wizard's
  *  full check on a pasted address, and the recurring probe behind the health dot — because they
@@ -287,13 +287,13 @@ export interface Reached {
  *  stored, so one that does not answer never has to be undone — `checked` says which failed and
  *  why. The same call is how a deployment that moved is followed. */
 export const deployed = (body: { store_url?: string; sandbox_url?: string }) =>
-  json<{ checked: Partial<Record<Service, Reached>>; connection: SourceRow }>("/api/deployment", {
+  json<{ checked: Partial<Record<Service, Reached>>; connection: SourceRow }>("/api/onboarding/deployment", {
     method: "PUT",
     body: JSON.stringify(body),
   });
 
 export const closure = (schema_name: string, tables: string[]) =>
-  post("/api/pipeline/tables/closure", { schema_name, tables }) as Promise<Closure>;
+  post("/api/onboarding/pipeline/tables/closure", { schema_name, tables }) as Promise<Closure>;
 
 /**
  * Start one action. Answers as soon as the job exists, not when it finishes.
@@ -304,11 +304,11 @@ export const closure = (schema_name: string, tables: string[]) =>
 export const runStage = (
   stage: StageName,
   body: { schema_name?: string; tables?: string[] | null } = {},
-) => post(`/api/pipeline/${stage}`, body) as Promise<JobState>;
+) => post(`/api/onboarding/pipeline/${stage}`, body) as Promise<JobState>;
 
-export const job = () => json<JobState>("/api/pipeline/job");
+export const job = () => json<JobState>("/api/onboarding/pipeline/job");
 export const cancelJob = () =>
-  json("/api/pipeline/job", { method: "DELETE" });
+  json("/api/onboarding/pipeline/job", { method: "DELETE" });
 
 // --- refs -----------------------------------------------------------------------------
 
@@ -401,36 +401,36 @@ export interface RefDiff {
   impact: Impact | null;
 }
 
-export const refs = () => json<Refs>("/api/model/refs");
+export const refs = () => json<Refs>("/api/ide/refs");
 
 export const createRef = (name: string) =>
-  post("/api/model/refs", { name }) as Promise<Refs>;
+  post("/api/ide/refs", { name }) as Promise<Refs>;
 
 export const deleteRef = (ref: string) =>
-  json<Refs>(`/api/model/refs/${encodeURIComponent(ref)}`, { method: "DELETE" });
+  json<Refs>(`/api/ide/refs/${encodeURIComponent(ref)}`, { method: "DELETE" });
 
-export const refDiff = (ref: string) => json<RefDiff>(`/api/model/refs/${ref}/diff`);
+export const refDiff = (ref: string) => json<RefDiff>(`/api/ide/refs/${ref}/diff`);
 
 /** Land a branch on main. `force` lands one that breaks saved queries — refused otherwise,
  *  server-side — and `deleteAfter` removes the branch in the same call, best-effort: the merge
  *  has happened by then, so a failed cleanup is a stale name in a dropdown and not a failure. */
 export const mergeRef = (ref: string, force = false, deleteAfter = false) =>
   post(
-    `/api/model/refs/${ref}/merge?force=${force}&delete_after=${deleteAfter}`,
+    `/api/ide/refs/${ref}/merge?force=${force}&delete_after=${deleteAfter}`,
   ) as Promise<Merged>;
 
 /** Every model file the editor may open on a branch, checked out if it never has been. */
 export const modelFiles = (ref: string) =>
-  json<ModelFiles>(`/api/model/files?ref=${encodeURIComponent(ref)}`);
+  json<ModelFiles>(`/api/ide/files?ref=${encodeURIComponent(ref)}`);
 
 export const modelFile = (path: string, ref: string) =>
   json<{ path: string; ref: string; text: string }>(
-    `/api/model/files/${path}?ref=${encodeURIComponent(ref)}`,
+    `/api/ide/files/${path}?ref=${encodeURIComponent(ref)}`,
   );
 
 /** Save one file into the branch's draft. Local: nothing is deployed and nothing compiles. */
 export const saveFile = (path: string, ref: string, text: string) =>
-  json<{ ref: string; path: string; dirty: string[] }>(`/api/model/files/${path}`, {
+  json<{ ref: string; path: string; dirty: string[] }>(`/api/ide/files/${path}`, {
     method: "PUT",
     body: JSON.stringify({ ref, text }),
   });
@@ -438,13 +438,13 @@ export const saveFile = (path: string, ref: string, text: string) =>
 /** Drop one file from the branch's draft. 404 when it was not there. */
 export const deleteFile = (path: string, ref: string) =>
   json<{ ref: string; path: string; deleted: string[] }>(
-    `/api/model/files/${path}?ref=${encodeURIComponent(ref)}`,
+    `/api/ide/files/${path}?ref=${encodeURIComponent(ref)}`,
     { method: "DELETE" },
   );
 
 /** Put the draft back to what the store last handed over — one file, or all of it. */
 export const discardDraft = (ref: string, path?: string) =>
-  post("/api/model/discard", { ref, path: path ?? null }) as Promise<ModelFiles>;
+  post("/api/ide/discard", { ref, path: path ?? null }) as Promise<ModelFiles>;
 
 /**
  * Validate: would Cube accept this branch's draft? **Nothing is published.**
@@ -457,12 +457,12 @@ export const discardDraft = (ref: string, path?: string) =>
  * `ok` is what says which. Only a bad request throws.
  */
 export const checkChanges = (ref: string) =>
-  post("/api/model/check", { ref }) as Promise<CheckResult>;
+  post("/api/ide/check", { ref }) as Promise<CheckResult>;
 
 /** Publish: land the branch's draft as one commit. This is the deploy — Cube is serving it
  *  within seconds. The gate runs again server-side, so a refusal is still possible. */
 export const commitChanges = (body: { ref: string; message?: string }) =>
-  post("/api/model/commit", body) as Promise<{
+  post("/api/ide/commit", body) as Promise<{
     ref: string;
     written: string[];
     deleted: string[];
@@ -472,7 +472,7 @@ export const commitChanges = (body: { ref: string; message?: string }) =>
 // --- the editor chat -----------------------------------------------------------------
 
 export const createEditChat = (ref: string) =>
-  post("/api/model/chats", { ref }) as Promise<{
+  post("/api/ide/chats", { ref }) as Promise<{
     id: string;
     title: string;
     ref: string;
@@ -486,7 +486,7 @@ export const createEditChat = (ref: string) =>
  * which is why Save comes before asking for a change to the same file.
  */
 export const sendEditMessage = (chatId: string, question: string, signal: AbortSignal) =>
-  streamTurn(`/api/model/chats/${chatId}/messages`, { question }, signal);
+  streamTurn(`/api/ide/chats/${chatId}/messages`, { question }, signal);
 
 /**
  * Watch the running job.
@@ -497,7 +497,7 @@ export const sendEditMessage = (chatId: string, question: string, signal: AbortS
  * after a refresh identical to connecting for the first time.
  */
 export function watchJob(onEvent: (event: JobEvent) => void): () => void {
-  const stream = new EventSource("/api/pipeline/job/stream");
+  const stream = new EventSource("/api/onboarding/pipeline/job/stream");
   stream.onmessage = (message) => onEvent(JSON.parse(message.data) as JobEvent);
   // The server closes the stream after job_end; EventSource would reconnect forever.
   stream.onerror = () => stream.close();

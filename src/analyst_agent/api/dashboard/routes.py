@@ -12,7 +12,7 @@ from ..support import state
 from . import controller
 from .dto import Layout, NewDashboard, Rename
 
-router = APIRouter(prefix="/api/dashboards")
+router = APIRouter(prefix="/api/dashboard")
 
 
 @router.get("")

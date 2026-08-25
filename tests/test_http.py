@@ -51,7 +51,13 @@ async def test_every_other_route_is_refused_without_the_token():
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=server.app), base_url="http://test"
     ) as bare:
-        for path in ("/api/chats", "/api/model/summary", "/api/connection", "/api/dashboards", "/"):
+        for path in (
+            "/api/chats",
+            "/api/ide/model/summary",
+            "/api/onboarding/connection",
+            "/api/dashboard",
+            "/",
+        ):
             assert (await bare.get(path)).status_code == 401, path
 
 
@@ -313,8 +319,8 @@ async def test_an_unknown_dashboard_reads_as_404_but_refreshes_as_a_failed_run(a
     """Not an inconsistency to fix here: `refresh._open` returns an outcome rather than raising,
     so that a check cannot apply to `validate` and not to `refresh`. The button renders the
     outcome, so a deleted board reports `failed` instead of throwing."""
-    assert (await api.get("/api/dashboards/nope")).status_code == 404
-    response = await api.post("/api/dashboards/nope/refresh")
+    assert (await api.get("/api/dashboard/nope")).status_code == 404
+    response = await api.post("/api/dashboard/nope/refresh")
     assert response.status_code == 200
     assert response.json()["status"] == "failed"
     assert "nope" in response.json()["error"]
@@ -325,7 +331,7 @@ async def test_refreshing_an_empty_board_is_refused_not_ok(api):
     is nothing to run. The status is what the button reports."""
     _, boards, _ = api.stores
     board = await boards.create("Weekly")
-    body = (await api.post(f"/api/dashboards/{board.id}/refresh")).json()
+    body = (await api.post(f"/api/dashboard/{board.id}/refresh")).json()
     assert body["ok"] is False
     assert body["status"] == "refused"
     assert body["tiles"] == []
@@ -335,14 +341,14 @@ async def test_a_dashboard_is_listed_renamed_and_deleted(api):
     _, boards, _ = api.stores
     board = await boards.create("Weekly")
 
-    listed = (await api.get("/api/dashboards")).json()
+    listed = (await api.get("/api/dashboard")).json()
     assert [b["title"] for b in listed] == ["Weekly"]
 
-    await api.patch(f"/api/dashboards/{board.id}", json={"title": "Monthly"})
-    assert (await api.get(f"/api/dashboards/{board.id}")).json()["title"] == "Monthly"
+    await api.patch(f"/api/dashboard/{board.id}", json={"title": "Monthly"})
+    assert (await api.get(f"/api/dashboard/{board.id}")).json()["title"] == "Monthly"
 
-    assert (await api.delete(f"/api/dashboards/{board.id}")).status_code == 200
-    assert (await api.get("/api/dashboards")).json() == []
+    assert (await api.delete(f"/api/dashboard/{board.id}")).status_code == 200
+    assert (await api.get("/api/dashboard")).json() == []
 
 
 # --- connecting --------------------------------------------------------------
@@ -379,7 +385,7 @@ async def test_connecting_mints_every_secret_the_deployments_need(api):
     it a populated `Deployment`: `sandbox_token` was a column nothing minted, and every one of
     them passed while the sandbox's file went out with `SANDBOX_TOKEN=`.
     """
-    assert (await api.post("/api/connection", json=CHINOOK)).status_code == 200
+    assert (await api.post("/api/onboarding/connection", json=CHINOOK)).status_code == 200
 
     _, _, sources = api.stores
     deployment = await sources.current()
@@ -396,10 +402,10 @@ async def test_connecting_mints_every_secret_the_deployments_need(api):
 async def test_the_handover_is_a_download_per_service(api):
     """The compose files are the whole interface to whoever runs these, and a download rather
     than a body the page renders — there is nothing to do with one but run it somewhere."""
-    await api.post("/api/connection", json=CHINOOK)
+    await api.post("/api/onboarding/connection", json=CHINOOK)
 
     for service in ("semantic", "sandbox"):
-        response = await api.get(f"/api/deployment/{service}/compose")
+        response = await api.get(f"/api/onboarding/deployment/{service}/compose")
         assert response.status_code == 200, service
         assert "attachment" in response.headers["content-disposition"]
         assert "docker-compose.yml" in response.headers["content-disposition"]
@@ -409,14 +415,14 @@ async def test_the_handover_is_a_download_per_service(api):
         assert "${" not in response.text, service
         assert "$" not in response.text.replace("$$", ""), service
 
-    assert (await api.get("/api/deployment/nonsense/compose")).status_code == 404
+    assert (await api.get("/api/onboarding/deployment/nonsense/compose")).status_code == 404
 
 
 async def test_nothing_is_running_after_connecting(api):
     """Connecting stores credentials; the addresses arrive later from whoever ran the compose
     file. So this state is neutral rather than unhealthy — a red dot on a deployment whose
     environment file has not been handed over yet is a bug report waiting to happen."""
-    body = (await api.post("/api/connection", json=CHINOOK)).json()
+    body = (await api.post("/api/onboarding/connection", json=CHINOOK)).json()
     assert body["deployed"] is False
     assert body["health"]["status"] == "not deployed"
     assert body["store_url"] == ""
@@ -426,24 +432,30 @@ async def test_both_addresses_are_not_finished_setup_without_a_model(api, answer
     """Computed and not a column, because `CREATE TABLE IF NOT EXISTS` cannot add one. Setup now
     ends with a built model, so two answering addresses and an empty store is the state the
     wizard's last step is entered in — not the state it is finished in."""
-    body = (await api.post("/api/connection", json=CHINOOK)).json()
+    body = (await api.post("/api/onboarding/connection", json=CHINOOK)).json()
     assert (body["deployed"], body["onboarded"]) == (False, False)
 
-    body = (await api.put("/api/deployment", json={"store_url": "http://store:8000"})).json()
+    body = (
+        await api.put("/api/onboarding/deployment", json={"store_url": "http://store:8000"})
+    ).json()
     source = body["connection"]
     assert (source["deployed"], source["onboarded"]) == (True, False), "the sandbox is still owed"
 
-    body = (await api.put("/api/deployment", json={"sandbox_url": "http://sb:8600"})).json()
+    body = (
+        await api.put("/api/onboarding/deployment", json={"sandbox_url": "http://sb:8600"})
+    ).json()
     assert body["connection"]["onboarded"] is False, "the store holds no cubes yet"
 
 
 async def test_an_address_that_does_not_answer_is_never_stored(api):
     """The check is what makes a typo recoverable: a stored-then-failed address is what makes a
     half-configured deployment look configured."""
-    await api.post("/api/connection", json=CHINOOK)
+    await api.post("/api/onboarding/connection", json=CHINOOK)
 
     body = (
-        await api.put("/api/deployment", json={"store_url": "http://127.0.0.1:9/nothing-here"})
+        await api.put(
+            "/api/onboarding/deployment", json={"store_url": "http://127.0.0.1:9/nothing-here"}
+        )
     ).json()
 
     assert body["checked"]["semantic"]["ok"] is False
@@ -455,12 +467,14 @@ async def test_editing_the_connection_discards_nothing(api):
     """A changed host may be the same database moved and a changed name may expose the same
     tables, so which happened is not derivable from the values. Guessing it wrong either way is
     worse than not guessing: `POST /source/reset` is the explicit answer."""
-    await api.post("/api/connection", json=CHINOOK)
+    await api.post("/api/onboarding/connection", json=CHINOOK)
     _, _, sources = api.stores
     await sources.save_step("cubes", {"status": "done"})
     await sources.save_state({"introspection": {"public": ["invoice"]}})
 
-    await api.patch("/api/connection", json={"values": {"CUBEJS_DB_NAME": "somewhere-else"}})
+    await api.patch(
+        "/api/onboarding/connection", json={"values": {"CUBEJS_DB_NAME": "somewhere-else"}}
+    )
 
     assert "cubes" in await sources.steps()
     assert await sources.state() != {}
@@ -470,17 +484,19 @@ async def test_there_is_no_way_to_discard_what_was_built(api):
     """It existed for re-pointing a connection at a different database, which is re-onboarding
     now — and a rebuild runs every stage from `read`, so clearing the records first bought
     nothing."""
-    await api.post("/api/connection", json=CHINOOK)
-    assert (await api.delete("/api/pipeline")).status_code == 404
+    await api.post("/api/onboarding/connection", json=CHINOOK)
+    assert (await api.delete("/api/onboarding/pipeline")).status_code == 404
 
 
 async def test_a_variable_that_is_not_a_warehouse_setting_is_refused(api):
     """The one rule about a name, and what keeps arbitrary keys safe: everything else the
     compose file sets is CUBEJS_ without the DB, so a typed key cannot overwrite the API
     secret or dev mode."""
-    await api.post("/api/connection", json=CHINOOK)
+    await api.post("/api/onboarding/connection", json=CHINOOK)
 
-    refused = await api.patch("/api/connection", json={"values": {"CUBEJS_API_SECRET": "mine"}})
+    refused = await api.patch(
+        "/api/onboarding/connection", json={"values": {"CUBEJS_API_SECRET": "mine"}}
+    )
 
     assert refused.status_code == 400
     assert "CUBEJS_API_SECRET" in refused.json()["detail"]
@@ -491,7 +507,7 @@ async def test_a_connection_that_cannot_open_is_refused_while_the_form_is_still_
     near side of HTTP. Stored instead, it becomes a compose file that starts a deployment which
     then refuses every query — a failure two screens away from the box that caused it."""
     refused = await api.post(
-        "/api/connection",
+        "/api/onboarding/connection",
         json={"driver": "postgres", "values": {"CUBEJS_DB_HOST": "db.internal"}},
     )
 
@@ -509,7 +525,7 @@ async def test_athenas_settings_are_aws_ones_and_still_accepted(api):
     database ones, so a single-prefix rule left the one warehouse on the list impossible to
     configure at all."""
     stored = await api.post(
-        "/api/connection",
+        "/api/onboarding/connection",
         json={
             "driver": "athena",
             "values": {
@@ -530,7 +546,7 @@ async def test_a_warehouse_the_portal_has_no_field_list_for_still_connects(api):
     """The free-form settings at the bottom of the form are the only way to connect something
     unlisted, so nothing here may require a set of keys it invented for it."""
     stored = await api.post(
-        "/api/connection",
+        "/api/onboarding/connection",
         json={"driver": "timescale", "values": {"CUBEJS_DB_URL": "postgres://db/metrics"}},
     )
 
@@ -541,15 +557,15 @@ async def test_there_is_no_way_to_rotate_the_secrets(api):
     """Rotating means re-rendering both compose files and re-running both deployments, since a
     container's environment cannot be changed in place. A button that silently stops everything
     answering was worse than no button."""
-    await api.post("/api/connection", json=CHINOOK)
-    assert (await api.post("/api/deployment/secrets")).status_code == 404
+    await api.post("/api/onboarding/connection", json=CHINOOK)
+    assert (await api.post("/api/onboarding/deployment/secrets")).status_code == 404
 
 
 async def test_there_is_no_way_to_delete_a_connection(api):
     """Removed deliberately: the edit form covers pointing somewhere else, and a delete is how
     a model and four recorded steps get orphaned in the store."""
-    await api.post("/api/connection", json=CHINOOK)
-    assert (await api.delete("/api/connection")).status_code == 405
+    await api.post("/api/onboarding/connection", json=CHINOOK)
+    assert (await api.delete("/api/onboarding/connection")).status_code == 405
 
 
 async def test_the_catalog_is_a_503_before_a_deployment_rather_than_a_500(api, monkeypatch):
@@ -565,7 +581,7 @@ async def test_the_catalog_is_a_503_before_a_deployment_rather_than_a_500(api, m
         raise HTTPException(503, "no Cube deployment is configured")
 
     monkeypatch.setattr(state, "cube", unconfigured)
-    assert (await api.get("/api/model/summary")).status_code == 503
+    assert (await api.get("/api/ide/model/summary")).status_code == 503
 
 
 # --- the editor's two routes -------------------------------------------------
@@ -578,21 +594,21 @@ async def test_the_catalog_is_a_503_before_a_deployment_rather_than_a_500(api, m
 async def test_saving_on_main_is_a_409_at_the_edge(api):
     """Main is generated: re-running the pipeline rewrites every file in it, so an edit there is
     work waiting to be discarded. Refused before any ref is created."""
-    await api.post("/api/connection", json=CHINOOK)
+    await api.post("/api/onboarding/connection", json=CHINOOK)
     await api.stores[2].patch(store_url=STORED.store_url, store_token=STORED.store_token)
     body = {"ref": "main"}
-    for route in ("/api/model/check", "/api/model/commit", "/api/model/discard"):
+    for route in ("/api/ide/check", "/api/ide/commit", "/api/ide/discard"):
         assert (await api.post(route, json=body)).status_code == 409, route
-    saved = await api.put("/api/model/files/views/s.yml", json={"ref": "main", "text": "views: []"})
+    saved = await api.put("/api/ide/files/views/s.yml", json={"ref": "main", "text": "views: []"})
     assert saved.status_code == 409
 
 
 async def test_a_path_that_is_not_a_model_file_is_a_400(api):
     """Refused where the bytes arrive, so a path Cube would ignore never reaches a draft."""
-    await api.post("/api/connection", json=CHINOOK)
+    await api.post("/api/onboarding/connection", json=CHINOOK)
     await api.stores[2].patch(store_url=STORED.store_url, store_token=STORED.store_token)
     answered = await api.put(
-        "/api/model/files/notes/escape.txt", json={"ref": "edit", "text": "views: []"}
+        "/api/ide/files/notes/escape.txt", json={"ref": "edit", "text": "views: []"}
     )
     assert answered.status_code == 400
 
@@ -600,8 +616,8 @@ async def test_a_path_that_is_not_a_model_file_is_a_400(api):
 async def test_a_change_set_with_an_unknown_field_is_refused(api):
     """`extra="forbid"` on `Draft`: a renamed field in the browser has to fail loudly rather
     than act on the default ref."""
-    await api.post("/api/connection", json=CHINOOK)
-    answered = await api.post("/api/model/commit", json={"ref": "edit", "files": {}})
+    await api.post("/api/onboarding/connection", json=CHINOOK)
+    answered = await api.post("/api/ide/commit", json={"ref": "edit", "files": {}})
     assert answered.status_code == 422
 
 
@@ -620,31 +636,31 @@ async def test_every_path_the_browser_calls_is_a_real_route():
         for method in route.methods
     }
     called = {
-        ("GET", "/api/connection"),
-        ("POST", "/api/connection"),
-        ("PATCH", "/api/connection"),
-        ("POST", "/api/connection/probe"),
-        ("PUT", "/api/deployment"),
-        ("GET", "/api/deployment/{service}/compose"),
-        ("GET", "/api/model"),
-        ("GET", "/api/model/summary"),
-        ("GET", "/api/model/refs"),
-        ("POST", "/api/model/refs"),
-        ("DELETE", "/api/model/refs/{ref}"),
-        ("GET", "/api/model/refs/{ref}/diff"),
-        ("POST", "/api/model/refs/{ref}/merge"),
-        ("GET", "/api/model/files"),
-        ("GET", "/api/model/files/{path:path}"),
-        ("POST", "/api/model/check"),
-        ("POST", "/api/model/commit"),
-        ("POST", "/api/model/chats"),
-        ("POST", "/api/model/chats/{chat_id}/messages"),
-        ("GET", "/api/pipeline/tables"),
-        ("POST", "/api/pipeline/tables/closure"),
-        ("POST", "/api/pipeline/{stage}"),
-        ("GET", "/api/pipeline/job"),
-        ("GET", "/api/pipeline/job/stream"),
-        ("DELETE", "/api/pipeline/job"),
+        ("GET", "/api/onboarding/connection"),
+        ("POST", "/api/onboarding/connection"),
+        ("PATCH", "/api/onboarding/connection"),
+        ("POST", "/api/onboarding/connection/probe"),
+        ("PUT", "/api/onboarding/deployment"),
+        ("GET", "/api/onboarding/deployment/{service}/compose"),
+        ("GET", "/api/ide/model"),
+        ("GET", "/api/ide/model/summary"),
+        ("GET", "/api/ide/refs"),
+        ("POST", "/api/ide/refs"),
+        ("DELETE", "/api/ide/refs/{ref}"),
+        ("GET", "/api/ide/refs/{ref}/diff"),
+        ("POST", "/api/ide/refs/{ref}/merge"),
+        ("GET", "/api/ide/files"),
+        ("GET", "/api/ide/files/{path:path}"),
+        ("POST", "/api/ide/check"),
+        ("POST", "/api/ide/commit"),
+        ("POST", "/api/ide/chats"),
+        ("POST", "/api/ide/chats/{chat_id}/messages"),
+        ("GET", "/api/onboarding/pipeline/tables"),
+        ("POST", "/api/onboarding/pipeline/tables/closure"),
+        ("POST", "/api/onboarding/pipeline/{stage}"),
+        ("GET", "/api/onboarding/pipeline/job"),
+        ("GET", "/api/onboarding/pipeline/job/stream"),
+        ("DELETE", "/api/onboarding/pipeline/job"),
     }
     assert not called - surface, f"the browser calls routes that do not exist: {called - surface}"
 
@@ -652,8 +668,8 @@ async def test_every_path_the_browser_calls_is_a_real_route():
 async def test_a_stage_name_is_validated_rather_than_accepted(api):
     """`POST /pipeline/{stage}` is as broad as a path parameter gets, so it has to refuse
     anything that is not one of the four rather than start a job named after it."""
-    await api.post("/api/connection", json=CHINOOK)
-    assert (await api.post("/api/pipeline/nonsense", json={})).status_code == 404
+    await api.post("/api/onboarding/connection", json=CHINOOK)
+    assert (await api.post("/api/onboarding/pipeline/nonsense", json={})).status_code == 404
 
 
 # --- the routes nothing else exercises ---------------------------------------
@@ -683,7 +699,7 @@ async def test_the_served_model_reports_entities_members_and_which_file_defined_
     monkeypatch.setattr(routes, "model_files", files)
     monkeypatch.setattr(routes, "served_catalog", served)
 
-    body = (await api.get("/api/model")).json()
+    body = (await api.get("/api/ide/model")).json()
     assert (body["serving"], body["error"]) == (True, "")
     assert set(body) == {"serving", "error", "counts", "unloaded", "entities"}
 
@@ -718,7 +734,7 @@ async def test_the_served_model_still_answers_when_cube_is_down(api, monkeypatch
     monkeypatch.setattr(routes, "model_files", files)
     monkeypatch.setattr(routes, "served_catalog", down)
 
-    body = (await api.get("/api/model")).json()
+    body = (await api.get("/api/ide/model")).json()
     assert body["serving"] is False
     assert "connection refused" in body["error"]
     assert body["entities"] == []
@@ -744,7 +760,7 @@ async def test_the_ref_list_counts_changed_files_and_never_counts_main(
     store.refs = refs
     monkeypatch.setattr(controller, "open_store", opening(store))
 
-    body = (await api.get("/api/model/refs")).json()
+    body = (await api.get("/api/ide/refs")).json()
     assert body["main"] == "main"
     assert body["refs"] == [{"name": "main", "changed": 0}, {"name": "feature", "changed": 2}]
 
@@ -771,7 +787,7 @@ async def test_a_rejected_change_set_is_a_200_carrying_its_reasons(
     monkeypatch.setattr(controller, "open_store", opening(model_store(edit={})))
     monkeypatch.setattr(workspace, "verify", verify)
 
-    answered = await api.post("/api/model/check", json={"ref": "edit"})
+    answered = await api.post("/api/ide/check", json={"ref": "edit"})
     assert answered.status_code == 200, "a model Cube refuses is not a bad request"
     body = answered.json()
     assert body["ok"] is False
@@ -793,8 +809,8 @@ async def test_a_rejected_change_set_is_a_200_carrying_its_reasons(
 async def test_the_table_picker_reads_what_the_read_stage_cached(api):
     """Never the warehouse: this fires on every checkbox tick. `read` is false before anything has
     been read, which is what the picker shows its empty state from."""
-    await api.post("/api/connection", json=CHINOOK)
-    body = (await api.get("/api/pipeline/tables")).json()
+    await api.post("/api/onboarding/connection", json=CHINOOK)
+    body = (await api.get("/api/onboarding/pipeline/tables")).json()
     assert body["read"] is False
     assert body["schemas"] == []
 
@@ -816,7 +832,7 @@ async def test_the_table_picker_reads_what_the_read_stage_cached(api):
             }
         }
     )
-    body = (await api.get("/api/pipeline/tables")).json()
+    body = (await api.get("/api/onboarding/pipeline/tables")).json()
     assert body["read"] is True
     assert [schema["schema"] for schema in body["schemas"]] == ["public"]
     assert set(body) == {"read", "truncated", "notes", "selection", "schemas"}

@@ -111,18 +111,18 @@ async def collect(api, monkeypatch, catalog, model_store, opening) -> dict:
 
     # Every connection route answers the same body — `evidence.public` plus four keys — so this
     # one payload is the contract for five routes. See the plan's Part 1 note about who owns it.
-    out["connection: stored"] = (await api.post("/api/connection", json=CHINOOK)).json()
-    out["connection: read back"] = (await api.get("/api/connection")).json()
+    out["connection: stored"] = (await api.post("/api/onboarding/connection", json=CHINOOK)).json()
+    out["connection: read back"] = (await api.get("/api/onboarding/connection")).json()
 
-    out["dashboards: none yet"] = (await api.get("/api/dashboards")).json()
-    board = (await api.post("/api/dashboards", json={"title": "Sales"})).json()
+    out["dashboards: none yet"] = (await api.get("/api/dashboard")).json()
+    board = (await api.post("/api/dashboard", json={"title": "Sales"})).json()
     out["dashboards: created"] = board
     out["dashboard: no tiles, never refreshed"] = (
-        await api.get(f"/api/dashboards/{board['id']}")
+        await api.get(f"/api/dashboard/{board['id']}")
     ).json()
 
-    out["pipeline: nothing read yet"] = (await api.get("/api/pipeline/tables")).json()
-    out["pipeline: no job running"] = (await api.get("/api/pipeline/job")).json()
+    out["pipeline: nothing read yet"] = (await api.get("/api/onboarding/pipeline/tables")).json()
+    out["pipeline: no job running"] = (await api.get("/api/onboarding/pipeline/job")).json()
 
     # With a catalog cached, so the per-table row and the schema wrapper are actually in the
     # snapshot. Without this the `schemas` list is empty in every payload here and the key the
@@ -157,10 +157,10 @@ async def collect(api, monkeypatch, catalog, model_store, opening) -> dict:
             }
         }
     )
-    out["pipeline: a schema was read"] = (await api.get("/api/pipeline/tables")).json()
+    out["pipeline: a schema was read"] = (await api.get("/api/onboarding/pipeline/tables")).json()
     out["pipeline: closing over one table"] = (
         await api.post(
-            "/api/pipeline/tables/closure",
+            "/api/onboarding/pipeline/tables/closure",
             json={"schema_name": "public", "tables": ["invoice_line"]},
         )
     ).json()
@@ -199,11 +199,11 @@ async def collect(api, monkeypatch, catalog, model_store, opening) -> dict:
 
     monkeypatch.setattr(model_routes, "model_files", files)
     monkeypatch.setattr(model_routes, "served_catalog", served)
-    out["model: served"] = (await api.get("/api/model")).json()
+    out["model: served"] = (await api.get("/api/ide/model")).json()
 
     monkeypatch.setattr(ide_controller, "open_store", opening(Listing()))
-    out["model: refs"] = (await api.get("/api/model/refs")).json()
-    out["model: files on a ref"] = (await api.get("/api/model/files?ref=feature")).json()
+    out["model: refs"] = (await api.get("/api/ide/refs")).json()
+    out["model: files on a ref"] = (await api.get("/api/ide/files?ref=feature")).json()
 
     async def verify(store, ref, write, delete):
         return workspace.Verdict(
@@ -217,7 +217,7 @@ async def collect(api, monkeypatch, catalog, model_store, opening) -> dict:
 
     monkeypatch.setattr(workspace, "verify", verify)
     out["model: a change set Cube refuses"] = (
-        await api.post("/api/model/check", json={"ref": "feature", "write": {}})
+        await api.post("/api/ide/check", json={"ref": "feature", "write": {}})
     ).json()
 
     return out

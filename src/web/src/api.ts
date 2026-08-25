@@ -61,7 +61,7 @@ interface ModelEntity {
 /** One line per entity: the chat's example questions and the header's link. The data page
  *  reads the same model in full through `sources.model()`. */
 export const modelSummary = () =>
-  json<{ cube_url: string; entities: ModelEntity[] }>("/api/model/summary");
+  json<{ cube_url: string; entities: ModelEntity[] }>("/api/ide/model/summary");
 export const listChats = () => json<Chat[]>("/api/chats");
 export const createChat = () => json<Chat>("/api/chats", { method: "POST", body: "{}" });
 export const chatEvents = (id: string) => json<AgentEvent[]>(`/api/chats/${id}/events`);
@@ -196,25 +196,25 @@ export const sendMessage = (
 
 // --- dashboards ---------------------------------------------------------------------
 
-export const listDashboards = () => json<DashboardRow[]>("/api/dashboards");
+export const listDashboards = () => json<DashboardRow[]>("/api/dashboard");
 
 export const createDashboard = (title: string) =>
-  json<{ id: string }>("/api/dashboards", { method: "POST", body: JSON.stringify({ title }) });
+  json<{ id: string }>("/api/dashboard", { method: "POST", body: JSON.stringify({ title }) });
 
-export const dashboard = (id: string) => json<DashboardDetail>(`/api/dashboards/${id}`);
+export const dashboard = (id: string) => json<DashboardDetail>(`/api/dashboard/${id}`);
 
 export const renameDashboard = (id: string, title: string) =>
-  json(`/api/dashboards/${id}`, { method: "PATCH", body: JSON.stringify({ title }) });
+  json(`/api/dashboard/${id}`, { method: "PATCH", body: JSON.stringify({ title }) });
 
 export const deleteDashboard = (id: string) =>
-  json(`/api/dashboards/${id}`, { method: "DELETE" });
+  json(`/api/dashboard/${id}`, { method: "DELETE" });
 
 /** A plain POST, not a stream: the refresh is atomic, so there is no partial state to show. */
 export const refreshDashboard = (id: string) =>
-  json<RefreshOutcome>(`/api/dashboards/${id}/refresh`, { method: "POST" });
+  json<RefreshOutcome>(`/api/dashboard/${id}/refresh`, { method: "POST" });
 
 export const saveLayout = (id: string, spec: unknown, note: string) =>
-  json<{ version: number }>(`/api/dashboards/${id}/layout`, {
+  json<{ version: number }>(`/api/dashboard/${id}/layout`, {
     method: "POST",
     body: JSON.stringify({ spec, note }),
   });

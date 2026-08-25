@@ -363,7 +363,7 @@ export default function App() {
           onConnect={async (body) => {
             await sourcesApi.connect(body);
             setDrawer(null);
-            // Onto the data page, where the pipeline is. POST /api/connection has already made
+            // Onto the data page, where the pipeline is. POST /api/onboarding/connection has already made
             // the connection usable — there is no Connect action to fire after it.
             showData();
             await refreshSource();

@@ -38,11 +38,11 @@ from .dto import (
     TableCatalog,
 )
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/api/onboarding")
 
 # The model being built out of the connection. Its own router so `POST /{stage}` cannot reach
 # past `/pipeline`, where a single `/api` prefix would have let it answer for `/connection`.
-pipeline = APIRouter(prefix="/api/pipeline")
+pipeline = APIRouter(prefix="/api/onboarding/pipeline")
 
 
 @router.get("/connection")
