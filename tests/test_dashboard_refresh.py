@@ -6,7 +6,7 @@ them (`outgrown`, `deltas`, `layout.validate`) were covered and their only calle
 
 import pytest
 
-from analyst_agent.api.dashboards import controller as runner
+from analyst_agent.api.dashboard import controller as runner
 from analyst_agent.core import boards as _dashboards
 from analyst_agent.core import db
 

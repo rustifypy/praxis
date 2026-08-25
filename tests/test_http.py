@@ -190,8 +190,8 @@ class FakeSandbox:
 
 @pytest.fixture
 def fake_sandbox(monkeypatch):
-    from analyst_agent.api.chat import controller as chat_controller
-    from analyst_agent.api.workspace import controller as workspace_controller
+    from analyst_agent.api.chat_management import controller as chat_controller
+    from analyst_agent.api.chat import controller as workspace_controller
 
     fake = FakeSandbox()
 
@@ -206,8 +206,8 @@ def fake_sandbox(monkeypatch):
 @pytest.fixture
 def no_sandbox(monkeypatch):
     """A deployment with none configured — which is every deployment until one is run."""
-    from analyst_agent.api.chat import controller as chat_controller
-    from analyst_agent.api.workspace import controller as workspace_controller
+    from analyst_agent.api.chat_management import controller as chat_controller
+    from analyst_agent.api.chat import controller as workspace_controller
     from analyst_agent.sandbox import SandboxError
 
     async def refused(*args, **kwargs):
@@ -254,7 +254,7 @@ async def test_an_upload_is_handed_over_and_its_shape_reported_back(api, fake_sa
 async def test_a_file_over_the_cap_is_refused_before_it_is_handed_over(api, fake_sandbox):
     """Content-Length is the cheap refusal and the running total is the real one — a chunked
     upload sends no length at all."""
-    from analyst_agent.api.workspace import controller as workspace_controller
+    from analyst_agent.api.chat import controller as workspace_controller
 
     chat = (await api.post("/api/chats", json={})).json()
     over = b"x" * (workspace_controller.MAX_BYTES + 1)

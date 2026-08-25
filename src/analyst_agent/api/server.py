@@ -16,7 +16,7 @@ from ..core import access
 from ..core.config import settings
 from ..core.transcript import checkpointer
 from ..sandbox import SandboxError
-from . import agentaccess, chat, connection, dashboards, model, pipeline, result, workspace
+from . import chat, chat_management, connection, dashboard, mcp, model, pipeline
 from .support import state
 
 STATIC = Path(__file__).parent / "static"
@@ -54,19 +54,19 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="analyst-agent web", lifespan=lifespan)
 
 # The products.
+app.include_router(chat_management.router)
 app.include_router(chat.router)
-app.include_router(workspace.router)
-app.include_router(result.router)
-app.include_router(dashboards.router)
+app.include_router(chat.results)
+app.include_router(dashboard.router)
 # What they run on: the connection, the deployment serving it, the pipeline that builds the
 # model, and the model itself.
 app.include_router(connection.router)
 app.include_router(pipeline.router)
 app.include_router(model.router)
 # What something else gets to call.
-app.include_router(agentaccess.router)
+app.include_router(mcp.router)
 
-mcp_server = agentaccess.build(app)
+mcp_server = mcp.build(app)
 app.state.mcp_server = mcp_server
 mcp_app = mcp_server.streamable_http_app(streamable_http_path="/")
 app.mount("/mcp", mcp_app)

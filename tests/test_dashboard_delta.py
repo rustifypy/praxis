@@ -1,4 +1,4 @@
-from analyst_agent.api.dashboards.delta import deltas
+from analyst_agent.api.dashboard.delta import deltas
 from analyst_agent.core.boards import TileResult
 from analyst_agent.modelstore.shape import Column
 

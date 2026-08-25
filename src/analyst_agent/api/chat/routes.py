@@ -1,54 +1,39 @@
-"""The eight chat routes.
+"""The ten routes of a chat in use: one turn, the files beside it, the rows it produced.
 
-Order matters within the prefix: every fixed-segment route here is registered before
-`web/workspace/`'s `{path:path}` ones, which share `/api/chats`. They do not currently collide —
-the greedy parameters sit under a literal `files/` or `preview/` segment — and
-`test_every_route_is_reachable_and_unshadowed` is what would say so if that changed.
+Making, naming and deleting a chat is `chat_management/`. Both routers share `/api/chats`, and
+nothing there goes deeper than `/{chat_id}`, so no route can shadow one here whichever loads
+first — `test_every_route_is_reachable_and_unshadowed` is what says so.
+
+The two greedy `{path:path}` parameters sit under a literal `files/` or `preview/` segment, which
+is what keeps them off `/messages` and `/stop`. That is a property of those literals rather than
+of the order.
+
+**No `SandboxError` handling here.** `server.py` maps it once at the app boundary, because the
+service supplies its own status and the file routes would otherwise repeat the same three lines.
 """
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+import mimetypes
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException, Request, UploadFile
+from fastapi.responses import Response, StreamingResponse
 
 from ...agent.turn import stream_turn
-from ...core.transcript import Chat
+from ...core import transcript
 from ..support.stream import turn_stream
 from . import controller
-from .dto import Decided, Decision, NewChat, Ok, Question, Rename, Stopped
+from .controller import CHUNK, MAX_BYTES, TOO_BIG
+from .dto import Decided, Decision, Discarded, FilePreview, Question, ResultPage, Stopped, Uploaded
 
 router = APIRouter(prefix="/api/chats")
 
+# A result is addressed by its own id and not through the chat that produced it: the
+# browser has the id from a `tool_end` event, and a table in an old transcript is a link.
+results = APIRouter(prefix="/api/results")
 
-@router.get("", response_model=list[Chat])
-async def list_chats() -> list[Chat]:
-    """Every question chat, newest activity first.
-    Model chats are absent: they are the same table filtered by kind, and the editor lists its
-    own."""
-    return await controller.listed()
-
-
-@router.post("", response_model=Chat)
-async def create_chat(body: NewChat) -> Chat:
-    """Start an empty chat and return it, so the browser can select it immediately.
-    Its title is a placeholder until the first question replaces it."""
-    return await controller.create(body.title)
-
-
-@router.patch("/{chat_id}", response_model=Ok)
-async def rename_chat(chat_id: str, body: Rename) -> Ok:
-    """Retitle a chat.
-    Answers `ok` rather than the row: the browser already has it and renaming cannot fail
-    usefully — an unknown id updates nothing."""
-    await controller.rename(chat_id, body.title)
-    return Ok()
-
-
-@router.delete("/{chat_id}", response_model=Ok)
-async def delete_chat(chat_id: str) -> Ok:
-    """Delete a chat, its events and results, and ask the sandbox to drop its workspace.
-    The workspace half is best-effort: the chat is already gone, so a sandbox that did not answer
-    must not report this as failed."""
-    await controller.delete(chat_id)
-    return Ok()
+# Raster only, and the type is derived from the extension rather than echoing the browser's: an
+# SVG is a document that can carry script, and serving one inline would hand it this origin.
+INLINE = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
 
 @router.get("/{chat_id}/events")
@@ -95,4 +80,91 @@ async def send_message(chat_id: str, body: Question, request: Request) -> Stream
         lambda cancel: stream_turn(
             chat_id, body.question, request.app.state.saver, cube, cancel, attached, approvals
         ),
+    )
+
+
+# --- the files beside a chat -------------------------------------------------
+
+
+@router.post("/{chat_id}/files", response_model=Uploaded)
+async def upload_file(chat_id: str, file: UploadFile, request: Request) -> Uploaded:
+    """Hand a file to the sandbox and report the shape it read out of it.
+    413 past the size limit, checked twice — Content-Length is the cheap refusal and not a
+    promise, since a chunked upload sends none at all."""
+    if await transcript.get(chat_id) is None:
+        raise HTTPException(404, "no such chat")
+
+    if int(request.headers.get("content-length") or 0) > MAX_BYTES:
+        raise HTTPException(413, TOO_BIG)
+
+    body = bytearray()
+    while chunk := await file.read(CHUNK):
+        body += chunk
+        if len(body) > MAX_BYTES:
+            raise HTTPException(413, TOO_BIG)
+
+    return await controller.store(chat_id, file.filename or "upload", bytes(body))
+
+
+# Below the chat routes that end in a fixed segment, and `{path:path}` because an artifact is
+# `charts/q1.png` as readily as `q1.png`.
+@router.get("/{chat_id}/files/{path:path}")
+async def download_file(chat_id: str, path: str) -> Response:
+    """One workspace file's bytes, inline for an image and as an attachment for anything else.
+    The content type is derived from the extension and never echoed from the upload: an SVG can
+    carry script, and serving one inline would hand it this origin."""
+    data = await controller.read_bytes(chat_id, path)
+    inline = Path(path).suffix.lower() in INLINE
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if not inline:
+        headers["Content-Disposition"] = f'attachment; filename="{Path(path).name}"'
+    return Response(
+        data,
+        media_type=mimetypes.guess_type(path)[0] or "application/octet-stream",
+        headers=headers,
+    )
+
+
+@router.get("/{chat_id}/preview/{path:path}", response_model=FilePreview)
+async def preview_file(chat_id: str, path: str) -> FilePreview:
+    """The head of a workspace file, as a table if it parses as one and as text otherwise.
+    Never reads the file at all for bytes with no useful head — the extension decides that before
+    a request reaches the service."""
+    return await controller.preview(chat_id, path)
+
+
+@router.delete("/{chat_id}/files/{path:path}", response_model=Discarded)
+async def discard_file(chat_id: str, path: str) -> Discarded:
+    """Take a file back off the workspace, deleting it rather than only un-attaching it.
+    `uploads/` is what the prompt is built from every turn, so a chip dropped while the file
+    stayed would leave the agent still describing it."""
+    return await controller.discard(chat_id, path)
+
+
+# --- the rows a turn produced, on their own prefix ---------------------------
+
+
+@results.get("/{result_id}", response_model=ResultPage)
+async def read_result(result_id: str, offset: int = 0, limit: int = 200) -> ResultPage:
+    """One page of a stored result set, plus the row count of the whole set.
+    404 when the id is unknown, which a link in an old transcript will hit: rows are pruned on a
+    retention pass and outlive nothing."""
+    found = await controller.page(result_id, offset, limit)
+    if found is None:
+        raise HTTPException(404, f"no result with id {result_id!r}")
+    return found
+
+
+@results.get("/{result_id}/csv")
+async def export_csv(result_id: str) -> Response:
+    """The whole result set as a CSV attachment, with column labels as its header.
+    No `response_model`: the body is text/csv, and the browser reaches this as a plain link
+    authenticated by the token cookie rather than through `fetch`."""
+    exported = await controller.as_csv(result_id)
+    if exported is None:
+        raise HTTPException(404, f"no result with id {result_id!r}")
+    return Response(
+        exported,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="result-{result_id[:8]}.csv"'},
     )
