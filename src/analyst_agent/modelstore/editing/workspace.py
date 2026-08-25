@@ -180,14 +180,41 @@ def model_yaml(files: dict[str, str]) -> dict[str, str]:
 
 
 async def ensure(store: ModelStore, ref: str) -> None:
-    """Check the ref out, if it has never been opened on this machine.
+    """Check the ref out, if what is on this machine is not this ref as the store holds it.
 
     Here rather than in the routes so every entry point is self-healing: the agent's tools and
     the HTTP surface both reach a ref through this module, and a missing draft is a ref nobody
     has opened yet rather than an error.
+
+    **A clean draft re-checks out whenever the store's revision has moved.** There is nothing to
+    lose by doing it — a draft with no changes is a copy, not work — and it is what keeps a ref
+    that moved underneath one from being read through a stale copy. The case that made this
+    necessary is a name reused: `delete` then `create` gives a *different* ref with the same
+    name, and a draft left behind from the first one reported itself clean against an origin that
+    no longer existed, so the editor listed files the ref did not have and Publish did nothing.
+
+    A **dirty** draft is left alone even when the store has moved. That divergence is the
+    staleness `origin` exists to make comparable, and it is reported rather than resolved:
+    re-checking out here would silently discard someone's edit.
     """
     if not drafts.exists(ref):
         drafts.sync(ref, await store.files(ref, refresh=True), await store.rev(ref))
+        return
+    if drafts.changes(ref).dirty:
+        return
+    origin, rev = drafts.origin_at(ref), await store.rev(ref)
+    if origin is None or origin.rev != rev:
+        drafts.sync(ref, await store.files(ref, refresh=True), rev)
+
+
+async def forget(store: ModelStore, ref: str) -> None:
+    """Delete the ref, and the draft that was a copy of it.
+
+    One function because the two must not come apart: the store dropping a ref while its working
+    copy stayed behind is what let a reused name resurrect the old one.
+    """
+    await store.delete_ref(ref)
+    drafts.drop(ref)
 
 
 async def stage(

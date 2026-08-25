@@ -309,6 +309,62 @@ async def test_member_errors_do_not_fail_a_save(store, monkeypatch, compiling):
     assert verdict.member_errors == {"album.titles": "ambiguous column"}
 
 
+# --- the draft and the ref it is a copy of -----------------------------------
+
+
+async def test_deleting_a_ref_takes_its_working_copy_with_it(store):
+    """The two must not come apart. A draft outliving its ref is what let a reused name
+    resurrect the old one — see `test_a_reused_name_does_not_resurrect_the_old_draft`."""
+    await workspace.ensure(store, "edit")
+    drafts.save("edit", "views/sales.yml", SALES)
+    assert drafts.exists("edit")
+
+    await workspace.forget(store, "edit")
+    assert not drafts.exists("edit")
+    assert "edit" not in store.refs
+
+
+async def test_a_reused_name_does_not_resurrect_the_old_draft(store):
+    """`delete` then `create` gives a *different* ref wearing the same name. Before this, the
+    draft left behind reported itself clean against an origin that no longer existed: the editor
+    listed a file the ref did not have, and Publish wrote nothing and said it had succeeded."""
+    outcome = await published(store, "edit", {"views/sales.yml": SALES})
+    assert outcome.ok, outcome.reason
+    assert "views/sales.yml" in store.refs["edit"]
+
+    await workspace.forget(store, "edit")
+    await store.create_ref("edit", MAIN)
+
+    await workspace.ensure(store, "edit")
+    assert "views/sales.yml" not in drafts.files("edit"), "the new ref never had this file"
+    assert not drafts.changes("edit").dirty
+
+
+async def test_a_clean_draft_re_checks_out_when_the_ref_has_moved(store):
+    """Nothing to lose: a draft with no changes is a copy, not work. This is what keeps a ref
+    that moved underneath one from being read through a stale copy."""
+    await workspace.ensure(store, "edit")
+    assert "views/sales.yml" not in drafts.files("edit")
+
+    # The store moves without this machine doing it — another tab, or the pipeline.
+    await store.edit("edit", write={"views/sales.yml": SALES}, message="elsewhere")
+
+    await workspace.ensure(store, "edit")
+    assert "views/sales.yml" in drafts.files("edit")
+
+
+async def test_a_dirty_draft_is_left_alone_when_the_ref_has_moved(store):
+    """Staleness is reported, never resolved here — re-checking out would discard the edit."""
+    await workspace.ensure(store, "edit")
+    drafts.save("edit", "cubes/album.yml", ADDED)
+
+    await store.edit("edit", write={"views/sales.yml": SALES}, message="elsewhere")
+
+    await workspace.ensure(store, "edit")
+    assert "titles" in drafts.read("edit", "cubes/album.yml"), "the local edit survived"
+    assert drafts.changes("edit").dirty
+
+
 # --- landing on main ---------------------------------------------------------
 
 

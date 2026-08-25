@@ -229,10 +229,16 @@ async def create_ref(body: NewRef, request: Request) -> dict:
 
 @router.delete("/refs/{ref}")
 async def delete_ref(ref: str, request: Request) -> dict:
+    """Drop the ref and the working copy of it. 404 when there was no such ref."""
     state.idle(request.app)
     _editable(ref)
-    async with _store() as store:
-        await store.delete_ref(ref)
+    try:
+        async with await open_store() as store:
+            await workspace.forget(store, ref)
+    except StoreError as exc:
+        # `missing` is the one worth telling apart: a name that was never there is a bad request,
+        # not the store failing.
+        raise HTTPException(404 if exc.missing else 502, str(exc)) from None
     return await list_refs()
 
 
@@ -284,8 +290,7 @@ async def merge_ref(
                 # Best-effort: the merge has landed, so a failed cleanup is a stale name in a
                 # dropdown and never a merge reported as failed.
                 with suppress(StoreError):
-                    await store.delete_ref(ref)
-                    drafts.drop(ref)
+                    await workspace.forget(store, ref)
                     deleted = True
         state.reloaded(request.app)
         # Main's own compile, after the merge: two clean refs can merge into a model that does
