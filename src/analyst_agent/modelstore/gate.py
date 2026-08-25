@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from pydantic import ValidationError
 
 from .catalog import Catalog
-from .client import CubeClient, CubeError
+from .client import Bound, StoreError
 from .schema import CubeQuery, Filter, FilterGroup, FilterNode
 
 
@@ -126,7 +126,7 @@ def semantic_check(query: CubeQuery, catalog: Catalog) -> GateResult:
     return GateResult(ok=not errors, errors=errors, warnings=warnings)
 
 
-async def check(payload: dict, catalog: Catalog, client: CubeClient, max_rows: int) -> GateResult:
+async def check(payload: dict, catalog: Catalog, client: Bound, max_rows: int) -> GateResult:
     # Tiers 1-3. An ok result carries the parsed query and Cube's SQL, and executed nothing.
     query, errors = parse(payload)
     if query is None:
@@ -151,7 +151,7 @@ async def check(payload: dict, catalog: Catalog, client: CubeClient, max_rows: i
     return GateResult(ok=True, warnings=checked.warnings, sql=compiled.sql, query=query)
 
 
-async def execute(checked: GateResult, client: CubeClient) -> GateResult:
+async def execute(checked: GateResult, client: Bound) -> GateResult:
     # Tier 4. Takes the GateResult so tiers 2-3's SQL and warnings survive rather than being
     # compiled a second time.
     if not checked.ok or checked.query is None:
@@ -167,11 +167,11 @@ async def execute(checked: GateResult, client: CubeClient) -> GateResult:
             query=checked.query,
             resolved_ranges=loaded.resolved_ranges,
         )
-    except CubeError as exc:
+    except StoreError as exc:
         return GateResult(ok=False, errors=[f"Execution failed: {exc}"], sql=checked.sql)
 
 
-async def run(payload: dict, catalog: Catalog, client: CubeClient, max_rows: int) -> GateResult:
+async def run(payload: dict, catalog: Catalog, client: Bound, max_rows: int) -> GateResult:
     # All four tiers — what a chat turn wants: one query, executed or explained.
     checked = await check(payload, catalog, client, max_rows)
     if not checked.ok:

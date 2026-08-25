@@ -11,9 +11,9 @@ reads is part of the rule, not a string each route gets to spell for itself.
 
 from fastapi import HTTPException
 
-from ..core import db, jobs
-from ..core import deployment as connection
-from ..cube.client import CubeClient
+from ...core import db, jobs
+from ...core import deployment as connection
+from ...modelstore.client import Bound, ModelStore
 
 
 async def init_state(app) -> None:
@@ -40,9 +40,10 @@ def reloaded(app) -> None:
     app.state.health = None
 
 
-async def cube(app) -> CubeClient:
+async def cube(app) -> Bound:
     # A held client carries an address, so an edited URL has to replace it rather than be
-    # ignored — hence the key.
+    # ignored — hence the key. What is held is the session; what is handed out is a view of it
+    # pinned to main, because a question chat and a dashboard are never on an edit ref.
     deployment = await connection.current()
     if deployment is None or not deployment.store_url:
         raise HTTPException(503, "no Cube deployment is configured")
@@ -50,6 +51,6 @@ async def cube(app) -> CubeClient:
     if app.state.cube_key != key:
         if app.state.cube is not None:
             await app.state.cube.aclose()
-        app.state.cube = CubeClient.for_deployment(deployment)
+        app.state.cube = ModelStore.for_deployment(deployment)
         app.state.cube_key = key
-    return app.state.cube
+    return app.state.cube.at()

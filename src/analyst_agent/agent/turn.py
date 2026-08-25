@@ -10,9 +10,7 @@ from ..core.config import settings
 from ..core.deployment import MAIN
 from ..core.events import Event
 from ..core.llm import reasoning_of, text_of
-from ..cube.client import ADMIN_TIMEOUT_S, CubeClient, open_client
-from ..datamodel import grounding
-from ..modelstore.client import open_store
+from ..modelstore.client import Bound, open_store
 from .build import (
     COMPACTION_TAG,
     build_agent,
@@ -105,7 +103,7 @@ async def stream_turn(
     chat_id: str,
     question: str,
     saver,
-    cube: CubeClient,
+    cube: Bound,
     cancel: asyncio.Event | None = None,
     files: list[str] | None = None,
     approvals: asyncio.Queue | None = None,
@@ -117,7 +115,6 @@ async def stream_turn(
             catalog=await cube.catalog(),
             client=cube,
             # Pinned to main: a question chat and a dashboard must never silently read an edit ref.
-            grounding=await grounding.load(),
             max_rows=settings.max_rows,
             # Result sets live beside the transcript under this turn, so the table and the CSV
             # have something to address after the stream has closed.
@@ -145,21 +142,25 @@ async def stream_edit_turn(
     saver,
     cancel: asyncio.Event | None = None,
 ) -> AsyncIterator[Event]:
+    """One editor turn.
+
+    Nothing about the model is passed in: the agent reads the ref's draft, which is where every
+    unpublished edit lives. `EditContext.staged` carries only this turn's own proposals, which
+    are on no ref and in no file until the user accepts them.
+    """
     # The ref is the chat's own, fixed when it was created: an edit chat is a conversation about
     # one ref, and a transcript that followed a page's selection would describe edits to a model
     # it was not editing.
     chat = await transcript.get(chat_id)
     ref = (chat and chat.ref) or MAIN
-    # Its own Cube session on the admin timeout, pinned to that ref: an editor turn waits for a
-    # model to compile, which a query timeout is not sized for.
-    async with (
-        await open_client(ref=ref, timeout=ADMIN_TIMEOUT_S) as client,
-        await open_store() as model_store,
-    ):
+    # The store and nothing else. There is no Cube session here any more: the one tool that needs
+    # Cube is `validate_model`, and it goes through `workspace.verify`, which opens a client on
+    # the throwaway ref it compiles — a session pinned to this ref would be the wrong one.
+    async with await open_store() as model_store:
 
         async def build(_turn_id: str):
             return build_editor_agent(
-                EditContext(client=client, store=model_store, ref=ref),
+                EditContext(store=model_store, ref=ref),
                 ref,
                 checkpointer=saver,
             )

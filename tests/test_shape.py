@@ -1,5 +1,5 @@
-from analyst_agent.cube.catalog import Catalog
-from analyst_agent.cube.shape import Column, columns_of, describe_query, export_value
+from analyst_agent.modelstore.catalog import Catalog
+from analyst_agent.modelstore.shape import Column, columns_of, describe_query, export_value
 
 # `format` and `shortTitle` are what a table needs and conftest's META carries neither, so
 # this file brings its own. Everything else about the shape is exercised on the shared one.

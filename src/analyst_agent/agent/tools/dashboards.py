@@ -3,10 +3,10 @@ from dataclasses import dataclass
 
 from langchain.tools import tool
 
-from ...cube.catalog import Catalog
 from ...dashboards import layout as layouts
 from ...dashboards import store
 from ...dashboards import tiles as tilecheck
+from ...modelstore.catalog import Catalog
 from .trace import end, start
 
 EVENT_KEYS = frozenset({"tool", "label", "ok", "note", "errors"})

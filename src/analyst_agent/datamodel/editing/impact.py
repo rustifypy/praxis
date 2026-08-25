@@ -2,15 +2,14 @@ from dataclasses import dataclass, field
 
 from pydantic import ValidationError
 
-from ...cube.catalog import Catalog
-from ...cube.schema import CubeQuery
 from ...dashboards import store
-from ..grounding import Grounding
+from ...modelstore.catalog import Catalog
+from ...modelstore.schema import CubeQuery
 
 
 @dataclass
 class Broken:
-    # `tile` or `certified`, and the dashboard it sits on or the grounding file it lives in.
+    # `tile`, and the dashboard it sits on.
     kind: str
     where: str
     title: str
@@ -55,10 +54,7 @@ def missing_members(query: dict, catalog: Catalog) -> tuple[list[str], dict[str,
         return [], {}
 
 
-async def check(
-    catalog: Catalog,
-    grounding: Grounding,
-) -> Impact:
+async def check(catalog: Catalog) -> Impact:
     # Every saved query against the model being served, and deliberately not a diff of main's
     # members against the ref's: "is what this tile reads still here" catches breakage
     # whatever caused it — a renamed view, a changed alias, an include quietly dropped.
@@ -69,13 +65,4 @@ async def check(
             absent, nearest = missing_members(tile.query, catalog)
             if absent:
                 impact.broken.append(Broken("tile", board.title, tile.title, absent, nearest))
-
-    for artefact in grounding.certified:
-        query = artefact.query
-        if query is None:
-            continue
-        impact.checked += 1
-        absent, nearest = missing_members(query, catalog)
-        if absent:
-            impact.broken.append(Broken("certified", artefact.file, artefact.name, absent, nearest))
     return impact

@@ -4,9 +4,9 @@ from dataclasses import asdict
 from langchain.tools import tool
 
 from ... import transcript
-from ...cube import gate
-from ...cube.shape import Column, columns_of, describe_query
-from ...cube.visualize import MAX_POINTS, chart_for, validate_spec
+from ...modelstore import gate
+from ...modelstore.shape import Column, columns_of, describe_query
+from ...modelstore.visualize import MAX_POINTS, chart_for, validate_spec
 from ..retrieval import LexicalRetriever, render
 from ..session import QueryRecord, Session
 from .trace import end, start
@@ -49,11 +49,7 @@ def build_query_tools(
         end("search_model", True, hits=len(hits))
         if not hits:
             return "The semantic model is empty."
-        certified = session.grounding.render_certified(question)
-        out = render(hits)
-        if certified:
-            out += f"\n\n# Certified queries for similar requests\n\n{certified}"
-        return out
+        return render(hits)
 
     @tool
     async def run_query(query: dict) -> str:
@@ -122,17 +118,6 @@ def build_query_tools(
         return f"{head}\n\n{body}"
 
     @tool
-    def load_grounding(name: str) -> str:
-        """Load the full instructions for a named skill or agent_requested rule."""
-        start("load_grounding", name)
-        pool = session.grounding.skills + session.grounding.rules
-        found = next((artefact for artefact in pool if artefact.name == name), None)
-        end("load_grounding", found is not None)
-        if not found:
-            return f"No artefact named '{name}'. Available: {[artefact.name for artefact in pool]}"
-        return found.body
-
-    @tool
     def set_chart(spec: dict) -> str:
         """Replace the chart drawn for the most recent result. Rarely needed — one is
         already chosen from the query's shape. Keys: type (line, area, stacked_area, bar,
@@ -169,4 +154,4 @@ def build_query_tools(
         last = session.executed[-1]
         return f"```json\n{json.dumps(last.query, indent=2)}\n```\n\n```sql\n{last.sql}\n```"
 
-    return [search_model, run_query, load_grounding, set_chart, explain_last_query]
+    return [search_model, run_query, set_chart, explain_last_query]

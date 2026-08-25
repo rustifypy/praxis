@@ -3,9 +3,8 @@ from dataclasses import dataclass, field
 import yaml
 
 from ...core.deployment import Deployment
-from ...cube.client import CubeError, open_client
-from ...cube.schema import CubeQuery
 from ...modelstore import StoreError, open_store
+from ...modelstore.schema import CubeQuery
 from .warehouse import Column, ForeignKey, Schema, Table
 
 # Its own ref, so the served model is neither read nor touched.
@@ -157,40 +156,40 @@ async def read_catalog(deployment: Deployment, timeout: float = BOOT_TIMEOUT_S) 
         await store.create_ref(PROBE_REF)
         await store.replace(PROBE_REF, files, "introspection probe")
         try:
-            async with await open_client(ref=PROBE_REF, timeout=PROBE_QUERY_TIMEOUT_S) as cube:
-                try:
-                    await cube.wait_until_compiled(timeout=timeout)
-                except CubeError as exc:
-                    raise RuntimeError(f"the probe model did not compile: {exc}") from None
+            cube = store.at(PROBE_REF, timeout=PROBE_QUERY_TIMEOUT_S)
+            try:
+                await cube.wait_until_compiled(timeout=timeout)
+            except StoreError as exc:
+                raise RuntimeError(f"the probe model did not compile: {exc}") from None
 
-                for name, _, columns in probes:
-                    if not columns:
-                        continue
-                    query = CubeQuery.model_validate(
-                        {
-                            "dimensions": [f"{name}.{column}" for column in columns],
-                            "limit": ROW_LIMIT,
-                        }
+            for name, _, columns in probes:
+                if not columns:
+                    continue
+                query = CubeQuery.model_validate(
+                    {
+                        "dimensions": [f"{name}.{column}" for column in columns],
+                        "limit": ROW_LIMIT,
+                    }
+                )
+                try:
+                    loaded = await cube.load(query)
+                except StoreError as exc:
+                    # Columns are the catalog itself and keys make joins legal, so losing
+                    # either is fatal. Statistics only sharpen the model's judgment.
+                    if name != "probe_stats":
+                        raise RuntimeError(f"{name}: {str(exc)[:400]}") from None
+                    catalog.notes.append(f"statistics unavailable: {str(exc)[:400]}")
+                    continue
+                rows[name] = [
+                    {column: row.get(f"{name}.{column}") for column in columns}
+                    for row in loaded.rows
+                ]
+                if len(rows[name]) >= ROW_LIMIT:
+                    catalog.truncated = True
+                    catalog.notes.append(
+                        f"{name} returned Cube's maximum of {ROW_LIMIT} rows — some keys or "
+                        "statistics are missing, so check the joins on a large schema"
                     )
-                    try:
-                        loaded = await cube.load(query)
-                    except CubeError as exc:
-                        # Columns are the catalog itself and keys make joins legal, so losing
-                        # either is fatal. Statistics only sharpen the model's judgment.
-                        if name != "probe_stats":
-                            raise RuntimeError(f"{name}: {str(exc)[:400]}") from None
-                        catalog.notes.append(f"statistics unavailable: {str(exc)[:400]}")
-                        continue
-                    rows[name] = [
-                        {column: row.get(f"{name}.{column}") for column in columns}
-                        for row in loaded.rows
-                    ]
-                    if len(rows[name]) >= ROW_LIMIT:
-                        catalog.truncated = True
-                        catalog.notes.append(
-                            f"{name} returned Cube's maximum of {ROW_LIMIT} rows — some keys or "
-                            "statistics are missing, so check the joins on a large schema"
-                        )
         finally:
             # Leaving it would put a ref in the list that nobody created.
             await store.delete_ref(PROBE_REF)

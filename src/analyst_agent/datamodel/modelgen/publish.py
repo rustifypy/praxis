@@ -5,9 +5,8 @@ from dataclasses import dataclass, field
 import yaml
 
 from ...core.deployment import MAIN
-from ...cube.client import CubeClient, CubeError, open_client
-from ...cube.schema import CubeQuery
-from ...modelstore import StoreError, open_store
+from ...modelstore import Bound, StoreError, open_store
+from ...modelstore.schema import CubeQuery
 from .decide import CubeDecision, Enrichment, MeasureDecision, ViewDecision, exposed_members
 
 COMPILE_TIMEOUT_S = 90.0
@@ -162,7 +161,7 @@ async def install(
             validation.candidate = CANDIDATE
             return validation
 
-        await store.merge(CANDIDATE, ref, message)
+        await store.merge(CANDIDATE, ref)
         try:
             await store.delete_ref(CANDIDATE)
         except StoreError:
@@ -183,7 +182,8 @@ async def check(
     try:
         validation = Validation()
 
-        async with await open_client(ref=ref) as cube:
+        async with await open_store() as opened:
+            cube = opened.at(ref)
             # Startup races look like errors too, so the session retries anything but a genuine
             # compile error, which it raises rather than waiting out the deadline.
             catalog = await cube.wait_until_compiled(timeout=timeout)
@@ -265,13 +265,13 @@ async def check(
             if error and member not in validation.member_errors:
                 validation.member_errors[member] = context + error
         return validation
-    except CubeError as exc:
+    except StoreError as exc:
         validation.compile_error = str(exc)
         return validation
 
 
 async def _probe(
-    cube: CubeClient, member: str, context: str, executed: bool, query: dict
+    cube: Bound, member: str, context: str, executed: bool, query: dict
 ) -> tuple[str, str, str]:
     # A compile probe reports Cube's refusal; an executed one is how an ambiguous column
     # reference surfaces at all.
@@ -284,5 +284,5 @@ async def _probe(
             if not compiled.ok:
                 return member, context, (compiled.error or "")[:300]
         return member, context, ""
-    except CubeError as exc:
+    except StoreError as exc:
         return member, context, str(exc)[:300]

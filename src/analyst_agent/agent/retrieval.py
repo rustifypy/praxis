@@ -1,6 +1,6 @@
 from rapidfuzz import fuzz
 
-from ..cube.catalog import Catalog, Entity
+from ..modelstore.catalog import Catalog, Entity
 
 
 class LexicalRetriever:

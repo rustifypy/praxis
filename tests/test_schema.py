@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from analyst_agent.cube.schema import CubeQuery
+from analyst_agent.modelstore.schema import CubeQuery
 
 
 def test_minimal_query():

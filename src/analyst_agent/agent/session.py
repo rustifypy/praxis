@@ -1,9 +1,8 @@
 import asyncio
 from dataclasses import dataclass, field
 
-from ..cube.catalog import Catalog
-from ..cube.client import CubeClient
-from ..datamodel.grounding import Grounding
+from ..modelstore.catalog import Catalog
+from ..modelstore.client import Bound
 
 
 @dataclass
@@ -23,8 +22,7 @@ class QueryRecord:
 @dataclass
 class Session:
     catalog: Catalog
-    client: CubeClient
-    grounding: Grounding
+    client: Bound
     max_rows: int = 5_000
     executed: list[QueryRecord] = field(default_factory=list)
     rejected: list[dict] = field(default_factory=list)

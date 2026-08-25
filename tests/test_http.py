@@ -14,13 +14,12 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from analyst_agent.core import jobs
-from analyst_agent.core.config import settings
 from analyst_agent.core.deployment import Deployment
-from analyst_agent.web import server, state
+from analyst_agent.modelstore.client import Ref
+from analyst_agent.web import server
 
 SHOP = Deployment(
-    store_url="http://localhost:8500",
+    store_url="http://localhost:8000",
     store_token="w" * 40,
     api_secret="s" * 40,
     description="Orders.",
@@ -30,46 +29,11 @@ SHOP = Deployment(
 
 STORED = Deployment(
     api_secret="s" * 40,
-    store_url="http://store:8500",
+    store_url="http://store:8000",
     store_token="writetok",
     driver="postgres",
 )
 """A deployment with an address, for the routes that read the model rather than query it."""
-
-
-@pytest.fixture
-async def api(tmp_path, monkeypatch, cube):
-    """The app with its state wired to a tmp database and a fake Cube."""
-    from analyst_agent import transcript
-    from analyst_agent.core import db
-    from analyst_agent.core import deployment as connection
-    from analyst_agent.dashboards import store as boards
-
-    # The stores read `settings.db_path`, so pointing the setting is the whole of what keeps
-    # these routes off the real ~/.analyst.
-    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    await db.create_tables()
-
-    server.app.state.jobs = jobs.Runner()
-    server.app.state.health = None
-    server.app.state.cube = cube
-    server.app.state.cube_key = None
-    # The routes ask for the session through `state.cube`, which rebuilds it when the row's
-    # address moves. Patching the accessor is what hands them the fake instead.
-    monkeypatch.setattr(state, "cube", _handing_over(cube))
-    server.app.state.cancels = {}
-    server.app.state.approvals = {}
-    server.app.state.always = set()
-    server.app.state.saver = None
-
-    transport = httpx.ASGITransport(app=server.app)
-    async with httpx.AsyncClient(
-        transport=transport,
-        base_url="http://test",
-        cookies={server.COOKIE: server.TOKEN},
-    ) as client:
-        client.stores = (transcript, boards, connection)  # type: ignore[attr-defined]
-        yield client
 
 
 # --- the token middleware ----------------------------------------------------
@@ -226,16 +190,16 @@ class FakeSandbox:
 
 @pytest.fixture
 def fake_sandbox(monkeypatch):
-    from analyst_agent.web import chats as chat_routes
-    from analyst_agent.web import files as files_routes
+    from analyst_agent.web.chat import controller as chat_controller
+    from analyst_agent.web.workspace import controller as workspace_controller
 
     fake = FakeSandbox()
 
     async def opened(*args, **kwargs):
         return fake
 
-    monkeypatch.setattr(files_routes, "open_sandbox", opened)
-    monkeypatch.setattr(chat_routes, "open_sandbox", opened)
+    monkeypatch.setattr(workspace_controller, "open_sandbox", opened)
+    monkeypatch.setattr(chat_controller, "open_sandbox", opened)
     return fake
 
 
@@ -243,14 +207,14 @@ def fake_sandbox(monkeypatch):
 def no_sandbox(monkeypatch):
     """A deployment with none configured — which is every deployment until one is run."""
     from analyst_agent.sandbox import SandboxError
-    from analyst_agent.web import chats as chat_routes
-    from analyst_agent.web import files as files_routes
+    from analyst_agent.web.chat import controller as chat_controller
+    from analyst_agent.web.workspace import controller as workspace_controller
 
     async def refused(*args, **kwargs):
         raise SandboxError("no sandbox is configured for this deployment")
 
-    monkeypatch.setattr(files_routes, "open_sandbox", refused)
-    monkeypatch.setattr(chat_routes, "open_sandbox", refused)
+    monkeypatch.setattr(workspace_controller, "open_sandbox", refused)
+    monkeypatch.setattr(chat_controller, "open_sandbox", refused)
 
 
 async def test_deleting_a_chat_asks_the_sandbox_to_drop_its_workspace(api, fake_sandbox):
@@ -290,10 +254,11 @@ async def test_an_upload_is_handed_over_and_its_shape_reported_back(api, fake_sa
 async def test_a_file_over_the_cap_is_refused_before_it_is_handed_over(api, fake_sandbox):
     """Content-Length is the cheap refusal and the running total is the real one — a chunked
     upload sends no length at all."""
-    from analyst_agent.web import files
+    from analyst_agent.web.workspace import controller as workspace_controller
 
     chat = (await api.post("/api/chats", json={})).json()
-    response = await upload(api, chat["id"], "big.csv", b"x" * (files.MAX_BYTES + 1))
+    over = b"x" * (workspace_controller.MAX_BYTES + 1)
+    response = await upload(api, chat["id"], "big.csv", over)
     assert response.status_code == 413
     assert "100 MB" in response.text
     assert fake_sandbox.uploaded == []
@@ -409,7 +374,7 @@ def answering(monkeypatch):
 
 
 async def test_connecting_mints_every_secret_the_deployments_need(api):
-    """All four, at connect and never again — they go into files someone runs elsewhere.
+    """All three, at connect and never again — they go into files someone runs elsewhere.
 
     Asserted through the route rather than on `render`, because the renderer's own tests hand
     it a populated `Deployment`: `sandbox_token` was a column nothing minted, and every one of
@@ -422,12 +387,11 @@ async def test_connecting_mints_every_secret_the_deployments_need(api):
     minted = {
         "api_secret": deployment.api_secret,
         "store_token": deployment.store_token,
-        "store_read_token": deployment.store_read_token,
         "sandbox_token": deployment.sandbox_token,
     }
     blank = [name for name, value in minted.items() if not value]
     assert not blank, f"minted nothing for {blank}"
-    assert len(set(minted.values())) == 4, "a secret is reused across roles"
+    assert len(set(minted.values())) == 3, "a secret is reused across roles"
 
 
 async def test_the_handover_is_a_download_per_service(api):
@@ -441,8 +405,10 @@ async def test_the_handover_is_a_download_per_service(api):
         assert "attachment" in response.headers["content-disposition"]
         assert "docker-compose.yml" in response.headers["content-disposition"]
         # The guard that matters: an unresolved variable reads as a complete file and dies at
-        # `up` with compose's message about an environment nobody was told to set.
-        assert "$" not in response.text, service
+        # `up` with compose's message about an environment nobody was told to set. A doubled
+        # `$` is the deliberate escape, since compose interpolates config content too.
+        assert "${" not in response.text, service
+        assert "$" not in response.text.replace("$$", ""), service
 
     assert (await api.get("/api/deployment/nonsense/compose")).status_code == 404
 
@@ -457,19 +423,19 @@ async def test_nothing_is_running_after_connecting(api):
     assert body["store_url"] == ""
 
 
-async def test_onboarding_is_finished_only_when_both_addresses_are_set(api, answering):
-    """Derived from the row and not a column, because `CREATE TABLE IF NOT EXISTS` cannot add
-    one. Both, because the sandbox step is required — so it is a different question from
-    `deployed`, and it is what decides whether the wizard is still owed."""
+async def test_both_addresses_are_not_finished_setup_without_a_model(api, answering):
+    """Computed and not a column, because `CREATE TABLE IF NOT EXISTS` cannot add one. Setup now
+    ends with a built model, so two answering addresses and an empty store is the state the
+    wizard's last step is entered in — not the state it is finished in."""
     body = (await api.post("/api/connection", json=CHINOOK)).json()
     assert (body["deployed"], body["onboarded"]) == (False, False)
 
-    body = (await api.put("/api/deployment", json={"store_url": "http://store:8500"})).json()
+    body = (await api.put("/api/deployment", json={"store_url": "http://store:8000"})).json()
     source = body["connection"]
     assert (source["deployed"], source["onboarded"]) == (True, False), "the sandbox is still owed"
 
     body = (await api.put("/api/deployment", json={"sandbox_url": "http://sb:8600"})).json()
-    assert body["connection"]["onboarded"] is True
+    assert body["connection"]["onboarded"] is False, "the store holds no cubes yet"
 
 
 async def test_an_address_that_does_not_answer_is_never_stored(api):
@@ -501,19 +467,12 @@ async def test_editing_the_connection_discards_nothing(api):
     assert await sources.state() != {}
 
 
-async def test_resetting_discards_the_pipeline_and_keeps_the_connection(api):
-    """For when the connection now points somewhere else. The served model is untouched — it
-    keeps answering until a rebuild replaces it, which is why the next stage is `read`."""
+async def test_there_is_no_way_to_discard_what_was_built(api):
+    """It existed for re-pointing a connection at a different database, which is re-onboarding
+    now — and a rebuild runs every stage from `read`, so clearing the records first bought
+    nothing."""
     await api.post("/api/connection", json=CHINOOK)
-    _, _, sources = api.stores
-    await sources.save_step("cubes", {"status": "done"})
-    await sources.save_state({"catalog": {"public": ["invoice"]}})
-
-    assert (await api.delete("/api/pipeline")).status_code == 200
-
-    assert await sources.steps() == {}
-    assert await sources.state() == {}
-    assert (await sources.current()).credentials["CUBEJS_DB_NAME"] == "chinook"
+    assert (await api.delete("/api/pipeline")).status_code == 404
 
 
 async def test_a_variable_that_is_not_a_warehouse_setting_is_refused(api):
@@ -525,30 +484,71 @@ async def test_a_variable_that_is_not_a_warehouse_setting_is_refused(api):
     refused = await api.patch("/api/connection", json={"values": {"CUBEJS_API_SECRET": "mine"}})
 
     assert refused.status_code == 400
-    assert "CUBEJS_DB_" in refused.json()["detail"]
+    assert "CUBEJS_API_SECRET" in refused.json()["detail"]
 
 
-async def test_rotating_re_mints_every_secret_and_touches_nothing_else(api):
-    """The honest reasons to rotate — a leak, a file sent to the wrong person — have nothing to
-    do with the credentials, so it must not discard the model or the pipeline."""
-    await api.post("/api/connection", json=CHINOOK)
+async def test_a_connection_that_cannot_open_is_refused_while_the_form_is_still_up(api):
+    """The form asks for these and will not submit without them; this is the same rule on the
+    near side of HTTP. Stored instead, it becomes a compose file that starts a deployment which
+    then refuses every query — a failure two screens away from the box that caused it."""
+    refused = await api.post(
+        "/api/connection",
+        json={"driver": "postgres", "values": {"CUBEJS_DB_HOST": "db.internal"}},
+    )
+
+    assert refused.status_code == 400
+    detail = refused.json()["detail"]
+    assert "a database" in detail and "a user" in detail
+    assert "CUBEJS_DB" not in detail, "a person reads this, and they typed into a box called User"
+
     _, _, sources = api.stores
-    await sources.save_step("cubes", {"status": "done"})
-    before = await sources.current()
+    assert await sources.current() is None, "a connection that cannot open was stored anyway"
 
-    assert (await api.post("/api/deployment/secrets")).status_code == 200
 
-    after = await sources.current()
-    for field in ("api_secret", "store_token", "store_read_token", "sandbox_token"):
-        assert getattr(after, field) != getattr(before, field), field
-        assert getattr(after, field), f"{field} was rotated to nothing"
-    assert after.credentials == before.credentials
-    assert "cubes" in await sources.steps(), "rotating discarded the pipeline"
+async def test_athenas_settings_are_aws_ones_and_still_accepted(api):
+    """Athena is why the name rule allows a second prefix: its settings are AWS ones rather than
+    database ones, so a single-prefix rule left the one warehouse on the list impossible to
+    configure at all."""
+    stored = await api.post(
+        "/api/connection",
+        json={
+            "driver": "athena",
+            "values": {
+                "CUBEJS_AWS_KEY": "AKIA",
+                "CUBEJS_AWS_SECRET": "shh",
+                "CUBEJS_AWS_REGION": "us-east-1",
+                "CUBEJS_AWS_S3_OUTPUT_LOCATION": "s3://results/",
+            },
+        },
+    )
+
+    assert stored.status_code == 200, stored.text
+    _, _, sources = api.stores
+    assert (await sources.current()).credentials["CUBEJS_AWS_REGION"] == "us-east-1"
+
+
+async def test_a_warehouse_the_portal_has_no_field_list_for_still_connects(api):
+    """The free-form settings at the bottom of the form are the only way to connect something
+    unlisted, so nothing here may require a set of keys it invented for it."""
+    stored = await api.post(
+        "/api/connection",
+        json={"driver": "timescale", "values": {"CUBEJS_DB_URL": "postgres://db/metrics"}},
+    )
+
+    assert stored.status_code == 200, stored.text
+
+
+async def test_there_is_no_way_to_rotate_the_secrets(api):
+    """Rotating means re-rendering both compose files and re-running both deployments, since a
+    container's environment cannot be changed in place. A button that silently stops everything
+    answering was worse than no button."""
+    await api.post("/api/connection", json=CHINOOK)
+    assert (await api.post("/api/deployment/secrets")).status_code == 404
 
 
 async def test_there_is_no_way_to_delete_a_connection(api):
     """Removed deliberately: the edit form covers pointing somewhere else, and a delete is how
-    a model, its grounding and four recorded steps get orphaned in the store."""
+    a model and four recorded steps get orphaned in the store."""
     await api.post("/api/connection", json=CHINOOK)
     assert (await api.delete("/api/connection")).status_code == 405
 
@@ -560,6 +560,8 @@ async def test_the_catalog_is_a_503_before_a_deployment_rather_than_a_500(api, m
     with "cannot reach the server" was the data panel that is the only way to configure one.
     """
 
+    from analyst_agent.web.support import state
+
     async def unconfigured(_app):
         raise HTTPException(503, "no Cube deployment is configured")
 
@@ -567,11 +569,41 @@ async def test_the_catalog_is_a_503_before_a_deployment_rather_than_a_500(api, m
     assert (await api.get("/api/model/summary")).status_code == 503
 
 
-def _handing_over(cube):
-    async def accessor(_app):
-        return cube
+# --- the editor's two routes -------------------------------------------------
+# Both are thin mappings from a `workspace` refusal to a status code, so what is asserted is the
+# mapping and nothing under it — the tiers themselves are covered in test_workspace.py, and the
+# Cube leg is verified against a live deployment. These two cases are the ones that never reach
+# the store, which is why they need no respx.
 
-    return accessor
+
+async def test_saving_on_main_is_a_409_at_the_edge(api):
+    """Main is generated: re-running the pipeline rewrites every file in it, so an edit there is
+    work waiting to be discarded. Refused before any ref is created."""
+    await api.post("/api/connection", json=CHINOOK)
+    await api.stores[2].patch(store_url=STORED.store_url, store_token=STORED.store_token)
+    body = {"ref": "main"}
+    for route in ("/api/model/check", "/api/model/commit", "/api/model/discard"):
+        assert (await api.post(route, json=body)).status_code == 409, route
+    saved = await api.put("/api/model/files/views/s.yml", json={"ref": "main", "text": "views: []"})
+    assert saved.status_code == 409
+
+
+async def test_a_path_that_is_not_a_model_file_is_a_400(api):
+    """Refused where the bytes arrive, so a path Cube would ignore never reaches a draft."""
+    await api.post("/api/connection", json=CHINOOK)
+    await api.stores[2].patch(store_url=STORED.store_url, store_token=STORED.store_token)
+    answered = await api.put(
+        "/api/model/files/notes/escape.txt", json={"ref": "edit", "text": "views: []"}
+    )
+    assert answered.status_code == 400
+
+
+async def test_a_change_set_with_an_unknown_field_is_refused(api):
+    """`extra="forbid"` on `Draft`: a renamed field in the browser has to fail loudly rather
+    than act on the default ref."""
+    await api.post("/api/connection", json=CHINOOK)
+    answered = await api.post("/api/model/commit", json={"ref": "edit", "files": {}})
+    assert answered.status_code == 422
 
 
 async def test_every_path_the_browser_calls_is_a_real_route():
@@ -593,15 +625,23 @@ async def test_every_path_the_browser_calls_is_a_real_route():
         ("PATCH", "/api/connection"),
         ("POST", "/api/connection/probe"),
         ("PUT", "/api/deployment"),
-        ("POST", "/api/deployment/secrets"),
         ("GET", "/api/deployment/{service}/compose"),
         ("GET", "/api/model"),
-        ("GET", "/api/model/grounding"),
         ("GET", "/api/model/summary"),
+        ("GET", "/api/model/refs"),
+        ("POST", "/api/model/refs"),
+        ("DELETE", "/api/model/refs/{ref}"),
+        ("GET", "/api/model/refs/{ref}/diff"),
+        ("POST", "/api/model/refs/{ref}/merge"),
+        ("GET", "/api/model/files"),
+        ("GET", "/api/model/files/{path:path}"),
+        ("POST", "/api/model/check"),
+        ("POST", "/api/model/commit"),
+        ("POST", "/api/model/chats"),
+        ("POST", "/api/model/chats/{chat_id}/messages"),
         ("GET", "/api/pipeline/tables"),
         ("POST", "/api/pipeline/tables/closure"),
         ("POST", "/api/pipeline/{stage}"),
-        ("DELETE", "/api/pipeline"),
         ("GET", "/api/pipeline/job"),
         ("GET", "/api/pipeline/job/stream"),
         ("DELETE", "/api/pipeline/job"),
@@ -614,3 +654,237 @@ async def test_a_stage_name_is_validated_rather_than_accepted(api):
     anything that is not one of the four rather than start a job named after it."""
     await api.post("/api/connection", json=CHINOOK)
     assert (await api.post("/api/pipeline/nonsense", json={})).status_code == 404
+
+
+# --- the routes nothing else exercises ---------------------------------------
+# Written before `web/` is split into routes, controllers and DTOs (see mvc-migration.md, Phase
+# 0): these payloads become pydantic response models, and a shape nothing asserts is a shape the
+# split is free to change by accident. Each of these locks the keys the browser reads, not the
+# machinery underneath — that has its own suite.
+#
+# The monkeypatches target the *route module's* attribute rather than the defining module,
+# because the routes do `from ..modelstore import model_files`, which binds the name at import.
+# The same trap applies to the controllers this code is about to become.
+
+
+async def test_the_served_model_reports_entities_members_and_which_file_defined_each(
+    api, monkeypatch, catalog
+):
+    """The data page's whole payload. `file` per entity is read from the store rather than
+    guessed from `cubes/<name>.yml`, because a hand-edited model may put a cube anywhere."""
+    from analyst_agent.web import model as routes
+
+    async def files(ref="main"):
+        return {"cubes/everything.yml": "cubes:\n  - name: orders\n  - name: customers\n"}
+
+    async def served(*, ref="main"):
+        return catalog
+
+    monkeypatch.setattr(routes, "model_files", files)
+    monkeypatch.setattr(routes, "served_catalog", served)
+
+    body = (await api.get("/api/model")).json()
+    assert (body["serving"], body["error"]) == (True, "")
+    assert set(body) == {"serving", "error", "counts", "unloaded", "entities"}
+
+    orders = next(entity for entity in body["entities"] if entity["name"] == "orders")
+    assert orders["file"] == "cubes/everything.yml", "the defining file is not read off the store"
+    assert orders["is_view"] is False
+    assert set(orders) >= {"name", "file", "is_view", "title", "description", "members"}
+    assert {member["name"] for member in orders["members"]} >= {"count", "net_revenue", "status"}
+    # `name` is the member id's last segment, shipped rather than split in the browser.
+    assert all(member["id"].endswith(member["name"]) for member in orders["members"])
+
+    # The view is what carries `exposed_by`, and a view's own members carry none.
+    view = next(entity for entity in body["entities"] if entity["name"] == "revenue")
+    assert view["is_view"] is True
+    assert all(member["exposed_by"] == [] for member in view["members"])
+    # Defined in a file but never served by Cube — the signal that a file did not compile.
+    assert body["unloaded"] == []
+
+
+async def test_the_served_model_still_answers_when_cube_is_down(api, monkeypatch):
+    """One half being unreachable must not hide the other: the files are still readable and the
+    editor has to keep working, so this is a 200 saying `serving: false`."""
+    from analyst_agent.modelstore.client import StoreError
+    from analyst_agent.web import model as routes
+
+    async def files(ref="main"):
+        return {"cubes/orders.yml": "cubes:\n  - name: orders\n"}
+
+    async def down(*, ref="main"):
+        raise StoreError("connection refused", where="cube")
+
+    monkeypatch.setattr(routes, "model_files", files)
+    monkeypatch.setattr(routes, "served_catalog", down)
+
+    body = (await api.get("/api/model")).json()
+    assert body["serving"] is False
+    assert "connection refused" in body["error"]
+    assert body["entities"] == []
+    assert body["unloaded"] == ["cubes/orders.yml"], "a readable file is not reported as lost"
+
+
+async def test_the_ref_list_counts_changed_files_and_never_counts_main(
+    api, monkeypatch, model_store, opening
+):
+    """Files changed and not commits: it is what a reviewer is about to read. Main has nothing to
+    compare against, so it is the one ref with no number."""
+    from analyst_agent.web import model as routes
+
+    store = model_store(main={"cubes/orders.yml": "cubes: []"}, feature={})
+
+    async def diff(ref):
+        return {"changed": ["cubes/orders.yml", "views/revenue.yml"], "patch": "diff --git…"}
+
+    async def refs():
+        return [Ref("main", "a", 1, False), Ref("feature", "b", 2, False)]
+
+    store.diff = diff
+    store.refs = refs
+    monkeypatch.setattr(routes, "open_store", opening(store))
+
+    body = (await api.get("/api/model/refs")).json()
+    assert body["main"] == "main"
+    assert body["refs"] == [{"name": "main", "changed": 0}, {"name": "feature", "changed": 2}]
+
+
+async def test_a_rejected_change_set_is_a_200_carrying_its_reasons(
+    api, monkeypatch, model_store, opening
+):
+    """The editor renders errors in one banner, so a rejection is the *answer* and not a failed
+    request. Splitting it across a 400 and a 200 would make one button read two code paths."""
+    from analyst_agent.datamodel.editing import workspace
+    from analyst_agent.web import model as routes
+
+    async def verify(store, ref):
+        return workspace.Verdict(
+            ok=False,
+            kind="rejected",
+            reason="it does not compile",
+            errors=["views/revenue.yml: no such member orders.nope"],
+            warnings=["a tile reads this view"],
+            compiled=False,
+            compile_error="Member not found: orders.nope",
+        )
+
+    monkeypatch.setattr(routes, "open_store", opening(model_store(edit={})))
+    monkeypatch.setattr(workspace, "verify", verify)
+
+    answered = await api.post("/api/model/check", json={"ref": "edit"})
+    assert answered.status_code == 200, "a model Cube refuses is not a bad request"
+    body = answered.json()
+    assert body["ok"] is False
+    assert body["compiled"] is False
+    assert body["errors"] and body["warnings"]
+    assert set(body) == {
+        "ref",
+        "ok",
+        "errors",
+        "warnings",
+        "compiled",
+        "compile_error",
+        "member_errors",
+        "impact",
+    }
+    assert body["impact"] is None, "nothing compiled, so there was no catalog to check against"
+
+
+async def test_the_table_picker_reads_what_the_read_stage_cached(api):
+    """Never the warehouse: this fires on every checkbox tick. `read` is false before anything has
+    been read, which is what the picker shows its empty state from."""
+    await api.post("/api/connection", json=CHINOOK)
+    body = (await api.get("/api/pipeline/tables")).json()
+    assert body["read"] is False
+    assert body["schemas"] == []
+
+    _, _, sources = api.stores
+    await sources.save_state(
+        {
+            "catalog": {
+                "public": {
+                    "tables": [
+                        {
+                            "name": "invoice",
+                            "schema": "public",
+                            "columns": [{"name": "id", "data_type": "integer"}],
+                            "primary_key": ["id"],
+                            "foreign_keys": [],
+                        }
+                    ]
+                }
+            }
+        }
+    )
+    body = (await api.get("/api/pipeline/tables")).json()
+    assert body["read"] is True
+    assert [schema["schema"] for schema in body["schemas"]] == ["public"]
+    assert set(body) == {"read", "truncated", "notes", "selection", "schemas"}
+
+
+async def test_a_stored_result_pages_and_exports_with_labels(api):
+    """The event carries only a head of the rows; this is where the rest is read from. The CSV
+    header is labels and not member ids — a person reads a spreadsheet."""
+    chat = (await api.post("/api/chats", json={})).json()
+    columns = [
+        {
+            "id": "orders.status",
+            "label": "Status",
+            "kind": "dimension",
+            "type": "string",
+            "format": "",
+            "align": "left",
+        },
+        {
+            "id": "orders.count",
+            "label": "Orders",
+            "kind": "measure",
+            "type": "number",
+            "format": "",
+            "align": "right",
+        },
+    ]
+    rows = [
+        {"orders.status": "paid", "orders.count": 3},
+        {"orders.status": "open", "orders.count": 1},
+    ]
+    result_id = await api.stores[0].save_result(chat["id"], "turn-1", columns, rows)
+
+    body = (await api.get(f"/api/results/{result_id}?offset=1&limit=1")).json()
+    assert (body["row_count"], body["offset"]) == (2, 1)
+    assert body["rows"] == [rows[1]], "the page is not sliced by offset and limit"
+
+    exported = await api.get(f"/api/results/{result_id}/csv")
+    assert exported.headers["content-type"].startswith("text/csv")
+    assert "attachment" in exported.headers["content-disposition"]
+    assert exported.text.splitlines()[0] == "Status,Orders"
+
+    assert (await api.get("/api/results/nope")).status_code == 404
+
+
+async def test_agent_access_reports_the_token_and_a_config_for_the_address_it_was_asked_on(api):
+    """`base_url` and not `settings.web_host`: reached over a tunnel, the settings pair still says
+    127.0.0.1, which is a config that cannot work from wherever the person actually is."""
+    from analyst_agent.core.access import Access
+
+    server.app.state.mcp = Access(enabled=True, token="tok-abc")
+    server.app.state.mcp_max_rows = 100
+
+    body = (await api.get("/api/mcp")).json()
+    assert body["enabled"] is True
+    assert body["token"] == "tok-abc"
+    assert body["url"] == "http://test/mcp"
+    assert "tok-abc" in body["desktop"] and "tok-abc" in body["cli"]
+    assert {tool["name"] for tool in body["tools"]} == {
+        "search_model",
+        "run_query",
+        "describe_model",
+    }
+
+    off = await api.post("/api/mcp/enabled", json={"enabled": False})
+    assert off.json() == {"enabled": False}
+    assert server.app.state.mcp.enabled is False
+
+    rotated = (await api.post("/api/mcp/rotate")).json()
+    assert rotated["token"] != "tok-abc"
+    assert rotated["token"] in rotated["desktop"], "a new token beside a stale config block"

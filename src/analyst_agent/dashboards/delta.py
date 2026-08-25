@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from ..cube.shape import Column
+from ..modelstore.shape import Column
 from .store import TileResult
 
 

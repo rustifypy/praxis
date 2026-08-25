@@ -1,10 +1,10 @@
 import asyncio
 from dataclasses import asdict, dataclass, field
 
-from ..cube import gate
-from ..cube.catalog import Catalog
-from ..cube.client import CubeClient
-from ..cube.shape import columns_of
+from ..modelstore import gate
+from ..modelstore.catalog import Catalog
+from ..modelstore.client import Bound
+from ..modelstore.shape import columns_of
 from . import delta, store
 from . import tiles as tilecheck
 from .delta import Delta
@@ -51,7 +51,7 @@ async def _open(dashboard_id: str) -> tuple[Dashboard | None, list[Tile], RunOut
 async def validate(
     dashboard_id: str,
     catalog: Catalog,
-    client: CubeClient,
+    client: Bound,
     max_rows: int,
 ) -> RunOutcome:
     _, live_tiles, refusal = await _open(dashboard_id)
@@ -70,7 +70,7 @@ async def validate(
 async def refresh(
     dashboard_id: str,
     catalog: Catalog,
-    client: CubeClient,
+    client: Bound,
     max_rows: int,
 ) -> RunOutcome:
     board, live_tiles, refusal = await _open(dashboard_id)
@@ -142,7 +142,7 @@ async def refresh(
 
 
 async def _compile_all(
-    payloads: list[dict], catalog: Catalog, client: CubeClient, max_rows: int
+    payloads: list[dict], catalog: Catalog, client: Bound, max_rows: int
 ) -> list[gate.GateResult]:
     limit = asyncio.Semaphore(CONCURRENCY)
 

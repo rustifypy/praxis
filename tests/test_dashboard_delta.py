@@ -1,6 +1,6 @@
-from analyst_agent.cube.shape import Column
 from analyst_agent.dashboards.delta import deltas
 from analyst_agent.dashboards.store import TileResult
+from analyst_agent.modelstore.shape import Column
 
 REVENUE = Column(
     id="orders.net_revenue", label="Revenue", kind="measure", type="sum", format="", align="right"

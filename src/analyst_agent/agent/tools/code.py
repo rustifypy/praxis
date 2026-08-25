@@ -7,7 +7,7 @@ from langchain.tools import tool
 
 from ... import transcript
 from ...core.events import Event, emit
-from ...cube.shape import Column, export_value
+from ...modelstore.shape import Column, export_value
 from ...sandbox import SandboxError, open_sandbox
 from ..session import Session
 from .trace import end, start

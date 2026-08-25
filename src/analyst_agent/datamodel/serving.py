@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from ..cube.client import ADMIN_TIMEOUT_S, CubeError, served_catalog
+from ..modelstore.client import ADMIN_TIMEOUT_S, StoreError, served_catalog
 
 
 @dataclass
@@ -34,5 +34,5 @@ async def read(timeout: float = ADMIN_TIMEOUT_S) -> Serving | None:
             views=[entity.name for entity in catalog.views],
             described=sum(1 for entity in catalog.entities if entity.description),
         )
-    except CubeError:
+    except StoreError:
         return None

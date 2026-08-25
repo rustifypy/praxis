@@ -11,13 +11,13 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from ..core.config import settings
-from ..cube.client import CubeClient, CubeError
-from ..cube.shape import Column
 from ..dashboards import delta, store
 from ..dashboards import layout as layouts
 from ..dashboards import refresh as runner
 from ..dashboards import tiles as tilecheck
-from . import state
+from ..modelstore.client import Bound, StoreError
+from ..modelstore.shape import Column
+from .support import state
 
 router = APIRouter(prefix="/api/dashboards")
 
@@ -132,7 +132,7 @@ async def read_dashboard(dashboard_id: str, request: Request) -> dict:
     }
 
 
-async def _checks(dashboard_id: str, cube: CubeClient) -> dict:
+async def _checks(dashboard_id: str, cube: Bound) -> dict:
     # Compiles every tile without executing it, and never fails the page for trying: a member
     # dropped by a model rebuild becomes a banner on arrival.
     try:
@@ -151,7 +151,7 @@ async def _checks(dashboard_id: str, cube: CubeClient) -> dict:
                 if not outcome_tile.ok
             ],
         }
-    except CubeError as exc:
+    except StoreError as exc:
         # The session wraps transport failures, so an unreachable Cube arrives here rather
         # than as a ConnectError — which once escaped an `except OSError` and 500'd the page.
         return {"available": False, "reason": str(exc), "broken": []}
@@ -194,7 +194,7 @@ async def refresh_dashboard(dashboard_id: str, request: Request) -> dict:
                 for outcome_tile in outcome.tiles
             ],
         }
-    except CubeError as exc:
+    except StoreError as exc:
         # 502 rather than 500: Cube being down is not this server malfunctioning, and the
         # message is what the button shows.
         raise HTTPException(502, f"Cube is not answering: {exc}") from exc

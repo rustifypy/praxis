@@ -2,8 +2,8 @@
 
 from dataclasses import dataclass, field
 
-from ...cube.client import CubeError, open_client
-from ...cube.schema import CubeQuery
+from ...modelstore.client import StoreError, open_store
+from ...modelstore.schema import CubeQuery
 from .warehouse import Schema, Table
 
 SYNTHETIC_KEY = "id"
@@ -239,12 +239,13 @@ async def build_menu(schema: Schema) -> Menu:
             wanted.append(f"{table.name}.{column.name}")
             picked += 1
 
-    async with await open_client() as cube:
+    async with await open_store() as store:
+        cube = store.at()
         for member in wanted:
             query = CubeQuery.model_validate({"dimensions": [member], "limit": SAMPLE_LIMIT})
             try:
                 loaded = await cube.load(query)
-            except CubeError:
+            except StoreError:
                 # A sample only sharpens the model's judgment; a column that will not
                 # aggregate is not a reason to fail the build.
                 continue
