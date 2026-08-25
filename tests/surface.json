@@ -1,0 +1,328 @@
+{
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/",
+      "name": "index",
+      "answers": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/chats",
+      "name": "list_chats",
+      "answers": "array"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chats",
+      "name": "create_chat",
+      "answers": "Chat"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/chats/{chat_id}",
+      "name": "delete_chat",
+      "answers": "Ok"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/chats/{chat_id}",
+      "name": "rename_chat",
+      "answers": "Ok"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chats/{chat_id}/approve",
+      "name": "approve_script",
+      "answers": "Decided"
+    },
+    {
+      "method": "GET",
+      "path": "/api/chats/{chat_id}/events",
+      "name": "read_events",
+      "answers": "array"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chats/{chat_id}/files",
+      "name": "upload_file",
+      "answers": "Uploaded"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/chats/{chat_id}/files/{path:path}",
+      "name": "discard_file",
+      "answers": "Discarded"
+    },
+    {
+      "method": "GET",
+      "path": "/api/chats/{chat_id}/files/{path:path}",
+      "name": "download_file",
+      "answers": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/chats/{chat_id}/messages",
+      "name": "send_message",
+      "answers": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/chats/{chat_id}/preview/{path:path}",
+      "name": "preview_file",
+      "answers": "FilePreview"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chats/{chat_id}/stop",
+      "name": "stop_turn",
+      "answers": "Stopped"
+    },
+    {
+      "method": "GET",
+      "path": "/api/connection",
+      "name": "get_connection",
+      "answers": ""
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/connection",
+      "name": "edit",
+      "answers": "object"
+    },
+    {
+      "method": "POST",
+      "path": "/api/connection",
+      "name": "connect",
+      "answers": "object"
+    },
+    {
+      "method": "POST",
+      "path": "/api/connection/probe",
+      "name": "probe_now",
+      "answers": "object"
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboards",
+      "name": "list_dashboards",
+      "answers": "array"
+    },
+    {
+      "method": "POST",
+      "path": "/api/dashboards",
+      "name": "create_dashboard",
+      "answers": "object"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/dashboards/{dashboard_id}",
+      "name": "delete_dashboard",
+      "answers": "object"
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboards/{dashboard_id}",
+      "name": "read_dashboard",
+      "answers": "object"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/dashboards/{dashboard_id}",
+      "name": "rename_dashboard",
+      "answers": "object"
+    },
+    {
+      "method": "POST",
+      "path": "/api/dashboards/{dashboard_id}/layout",
+      "name": "set_layout",
+      "answers": "object"
+    },
+    {
+      "method": "POST",
+      "path": "/api/dashboards/{dashboard_id}/refresh",
+      "name": "refresh_dashboard",
+      "answers": "object"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/deployment",
+      "name": "deployed",
+      "answers": "object"
+    },
+    {
+      "method": "GET",
+      "path": "/api/deployment/{service}/compose",
+      "name": "compose",
+      "answers": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/healthz",
+      "name": "healthz",
+      "answers": "object"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcp",
+      "name": "read_access",
+      "answers": "AccessStatus"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp/enabled",
+      "name": "set_access_enabled",
+      "answers": "Enabled"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp/rotate",
+      "name": "rotate_access_token",
+      "answers": "RotatedToken"
+    },
+    {
+      "method": "GET",
+      "path": "/api/model",
+      "name": "served_model",
+      "answers": "object"
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/chats",
+      "name": "create_edit_chat",
+      "answers": "object"
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/chats/{chat_id}/messages",
+      "name": "send_edit_message",
+      "answers": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/check",
+      "name": "check_changes",
+      "answers": "object"
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/commit",
+      "name": "commit_changes",
+      "answers": "object"
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/discard",
+      "name": "discard_draft",
+      "answers": "object"
+    },
+    {
+      "method": "GET",
+      "path": "/api/model/files",
+      "name": "list_files",
+      "answers": "object"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/model/files/{path:path}",
+      "name": "delete_file",
+      "answers": "object"
+    },
+    {
+      "method": "GET",
+      "path": "/api/model/files/{path:path}",
+      "name": "read_file",
+      "answers": "object"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/model/files/{path:path}",
+      "name": "save_file",
+      "answers": "object"
+    },
+    {
+      "method": "GET",
+      "path": "/api/model/refs",
+      "name": "list_refs",
+      "answers": "object"
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/refs",
+      "name": "create_ref",
+      "answers": "object"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/model/refs/{ref}",
+      "name": "delete_ref",
+      "answers": "object"
+    },
+    {
+      "method": "GET",
+      "path": "/api/model/refs/{ref}/diff",
+      "name": "ref_diff",
+      "answers": "object"
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/refs/{ref}/merge",
+      "name": "merge_ref",
+      "answers": "object"
+    },
+    {
+      "method": "GET",
+      "path": "/api/model/summary",
+      "name": "summary",
+      "answers": "object"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/pipeline/job",
+      "name": "cancel_job",
+      "answers": "Cancelled"
+    },
+    {
+      "method": "GET",
+      "path": "/api/pipeline/job",
+      "name": "read_job",
+      "answers": "JobSnapshot"
+    },
+    {
+      "method": "GET",
+      "path": "/api/pipeline/job/stream",
+      "name": "stream_job",
+      "answers": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/pipeline/tables",
+      "name": "read_tables",
+      "answers": "TableCatalog"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pipeline/tables/closure",
+      "name": "read_closure",
+      "answers": "Closure"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pipeline/{stage}",
+      "name": "run_stage",
+      "answers": "JobSnapshot"
+    },
+    {
+      "method": "GET",
+      "path": "/api/results/{result_id}",
+      "name": "read_result",
+      "answers": "ResultPage"
+    },
+    {
+      "method": "GET",
+      "path": "/api/results/{result_id}/csv",
+      "name": "export_csv",
+      "answers": ""
+    }
+  ]
+}

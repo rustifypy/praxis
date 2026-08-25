@@ -11,9 +11,9 @@ import pytest
 import respx
 
 from analyst_agent.core.deployment import Deployment
-from analyst_agent.datamodel.modelgen import publish
+from analyst_agent.modelstore.modelgen import publish
 
-URL = "http://store:8500"
+URL = "http://store:8000"
 FILES = {"cubes/album.yml": "cubes:\n- name: album\n"}
 
 
@@ -41,22 +41,47 @@ def verdict(monkeypatch):
     return compiles
 
 
-def routes(candidate_exists: bool = False):
-    """The store as `install` uses it, and the calls back so order can be asserted."""
+def routes(
+    candidate_exists: bool = False,
+    carries: dict | None = None,
+    write_answer: httpx.Response | None = None,
+):
+    """The store as `install` uses it, and the calls back so order can be asserted.
+
+    A replace is a listing, one write per file, and one commit — the store takes no bulk write,
+    so `carries` is what the candidate already holds and therefore what has to be removed.
+    """
+    listed = [{"path": p, "size": 1, "modified": 0.0} for p in carries or {}]
+    respx.get(f"{URL}/refs/{publish.CANDIDATE}/tree").mock(
+        return_value=httpx.Response(200, json={"ref": publish.CANDIDATE, "rev": 1, "files": listed})
+    )
+    respx.get(f"{URL}/refs/{publish.CANDIDATE}").mock(
+        return_value=httpx.Response(
+            200, json={"ref": publish.CANDIDATE, "sha": "aaa", "rev": 1, "dirty": False}
+        )
+    )
     return {
         "delete": respx.delete(f"{URL}/refs/{publish.CANDIDATE}").mock(
-            return_value=httpx.Response(200, json={"deleted": publish.CANDIDATE})
+            return_value=httpx.Response(204)
             if candidate_exists
-            else httpx.Response(404, json={"detail": "no such ref: 'candidate'"})
+            else httpx.Response(404, json={"error": "unknown ref: candidate"})
         ),
         "create": respx.post(f"{URL}/refs").mock(
-            return_value=httpx.Response(200, json={"name": publish.CANDIDATE, "sha": "aaa"})
+            return_value=httpx.Response(
+                201, json={"ref": publish.CANDIDATE, "sha": "aaa", "rev": 1, "dirty": False}
+            )
         ),
-        "replace": respx.put(f"{URL}/files", params={"ref": publish.CANDIDATE}).mock(
-            return_value=httpx.Response(200, json={"ref": publish.CANDIDATE, "sha": "bbb"})
+        "replace": respx.put(url__startswith=f"{URL}/refs/{publish.CANDIDATE}/files/").mock(
+            return_value=write_answer
+            or httpx.Response(200, json={"ref": publish.CANDIDATE, "rev": 2, "changed": True})
         ),
-        "merge": respx.post(f"{URL}/merge").mock(
-            return_value=httpx.Response(200, json={"into": "main", "sha": "ccc"})
+        "commit": respx.post(f"{URL}/refs/{publish.CANDIDATE}/commit").mock(
+            return_value=httpx.Response(
+                200, json={"ref": publish.CANDIDATE, "sha": "bbb", "files": []}
+            )
+        ),
+        "merge": respx.post(f"{URL}/refs/{publish.CANDIDATE}/merge").mock(
+            return_value=httpx.Response(200, json={"ref": "main", "sha": "ccc", "rev": 3})
         ),
     }
 
@@ -73,8 +98,8 @@ async def test_a_model_that_compiles_lands_on_main(configured, verdict):
     # Validated at the candidate, never at main: main is what everything else is querying.
     assert seen["ref"] == publish.CANDIDATE
     assert call["merge"].called
-    body = call["merge"].calls[0].request.content
-    assert b'"from_ref":"candidate"' in body.replace(b" ", b"")
+    # The ref being merged is the route, not a field in a body.
+    assert call["merge"].calls[0].request.url.path == f"/refs/{publish.CANDIDATE}/merge"
     # Deleted twice: the leftover check on the way in, and the cleanup on the way out.
     assert call["delete"].call_count == 2
 
@@ -115,9 +140,6 @@ async def test_a_store_that_will_not_take_the_model_is_not_reported_as_a_compile
     """A path the store refuses is a bug in what was emitted, and it has to arrive with the
     store's own reason rather than as "Cube rejected the model"."""
     verdict(True)
-    routes()
-    respx.put(f"{URL}/files", params={"ref": publish.CANDIDATE}).mock(
-        return_value=httpx.Response(400, json={"detail": "'cubes/a.txt' must be cubes/*.yml"})
-    )
+    routes(write_answer=httpx.Response(400, json={"error": "'cubes/a.txt' must be cubes/*.yml"}))
     with pytest.raises(Exception, match="cubes/a.txt"):
         await publish.install({"cubes/a.txt": "x"})

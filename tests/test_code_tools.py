@@ -63,7 +63,6 @@ async def session(tmp_path, catalog, cube):
     built = Session(
         catalog=catalog,
         client=cube,
-        grounding=None,
         chat_id=CHAT,
         turn_id="turn-1",
     )
@@ -165,7 +164,7 @@ async def test_a_session_with_no_chat_still_names_a_workspace(catalog, cube, san
     """Only tests build one. It must not land on the workspace root itself, which is the whole
     volume rather than one chat's corner of it."""
     fake = sandbox()
-    session = Session(catalog=catalog, client=cube, grounding=None)
+    session = Session(catalog=catalog, client=cube)
     await named(tools.build_code_tools(session), "run_python").ainvoke({"script": "x"})
     assert fake.ran, "a chatless session still runs"
 
@@ -211,7 +210,7 @@ async def test_an_export_with_no_sandbox_says_so_rather_than_claiming_success(se
 
 
 async def test_exporting_before_any_query_says_to_query_first(catalog, cube):
-    session = Session(catalog=catalog, client=cube, grounding=None, chat_id=CHAT)
+    session = Session(catalog=catalog, client=cube, chat_id=CHAT)
     out = await named(tools.build_code_tools(session), "export_result").ainvoke({})
     assert "No query has run yet" in out and "run_query" in out
 
@@ -219,7 +218,7 @@ async def test_exporting_before_any_query_says_to_query_first(catalog, cube):
 async def test_exporting_a_result_that_was_never_stored_says_to_re_run(catalog, cube, data_dir):
     """`run_query` stores rows only when the session has a store and a chat. Without one there is
     a QueryRecord and no rows, and the tool must say so rather than write an empty file."""
-    session = Session(catalog=catalog, client=cube, grounding=None, chat_id=CHAT)
+    session = Session(catalog=catalog, client=cube, chat_id=CHAT)
     session.executed.append(
         QueryRecord(query={}, sql=None, row_count=2, duration_ms=1, warnings=[], columns=COLUMNS)
     )

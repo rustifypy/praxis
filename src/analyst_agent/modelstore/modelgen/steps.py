@@ -3,8 +3,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from ...core import deployment
-from ...modelstore import model_files
 from .. import definitions, evidence
+from ..client import model_files
 from ..evidence import STAGES, STEPS
 from . import build, decide, publish, read, selection
 from .warehouse import Schema, dump_schema, load_schema
@@ -134,16 +134,10 @@ async def cubes(
         "schema": schema_name,
     }
     await deployment.save_step("cubes", _record(summary, notes))
-    dropped = evidence.invalidated_by(
-        evidence.of(definitions.read(await model_files())[0], await deployment.state()), "cubes"
-    )
-    await deployment.drop_steps(dropped)
-    if dropped:
-        notes.append(
-            f"discarded {' and '.join(dropped)} — every model file was rewritten, and the "
-            "commit before this one is what those steps had produced"
-        )
-    return StepResult(summary={**summary, "invalidated": dropped}, notes=notes)
+    # Nothing is dropped from `steps` here any more. A stage is no longer run on its own: the
+    # wizard runs cubes → describe → views in order, and a rebuild runs all of them again, so
+    # there is no state in which a later step's record outlives the model it described.
+    return StepResult(summary=summary, notes=notes)
 
 
 # --- step 3: describe --------------------------------------------------------
@@ -196,12 +190,8 @@ async def describe(report: Report | None = None) -> StepResult:
         "describe",
         _record(summary, enrichment.rejected, validation.member_errors),
     )
-    dropped = evidence.invalidated_by(
-        evidence.of(definitions.read(await model_files())[0], await deployment.state()), "describe"
-    )
-    await deployment.drop_steps(dropped)
     return StepResult(
-        summary={**summary, "invalidated": dropped},
+        summary=summary,
         notes=enrichment.rejected,
         errors=validation.member_errors,
     )

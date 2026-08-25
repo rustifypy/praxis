@@ -2,8 +2,8 @@
 
 from dataclasses import dataclass, field
 
-from ...modelstore.client import StoreError, open_store
-from ...modelstore.schema import CubeQuery
+from ..client import StoreError, open_store
+from ..schema import CubeQuery
 from .warehouse import Schema, Table
 
 SYNTHETIC_KEY = "id"

@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 import yaml
 
 from ...core.deployment import MAIN
-from ...modelstore import Bound, StoreError, open_store
-from ...modelstore.schema import CubeQuery
+from ..client import Bound, StoreError, open_store
+from ..schema import CubeQuery
 from .decide import CubeDecision, Enrichment, MeasureDecision, ViewDecision, exposed_members
 
 COMPILE_TIMEOUT_S = 90.0

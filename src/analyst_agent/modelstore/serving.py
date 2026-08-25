@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from ..modelstore.client import ADMIN_TIMEOUT_S, StoreError, served_catalog
+from .client import ADMIN_TIMEOUT_S, StoreError, served_catalog
 
 
 @dataclass

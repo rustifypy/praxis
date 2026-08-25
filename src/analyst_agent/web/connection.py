@@ -12,46 +12,35 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from .. import reachable
+from ..core import deployenv
 from ..core import deployment as connection
 from ..core.deployment import Deployment
-from ..datamodel import definitions, deployenv, evidence, serving
-from ..modelstore import StoreError, model_files
-from . import state
+from ..modelstore import StoreError, definitions, evidence, model_files, serving
+from .support import state
 
 router = APIRouter(prefix="/api")
 
 COMPOSE_FILE = "docker-compose.yml"
 
-# How long a probe is reused: each one is an HTTP call, and a dot that is a few seconds stale
-# beats one that costs a round trip per page build.
 HEALTH_TTL_S = 15.0
 
-# The one rule about a connection variable's name. Everything the compose file sets itself is
-# CUBEJS_ without the DB, so a typed key can never overwrite the API secret or dev mode.
-ENV_PREFIX = "CUBEJS_DB_"
+ENV_PREFIXES = ("CUBEJS_DB_", "CUBEJS_AWS_")
 
-# The two deployments, and nothing else is one. Named here so the route cannot be asked for a
-# third, and so the browser's two download links and this dict cannot disagree on the names.
 RENDERERS = {"semantic": deployenv.semantic, "sandbox": deployenv.sandbox}
 
 
 class NewConnection(BaseModel):
     description: str = ""
     driver: str
-    # Whatever CUBEJS_DB_* variables this warehouse needs. No per-driver field list: the portal
-    # writes what it is given into the compose file, and Cube is what reads them.
     values: dict[str, str] = Field(default_factory=dict)
 
 
 class EditConnection(BaseModel):
     description: str | None = None
-    # A key with an empty value keeps what is stored: the form is never sent the password it
-    # would otherwise overwrite with blank.
     values: dict[str, str] = Field(default_factory=dict)
 
 
 class Addresses(BaseModel):
-    # Either or both. Step two of connecting, once someone has run the compose files.
     store_url: str = ""
     sandbox_url: str = ""
 
@@ -72,12 +61,8 @@ async def probe(app, deployment: Deployment) -> dict:
     if hit and now - hit[0] < HEALTH_TTL_S:
         return hit[1]
 
-    # Liveness and identity but not the token, since this answers on every page build. A field
-    # rather than a failed request: nothing but `run_python` needs a sandbox.
     found = await reachable.alive(deployment)
     if not deployment.deployed:
-        # Not "down": nothing has been run yet, and calling that unhealthy would put a red dot
-        # on a deployment whose compose file has not been handed over.
         probed = {
             "health": reachable.Reached(False, "not deployed").as_dict(),
             "serving": None,
@@ -89,8 +74,6 @@ async def probe(app, deployment: Deployment) -> dict:
         probed = {
             "health": result.as_dict(),
             "serving": served and served.__dict__,
-            # Cached with the probe: it is a fact about this probe rather than about the row,
-            # and the browser must not re-derive it from `serving` being null.
             "serving_state": serving.state(True, result.ok, served),
         }
     probed["sandbox_reason"] = "" if found.ok else found.detail
@@ -100,9 +83,6 @@ async def probe(app, deployment: Deployment) -> dict:
 
 async def view(request: Request, deployment: Deployment, steps: dict) -> dict:
     probed = await probe(request.app, deployment)
-    served = (probed["serving"] or {}).get("cubes", 0)
-    # A store that is down must not take this page with it: saying what is broken is the page's
-    # whole job. Everywhere else `model_files` raises, deliberately.
     store_error = ""
     try:
         files = await model_files()
@@ -110,7 +90,7 @@ async def view(request: Request, deployment: Deployment, steps: dict) -> dict:
         files = {}
         store_error = str(exc)
     found_files, _ = definitions.read(files)
-    found = evidence.of(found_files, await connection.state(), served=served)
+    found = evidence.of(found_files, await connection.state())
     return {
         **evidence.public(deployment, steps=steps, health=probed["health"], found=found),
         "store_error": store_error,
@@ -143,8 +123,8 @@ def _envs(values: dict[str, str]) -> dict[str, str]:
     envs = {}
     for key, value in values.items():
         name = key.strip().upper()
-        if not name.startswith(ENV_PREFIX):
-            raise HTTPException(400, f"{key!r} is not a {ENV_PREFIX}* variable")
+        if not name.startswith(ENV_PREFIXES):
+            raise HTTPException(400, f"{key!r} is not a connection setting")
         if value.strip():
             envs[name] = value.strip()
     return envs
@@ -155,19 +135,21 @@ async def connect(body: NewConnection, request: Request) -> dict:
     # Nothing is running after this: the addresses arrive later from whoever ran the compose
     # file, which is the whole reason connecting is two steps.
     state.idle(request.app)
-    if not body.driver.strip():
-        raise HTTPException(400, "no warehouse type — it becomes CUBEJS_DB_TYPE")
+    driver = body.driver.strip()
+    if not driver:
+        raise HTTPException(400, "pick the kind of database this is")
 
-    # Minted once: they go into the compose file, and the deployment that reads it has to keep
-    # matching the row, so rotating one means re-running that deployment.
+    credentials = {**_envs(body.values), "CUBEJS_DB_TYPE": driver}
+    if owed := deployenv.missing(driver, credentials):
+        raise HTTPException(400, f"still needs {', '.join(owed)}")
+
     built = Deployment(
         api_secret=secrets.token_urlsafe(36),
         store_token=secrets.token_urlsafe(32),
-        store_read_token=secrets.token_urlsafe(32),
         sandbox_token=secrets.token_urlsafe(32),
-        driver=body.driver.strip(),
+        driver=driver,
         description=body.description,
-        credentials={**_envs(body.values), "CUBEJS_DB_TYPE": body.driver.strip()},
+        credentials=credentials,
     )
     await connection.save(built)
     state.reloaded(request.app)
@@ -176,10 +158,6 @@ async def connect(body: NewConnection, request: Request) -> dict:
 
 @router.patch("/connection")
 async def edit(body: EditConnection, request: Request) -> dict:
-    # Credentials only. The addresses are `PUT /deployment`, which checks them first. Nothing is
-    # invalidated here: a changed host may be the same database moved and a changed name may
-    # expose the same tables, so which it was is not derivable from the values. `DELETE
-    # /pipeline` is how what was built is discarded, deliberately.
     deployment = await find()
     merged = None
     if body.values:
@@ -203,9 +181,6 @@ async def probe_now(request: Request) -> dict:
 
 @router.get("/deployment/{service}/compose")
 async def compose(service: str) -> Response:
-    # The one route that returns credential *values*: handing them over is its entire purpose,
-    # since nothing can start the deployment without them. A download and never a body the page
-    # renders — the only thing to do with the file is run it somewhere.
     try:
         if service not in RENDERERS:
             raise HTTPException(404, f"no such service {service!r} — one of {', '.join(RENDERERS)}")
@@ -217,8 +192,6 @@ async def compose(service: str) -> Response:
             headers={"Content-Disposition": f'attachment; filename="{COMPOSE_FILE}"'},
         )
     except RuntimeError as exc:
-        # Not a 500: a secret the deployment has none of is actionable, and a file with an
-        # unresolved variable reads as complete and dies at `up`. `render` raises nothing else.
         raise HTTPException(503, str(exc)) from None
 
 
@@ -246,17 +219,3 @@ async def deployed(body: Addresses, request: Request) -> dict:
         "checked": {service: result.as_dict() for service, result in checked.items()},
         "connection": await read(request),
     }
-
-
-@router.post("/deployment/secrets")
-async def rotate(request: Request) -> dict:
-    await find()
-    state.idle(request.app)
-    await connection.patch(
-        api_secret=secrets.token_urlsafe(36),
-        store_token=secrets.token_urlsafe(32),
-        store_read_token=secrets.token_urlsafe(32),
-        sandbox_token=secrets.token_urlsafe(32),
-    )
-    state.reloaded(request.app)
-    return await read(request)

@@ -30,9 +30,9 @@ import asyncio
 from contextlib import suppress
 from dataclasses import dataclass, field
 
-from ... import drafts
 from ...core.deployment import MAIN
-from ...modelstore.client import ModelStore, StoreError, served_catalog
+from .. import drafts
+from ..client import ModelStore, StoreError, served_catalog
 from ..modelgen.publish import check as compiles
 from . import edits, impact
 

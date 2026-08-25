@@ -22,14 +22,7 @@ class Evidence:
     described: tuple[str, ...] = ()
     views: tuple[str, ...] = ()
     catalog: bool = False
-    served: int = 0
     state: dict = field(default_factory=dict)
-
-    @property
-    def adopted(self) -> bool:
-        # Cube is serving a model nothing here produced — an empty rail over working cubes is
-        # the whole reason this module exists.
-        return not self.cubes and not self.views and self.served > 0
 
     def done(self, step: str) -> bool:
         if step == "read":
@@ -42,15 +35,6 @@ class Evidence:
             return bool(self.views)
         return False
 
-    def note(self, step: str) -> str:
-        # Nobody re-describes a whole model to finish the last two, so "9 of 11" is honest and
-        # still counts as run.
-        if step != "describe" or not self.cubes:
-            return ""
-        if len(self.described) == len(self.cubes):
-            return f"all {len(self.cubes)} described"
-        return f"{len(self.described)} of {len(self.cubes)} described"
-
     def blocked(self, step: str) -> str:
         # Keyed on the state a step *reads* rather than on a recorded tick, and on presence
         # rather than truth: a describe step that proposed nothing stores an empty enrichment,
@@ -62,7 +46,13 @@ class Evidence:
         return ""
 
 
-def of(definitions: dict[str, Definition], state: dict, served: int = 0) -> Evidence:
+def of(definitions: dict[str, Definition], state: dict) -> Evidence:
+    """What the model store holds, plus what the steps left in the row.
+
+    It no longer takes what Cube is *serving*. That existed only to spot a model this portal did
+    not build — a store that arrived with one already in it — and there is no such case now: a
+    deployment is created by onboarding, which builds the model as its last step.
+    """
     cubes = sorted(
         definition.name for definition in definitions.values() if definition.kind == "cube"
     )
@@ -75,38 +65,33 @@ def of(definitions: dict[str, Definition], state: dict, served: int = 0) -> Evid
             )
         ),
         catalog=bool(state.get("catalog")),
-        served=served,
         state=state,
     )
 
 
-def stages(steps: dict, found: Evidence) -> list[dict]:
-    # A recorded failure wins over the artefacts it left behind: it is the newer information,
-    # and a half-written model must not hide the error.
-    rail = []
-    for stage in STAGES:
-        if steps.get(stage, {}).get("status") == "error":
-            state = "error"
-        else:
-            state = "done" if found.done(stage) else "todo"
-        rail.append(
-            {
-                "name": stage,
-                "state": state,
-                "blocked_by": found.blocked(stage),
-                "note": found.note(stage),
-            }
-        )
-    return rail
+# There is no `stages()` here any more, and no `stages`/`next_stage` on the body below. They fed
+# the data page's four-stage rail, which is gone: the pipeline runs inside onboarding and inside
+# Rebuild, and both of those follow the *job* rather than a rail of recorded state. `blocked` stays
+# because `steps.action` enforces the ordering rule with it.
 
 
-def invalidated_by(found: Evidence, step: str) -> list[str]:
-    # Read off the artefacts and not off `steps`: for an adopted model `steps` is empty while
-    # the views a rebuild deletes are right there, so a warning from `steps` would promise
-    # nothing is lost.
-    if step not in STEPS:
-        return []
-    return [later for later in STEPS[STEPS.index(step) + 1 :] if found.done(later)]
+def onboarded(deployment: Deployment, found: Evidence) -> bool:
+    """Whether setup is finished: both addresses stored, and a model in the store.
+
+    Computed rather than stored, because `core.db.SCHEMA` cannot gain a column —
+    `CREATE TABLE IF NOT EXISTS` does not diff, so a new column silently fails to appear on an
+    existing `analyst.db` and there is no migration mechanism to add one with.
+
+    Read off the cubes the store holds and not off a recorded step, the same way every other
+    question here is: a step record says what this portal once did, and the model is what is
+    true now. The wizard is owed until this is true, so getting it from `steps` would let a
+    model someone deleted read as finished setup.
+
+    Views and descriptions are deliberately not part of it. Enrichment is optional in the
+    wizard and reachable afterwards through the editor chat, so demanding it here would trap
+    someone in setup over work they chose to skip.
+    """
+    return bool(deployment.store_url and deployment.sandbox_url) and found.done("cubes")
 
 
 def public(
@@ -116,7 +101,6 @@ def public(
     found: Evidence,
 ) -> dict:
     # Every field except the secrets.
-    rail = stages(steps, found)
     return {
         "label": label_of(deployment),
         "description": deployment.description,
@@ -126,16 +110,11 @@ def public(
         # well and just cannot run Python.
         "sandbox_url": deployment.sandbox_url,
         "deployed": deployment.deployed,
-        "onboarded": deployment.onboarded,
+        "onboarded": onboarded(deployment, found),
         # Names only, never values, so the edit form can show which fields are set.
         "credential_keys": sorted(deployment.credentials),
         "steps": steps,
         "health": health,
-        "adopted": found.adopted,
         "cubes": list(found.cubes),
         "views": list(found.views),
-        "invalidates": {step: invalidated_by(found, step) for step in STEPS},
-        "stages": rail,
-        # One answer, so a sidebar and a page cannot name different next steps.
-        "next_stage": next((stage["name"] for stage in rail if stage["state"] != "done"), None),
     }

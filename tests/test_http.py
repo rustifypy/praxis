@@ -754,7 +754,7 @@ async def test_a_rejected_change_set_is_a_200_carrying_its_reasons(
 ):
     """The editor renders errors in one banner, so a rejection is the *answer* and not a failed
     request. Splitting it across a 400 and a 200 would make one button read two code paths."""
-    from analyst_agent.datamodel.editing import workspace
+    from analyst_agent.modelstore.editing import workspace
     from analyst_agent.web import model as routes
 
     async def verify(store, ref):

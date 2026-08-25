@@ -13,13 +13,13 @@ running deployment rather than about a directory that happens to sit alongside.
 import pytest
 
 from analyst_agent.core.config import settings
-from analyst_agent.datamodel.deployenv import (
+from analyst_agent.core.deployenv import (
     CUBE_TIMEOUT_S,
     SANDBOX_EXEC_TIMEOUT_S,
     SANDBOX_PROFILE_TIMEOUT_S,
 )
-from analyst_agent.datamodel.modelgen.read import PROBE_QUERY_TIMEOUT_S
 from analyst_agent.modelstore.client import ADMIN_TIMEOUT_S, POLL_REQUEST_TIMEOUT_S
+from analyst_agent.modelstore.modelgen.read import PROBE_QUERY_TIMEOUT_S
 from analyst_agent.reachable import CHECK_TIMEOUT_S, LIVE_TIMEOUT_S
 from analyst_agent.sandbox import client
 from analyst_agent.sandbox.client import RUN_TIMEOUT_S, UPLOAD_TIMEOUT_S

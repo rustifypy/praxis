@@ -7,7 +7,7 @@ from analyst_agent.core import db
 from analyst_agent.core import deployment as _deployment
 from analyst_agent.core.config import settings
 from analyst_agent.core.deployment import Deployment
-from analyst_agent.datamodel.modelgen.decide import (
+from analyst_agent.modelstore.modelgen.decide import (
     CubeDecision,
     Enrichment,
     MeasureDecision,
@@ -15,7 +15,7 @@ from analyst_agent.datamodel.modelgen.decide import (
     ViewCube,
     ViewDecision,
 )
-from analyst_agent.datamodel.modelgen.warehouse import (
+from analyst_agent.modelstore.modelgen.warehouse import (
     Column,
     ForeignKey,
     Schema,
@@ -34,7 +34,7 @@ CREDENTIALS = {
 }
 
 SHOP = Deployment(
-    store_url="http://localhost:8500",
+    store_url="http://localhost:8000",
     description="Orders.",
     driver="postgres",
     credentials=CREDENTIALS,
@@ -123,15 +123,15 @@ async def test_state_merges_at_the_top_level(store):
     assert state["selection"] == {"tables": ["invoice"]}
 
 
-async def test_reset_progress_forgets_the_pipeline_and_keeps_the_connection(store):
-    """What a change of database needs, and the only thing that needs it: there is no delete, so
-    the edit form is the way to point at a different warehouse — and steps describing the old
-    one would offer a rebuild from a catalog nothing read."""
+async def test_connecting_again_is_what_forgets_the_pipeline(store):
+    """There is no `reset_progress` any more: it existed for re-pointing at a different database,
+    which is re-onboarding now. `save` is still a replacement, so the steps and the cached tables
+    of the database that is no longer connected go with it."""
     await store.save(SHOP)
     await store.save_step("cubes", {"status": "done"})
     await store.save_state({"catalog": {"public": ["invoice"]}})
 
-    await store.reset_progress()
+    await store.save(SHOP)
 
     assert await store.steps() == {}
     assert await store.state() == {}

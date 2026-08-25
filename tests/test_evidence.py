@@ -8,14 +8,14 @@ it reports a working model as unstarted.
 import json
 
 from analyst_agent.core.deployment import Deployment
-from analyst_agent.datamodel import evidence
-from analyst_agent.datamodel.definitions import Definition
-from analyst_agent.datamodel.evidence import STEPS, invalidated_by, public, stages
-from analyst_agent.datamodel.registry import label_of
+from analyst_agent.modelstore import evidence
+from analyst_agent.modelstore.definitions import Definition
+from analyst_agent.modelstore.evidence import STEPS, onboarded, public
+from analyst_agent.modelstore.registry import label_of
 
 CREDENTIALS = {"CUBEJS_DB_NAME": "chinook", "CUBEJS_DB_PASS": "secret"}
 SHOP = Deployment(
-    store_url="http://localhost:8500",
+    store_url="http://localhost:8000",
     store_token="w" * 40,
     api_secret="s" * 40,
     description="Orders.",
@@ -65,40 +65,14 @@ def test_read_is_the_cached_catalog_and_not_a_recorded_run():
     assert evidence.of({}, {"catalog": {"public": {}}}).done("read")
 
 
-def test_describing_is_a_count_rather_than_a_tick():
-    """Nobody re-describes a whole model to finish the last two, so "9 of 11" is the honest
-    thing to say — and it still counts as run."""
-    found = evidence.of(model({"a": True, "b": False, "c": False}), BUILT)
-    assert found.done("describe")
-    assert found.note("describe") == "1 of 3 described"
-    assert evidence.of(model({"a": True}), BUILT).note("describe") == "all 1 described"
+def test_a_partly_described_model_still_counts_as_described():
+    """Nobody re-describes a whole model to finish the last two, so one description is enough for
+    the step to have run. The count that used to be reported with it went with the stage rail."""
+    assert evidence.of(model({"a": True, "b": False, "c": False}), BUILT).done("describe")
+    assert not evidence.of(model({"a": False, "b": False}), BUILT).done("describe")
 
 
-def test_a_model_nobody_here_built_says_so_rather_than_reading_as_unstarted():
-    """The empty rail over a Cube serving thirteen cubes is the whole reason for this module."""
-    adopted = evidence.of({}, {}, served=13)
-    assert adopted.adopted
-    assert not evidence.of({}, {}, served=0).adopted
-    assert not evidence.of(model({"invoice": True}), BUILT, served=13).adopted
-
-
-# --- the rail ----------------------------------------------------------------
-
-
-def test_the_rail_comes_from_the_files_with_an_empty_steps_blob():
-    """A cloned model directory: nothing recorded, everything built."""
-    rail = {
-        s["name"]: s["state"] for s in stages({}, evidence.of(model({"a": True}, ("v",)), BUILT))
-    }
-    assert rail == {"read": "done", "cubes": "done", "describe": "done", "views": "done"}
-
-
-def test_a_failed_run_wins_over_the_artefacts_it_left_behind():
-    """It is the newer information, and a half-written model must not hide the error."""
-    steps = {"describe": {"status": "error"}}
-    rail = {s["name"]: s["state"] for s in stages(steps, evidence.of(model({"a": True}), BUILT))}
-    assert rail["describe"] == "error"
-    assert rail["cubes"] == "done"
+# --- what holds a step up -----------------------------------------------------
 
 
 def test_a_step_is_held_up_by_the_state_it_reads_not_by_a_recorded_tick():
@@ -122,20 +96,28 @@ def test_views_needs_the_decisions_describe_makes():
     assert evidence.of({}, BUILT).blocked("views") == ""
 
 
-# --- what a rebuild destroys -------------------------------------------------
+# --- whether setup is finished -----------------------------------------------
 
 
-def test_the_warning_names_what_is_on_disk_and_not_what_was_recorded():
-    """For an adopted model `steps` is empty while the views a rebuild deletes are there, so a
-    warning read off `steps` would promise nothing is lost."""
-    found = evidence.of(model({"a": True}, views=("sales",)), BUILT)
-    assert invalidated_by(found, "cubes") == ["describe", "views"]
-    assert invalidated_by(found, "views") == []
+def test_setup_is_finished_when_both_addresses_and_a_model_are_there():
+    """Cubes and not views: enrichment is skippable in the wizard and reachable afterwards
+    through the editor chat, so demanding it would trap someone in setup over work they chose
+    not to do."""
+    whole = Deployment(store_url="http://store", sandbox_url="http://box")
+    assert onboarded(whole, evidence.of(model({"a": False}), BUILT))
+    assert not onboarded(whole, evidence.of({}, BUILT))
 
 
-def test_nothing_is_lost_when_the_later_steps_produced_nothing():
-    found = evidence.of(model({"a": False}), BUILT)
-    assert invalidated_by(found, "cubes") == []
+def test_addresses_without_a_model_is_not_finished_setup():
+    """The wizard's last step builds the model, so this is the state it is entered in."""
+    both = Deployment(store_url="http://store", sandbox_url="http://box")
+    assert not onboarded(both, evidence.of({}, {}))
+
+
+def test_a_model_without_a_sandbox_is_not_finished_setup():
+    """The sandbox step is required, which is the whole difference from `deployed`."""
+    no_sandbox = Deployment(store_url="http://store")
+    assert not onboarded(no_sandbox, evidence.of(model({"a": True}), BUILT))
 
 
 # --- what leaves the process -------------------------------------------------
@@ -150,7 +132,7 @@ def test_public_never_carries_a_credential_value():
     )
     assert "secret" not in json.dumps(body)
     assert body["credential_keys"] == sorted(CREDENTIALS)
-    assert body["store_url"] == "http://localhost:8500"
+    assert body["store_url"] == "http://localhost:8000"
 
 
 def test_the_secret_never_leaves_either():
@@ -168,17 +150,8 @@ def test_the_label_is_the_database_the_credentials_open():
     assert label_of(Deployment(driver="postgres")) == "postgres"
 
 
-def test_public_ships_what_each_step_would_discard():
-    """So the browser confirms from the same rule the rebuild performs."""
-    found = evidence.of(model({"a": True}, views=("sales",)), BUILT)
-    body = public(SHOP, steps={}, health={}, found=found)
-    assert body["invalidates"]["cubes"] == ["describe", "views"]
-    assert body["invalidates"]["views"] == []
-
-
-def test_next_stage_is_the_first_one_not_done():
-    """One answer, so a sidebar and a page cannot name different next steps."""
-    partial = evidence.of({}, {"catalog": {"public": {}}})
-    assert public(SHOP, steps={}, health={}, found=partial)["next_stage"] == "cubes"
-    whole = evidence.of(model({"a": True}, views=("v",)), BUILT)
-    assert public(SHOP, steps={}, health={}, found=whole)["next_stage"] is None
+def test_the_body_no_longer_carries_a_stage_rail():
+    """It fed the data page's four-stage stepper, which is gone: the pipeline runs inside
+    onboarding and inside Rebuild, and both follow the job rather than a rail of recorded state."""
+    body = public(SHOP, steps={}, health={}, found=evidence.of(model({"a": True}), BUILT))
+    assert "stages" not in body and "next_stage" not in body

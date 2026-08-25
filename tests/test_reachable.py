@@ -12,11 +12,13 @@ import respx
 from analyst_agent import reachable
 from analyst_agent.core.deployment import CONTRACT, Deployment
 
-STORE = "http://localhost:8500"
+STORE = "http://localhost:8000"
 SANDBOX = "http://localhost:8600"
 TOKEN = "w" * 40
 
-HEALTHY_STORE = {"ok": True, "refs": 1, "contract": CONTRACT}
+HEALTHY_STORE = {"status": "ok"}
+SERVING = f"{STORE}/refs/main/meta"
+META = {"cubes": [{"name": "orders"}]}
 HEALTHY_SANDBOX = {"ok": True, "contract": CONTRACT, "root": "/data", "running": 0}
 
 
@@ -29,17 +31,15 @@ def sandboxed(**over) -> Deployment:
 
 @respx.mock
 async def test_semantic_passes_when_both_halves_answer():
-    respx.get(f"{STORE}/health").mock(return_value=httpx.Response(200, json=HEALTHY_STORE))
-    respx.get(f"{STORE}/cube/readyz").mock(
-        return_value=httpx.Response(200, json={"health": "HEALTH"})
-    )
+    respx.get(f"{STORE}/healthz").mock(return_value=httpx.Response(200, json=HEALTHY_STORE))
+    respx.get(SERVING).mock(return_value=httpx.Response(200, json={"health": "HEALTH"}))
     found = await reachable.semantic(STORE, TOKEN)
     assert found.ok and found.status == "ok" and not found.warnings
 
 
 @respx.mock
 async def test_semantic_refuses_when_nothing_is_listening():
-    respx.get(f"{STORE}/health").mock(side_effect=httpx.ConnectError("refused"))
+    respx.get(f"{STORE}/healthz").mock(side_effect=httpx.ConnectError("refused"))
     found = await reachable.semantic(STORE, TOKEN)
     assert not found.ok and found.status == "unreachable"
     assert "nothing listening" in found.detail
@@ -47,7 +47,7 @@ async def test_semantic_refuses_when_nothing_is_listening():
 
 @respx.mock
 async def test_semantic_refuses_a_store_that_answers_badly():
-    respx.get(f"{STORE}/health").mock(return_value=httpx.Response(503))
+    respx.get(f"{STORE}/healthz").mock(return_value=httpx.Response(503))
     found = await reachable.semantic(STORE, TOKEN)
     assert not found.ok and found.status == "unreachable"
     assert "answered 503" in found.detail
@@ -56,39 +56,27 @@ async def test_semantic_refuses_a_store_that_answers_badly():
 @respx.mock
 async def test_something_else_on_the_port_is_not_a_store():
     """A 200 of prose is the failure that would otherwise read as a healthy deployment."""
-    respx.get(f"{STORE}/health").mock(return_value=httpx.Response(200, text="<html>nginx</html>"))
+    respx.get(f"{STORE}/healthz").mock(return_value=httpx.Response(200, text="<html>nginx</html>"))
     found = await reachable.semantic(STORE, TOKEN)
     assert not found.ok and found.status == "wrong service"
     assert "not as the model store" in found.detail
 
 
 @respx.mock
-async def test_a_contract_mismatch_warns_and_still_passes():
-    """The whole point of `warnings`: it may well work, and refusing would strand someone whose
-    only problem is an older file."""
-    respx.get(f"{STORE}/health").mock(
-        return_value=httpx.Response(200, json={"ok": True, "contract": CONTRACT + 7})
-    )
-    respx.get(f"{STORE}/cube/readyz").mock(return_value=httpx.Response(200, json={}))
+async def test_the_store_is_not_asked_for_a_contract_it_does_not_report():
+    """It is a separate product with its own release cycle and no version handshake, so a
+    warning here would invent agreement rather than confirm it. The sandbox is ours and still
+    speaks one."""
+    respx.get(f"{STORE}/healthz").mock(return_value=httpx.Response(200, json=HEALTHY_STORE))
+    respx.get(SERVING).mock(return_value=httpx.Response(200, json=META))
     found = await reachable.semantic(STORE, TOKEN)
-    assert found.ok
-    assert len(found.warnings) == 1
-    assert f"contract {CONTRACT + 7}" in found.warnings[0]
-
-
-@respx.mock
-async def test_a_store_with_no_contract_warns_the_same_way():
-    """Absent means older than the handshake, which means the same thing as a wrong number."""
-    respx.get(f"{STORE}/health").mock(return_value=httpx.Response(200, json={"ok": True}))
-    respx.get(f"{STORE}/cube/readyz").mock(return_value=httpx.Response(200, json={}))
-    found = await reachable.semantic(STORE, TOKEN)
-    assert found.ok and "contract unknown" in found.warnings[0]
+    assert found.ok and not found.warnings
 
 
 @respx.mock
 async def test_a_rejected_token_blames_the_file_and_not_the_warehouse():
-    respx.get(f"{STORE}/health").mock(return_value=httpx.Response(200, json=HEALTHY_STORE))
-    respx.get(f"{STORE}/cube/readyz").mock(return_value=httpx.Response(401))
+    respx.get(f"{STORE}/healthz").mock(return_value=httpx.Response(200, json=HEALTHY_STORE))
+    respx.get(SERVING).mock(return_value=httpx.Response(401))
     found = await reachable.semantic(STORE, TOKEN)
     assert not found.ok and found.status == "rejected"
     assert "rendered for a different connection" in found.detail
@@ -98,10 +86,8 @@ async def test_a_rejected_token_blames_the_file_and_not_the_warehouse():
 async def test_a_store_that_is_up_with_cube_still_booting_is_refused():
     """The half-broken state the second leg exists for: stopping at `/health` passes onboarding
     and then fails every question."""
-    respx.get(f"{STORE}/health").mock(return_value=httpx.Response(200, json=HEALTHY_STORE))
-    respx.get(f"{STORE}/cube/readyz").mock(
-        return_value=httpx.Response(503, json={"error": "no datasource"})
-    )
+    respx.get(f"{STORE}/healthz").mock(return_value=httpx.Response(200, json=HEALTHY_STORE))
+    respx.get(SERVING).mock(return_value=httpx.Response(502, json={"error": "no datasource"}))
     found = await reachable.semantic(STORE, TOKEN)
     assert not found.ok and found.status == "not ready"
     assert "Cube is not ready behind the store" in found.detail
@@ -109,14 +95,17 @@ async def test_a_store_that_is_up_with_cube_still_booting_is_refused():
 
 
 @respx.mock
-async def test_a_warning_survives_a_later_refusal():
-    """Both facts are worth having: the token is wrong *and* the file is stale."""
-    respx.get(f"{STORE}/health").mock(
-        return_value=httpx.Response(200, json={"ok": True, "contract": CONTRACT + 1})
+async def test_a_ref_with_nothing_published_is_not_reported_as_an_outage():
+    """409 is the store refusing before Cube is involved, so blaming Cube — or the warehouse —
+    for a model that was never built is what this branch exists to prevent."""
+    respx.get(f"{STORE}/healthz").mock(return_value=httpx.Response(200, json=HEALTHY_STORE))
+    respx.get(SERVING).mock(
+        return_value=httpx.Response(409, json={"error": "ref main has no revision to serve yet"})
     )
-    respx.get(f"{STORE}/cube/readyz").mock(return_value=httpx.Response(403))
     found = await reachable.semantic(STORE, TOKEN)
-    assert not found.ok and found.status == "rejected" and found.warnings
+    assert not found.ok and found.status == "not ready"
+    assert "no revision to serve yet" in found.detail
+    assert "Cube is not ready" not in found.detail
 
 
 @respx.mock
@@ -156,28 +145,25 @@ async def test_a_sandbox_contract_mismatch_mentions_scripts():
 
 
 @respx.mock
-async def test_querying_reports_cubes_own_word(deployment):
-    respx.get(f"{STORE}/cube/readyz").mock(
-        return_value=httpx.Response(200, json={"health": "HEALTH"})
-    )
+async def test_querying_passes_when_cube_answers_for_main(deployment):
+    respx.get(SERVING).mock(return_value=httpx.Response(200, json=META))
     found = await reachable.querying(deployment)
-    assert found.ok and found.status == "HEALTH"
+    assert found.ok and found.status == "ok"
 
 
 @respx.mock
 async def test_querying_reports_down_with_detail(deployment):
-    respx.get(f"{STORE}/cube/readyz").mock(
-        return_value=httpx.Response(500, json={"health": "DOWN"})
-    )
+    respx.get(SERVING).mock(return_value=httpx.Response(502, json={"error": "cube unreachable"}))
     found = await reachable.querying(deployment)
-    assert not found.ok and found.status == "DOWN"
-    assert "connection is down" in found.detail
+    assert not found.ok and found.status == "502"
+    assert "Cube is not ready behind the store" in found.detail
+    assert "cube unreachable" in found.detail
 
 
 @respx.mock
 async def test_querying_survives_a_connection_reset_while_booting(deployment):
     """A container that accepts then resets raises ReadError, not ConnectError."""
-    respx.get(f"{STORE}/cube/readyz").mock(side_effect=httpx.ReadError("reset"))
+    respx.get(SERVING).mock(side_effect=httpx.ReadError("reset"))
     found = await reachable.querying(deployment)
     assert not found.ok and found.status == "unreachable"
     assert "ReadError" in found.detail
@@ -187,10 +173,9 @@ async def test_querying_survives_a_connection_reset_while_booting(deployment):
 async def test_a_rejected_token_is_not_reported_as_a_warehouse_outage(deployment):
     """The bug this consolidation existed to fix: a 401 fell through to the default detail and
     blamed the database for a file rendered against another connection."""
-    respx.get(f"{STORE}/cube/readyz").mock(return_value=httpx.Response(401))
+    respx.get(SERVING).mock(return_value=httpx.Response(401))
     found = await reachable.querying(deployment)
     assert not found.ok and found.status == "rejected"
-    assert "connection is down" not in found.detail
     assert "rendered for a different connection" in found.detail
 
 
@@ -203,10 +188,10 @@ async def test_an_unconfigured_deployment_is_its_own_state():
 
 @respx.mock
 async def test_the_recurring_probe_asks_once(deployment):
-    """It is answered on every page build, so a second leg is a cost paid forever. `/cube/readyz`
-    goes through the store's proxy, which is what makes one request prove three things."""
-    store = respx.get(f"{STORE}/health").mock(return_value=httpx.Response(200))
-    cube = respx.get(f"{STORE}/cube/readyz").mock(return_value=httpx.Response(200, json={}))
+    """It is answered on every page build, so a second leg is a cost paid forever. Asking the
+    store for main's metadata is what makes one request prove three things."""
+    store = respx.get(f"{STORE}/healthz").mock(return_value=httpx.Response(200))
+    cube = respx.get(SERVING).mock(return_value=httpx.Response(200, json=META))
     await reachable.querying(deployment)
     assert cube.called and not store.called
 
@@ -258,8 +243,8 @@ async def test_an_unknown_service_is_a_programming_error():
 async def test_the_dispatcher_tests_the_pasted_address_not_the_row(deployment):
     """The row still holds the old address while the wizard checks a new one."""
     elsewhere = "http://elsewhere:9000"
-    respx.get(f"{elsewhere}/health").mock(return_value=httpx.Response(200, json=HEALTHY_STORE))
-    respx.get(f"{elsewhere}/cube/readyz").mock(return_value=httpx.Response(200, json={}))
-    stale = respx.get(f"{STORE}/health")
+    respx.get(f"{elsewhere}/healthz").mock(return_value=httpx.Response(200, json=HEALTHY_STORE))
+    respx.get(f"{elsewhere}/refs/main/meta").mock(return_value=httpx.Response(200, json=META))
+    stale = respx.get(f"{STORE}/healthz")
     found = await reachable.test(deployment, "semantic", elsewhere)
     assert found.ok and not stale.called

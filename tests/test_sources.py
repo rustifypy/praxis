@@ -1,4 +1,4 @@
-from analyst_agent.datamodel import serving
+from analyst_agent.modelstore import serving
 
 SERVED = serving.Serving(cubes=13, views=["sales"], described=13)
 

@@ -3,8 +3,8 @@ from dataclasses import dataclass, field
 from pydantic import ValidationError
 
 from ...dashboards import store
-from ...modelstore.catalog import Catalog
-from ...modelstore.schema import CubeQuery
+from ..catalog import Catalog
+from ..schema import CubeQuery
 
 
 @dataclass

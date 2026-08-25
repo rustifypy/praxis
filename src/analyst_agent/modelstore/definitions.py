@@ -46,7 +46,7 @@ def read(files: dict[str, str]) -> tuple[dict[str, Definition], list[str]]:
     entities: dict[str, Definition] = {}
     errors: list[str] = []
     for path in sorted(files):
-        # The store hands over the whole model, grounding markdown included; Cube compiles
+        # The store hands over the whole model; Cube compiles
         # only the `*.yml`.
         if not path.endswith(".yml"):
             continue

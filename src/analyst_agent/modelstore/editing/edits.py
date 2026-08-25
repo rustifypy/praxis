@@ -113,7 +113,7 @@ def frozen_violations(was: Definition, now: Definition) -> list[str]:
                     "that path depends on it"
                     if key == "joins"
                     else f"{was.name}.{member} was removed — a member main carries is frozen, "
-                    "because a dashboard tile or a certified query may name it"
+                    "because a dashboard tile may name it"
                 )
                 continue
             for name in sorted(set(body) | set(target)):
@@ -145,7 +145,7 @@ def check(base: dict[str, str], proposed: dict[str, str]) -> EditResult:
     # Tiers 1-2. `base` is main's model files, `proposed` the whole model as it would be
     # written, both as relative path -> YAML text. The base for every comparison is main and
     # never the ref's own previous state: a member main carries is frozen because a tile or
-    # a certified query may name it.
+    # a dashboard tile may name it.
     entities, errors = read(proposed)
     if errors:
         # Comparing a model that does not parse produces noise, not findings.

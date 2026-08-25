@@ -16,7 +16,6 @@ from analyst_agent.agent.tools import query as tools_module
 from analyst_agent.agent.tools import trace
 from analyst_agent.agent.tools.query import build_query_tools
 from analyst_agent.core.events import Event, emit
-from analyst_agent.datamodel.grounding import Grounding
 
 QUERY = {
     "measures": ["orders.net_revenue"],
@@ -29,7 +28,7 @@ ROWS = [{"orders.status": "paid", "orders.net_revenue": 100}]
 
 @pytest.fixture
 def tools(cube, catalog):
-    session = Session(catalog=catalog, client=cube, grounding=Grounding({}))
+    session = Session(catalog=catalog, client=cube)
     return {t.name: t for t in build_query_tools(session)}, session
 
 
@@ -104,7 +103,6 @@ async def test_no_query_tool_invents_an_event_key(tools, cube, monkeypatch):
         {"spec": {"type": "bar", "x": "orders.status", "y": ["orders.net_revenue"]}}
     )
     await registry["explain_last_query"].ainvoke({})
-    await registry["load_grounding"].ainvoke({"name": "nothing"})
 
     assert captured, "the tools emitted nothing at all"
     for event in captured:

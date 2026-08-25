@@ -5,7 +5,7 @@ module because they are one prefix and one thing: `GET /api/model` is what the d
 and `POST /api/model/commit` is what changes it, and a reader looking for either should not have
 to guess which file it is in.
 
-Editing invariants live in `datamodel/editing/`; the two that constrain *these routes* are that
+Editing invariants live in `modelstore/editing/`; the two that constrain *these routes* are that
 the gate runs before the write (because the write is the deploy) and that a workspace failure is
 an `Outcome` rather than an exception — one escaping here would 500 the route.
 
@@ -22,14 +22,13 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
-from .. import drafts, transcript
+from .. import transcript
 from ..agent.turn import stream_edit_turn
 from ..core.deployment import MAIN
-from ..datamodel import definitions
-from ..datamodel.editing import impact, workspace
-from ..datamodel.modelgen import publish
-from ..modelstore import StoreError, model_files, served_catalog
+from ..modelstore import StoreError, definitions, drafts, model_files, served_catalog
 from ..modelstore.client import open_store
+from ..modelstore.editing import impact, workspace
+from ..modelstore.modelgen import publish
 from .support import state
 from .support.stream import turn_stream
 

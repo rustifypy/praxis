@@ -10,10 +10,10 @@ import pytest
 from analyst_agent.core import db
 from analyst_agent.core import deployment as _deployment
 from analyst_agent.core.deployment import Deployment
-from analyst_agent.datamodel.modelgen import steps
-from analyst_agent.datamodel.modelgen.steps import StepFailed
+from analyst_agent.modelstore.modelgen import steps
+from analyst_agent.modelstore.modelgen.steps import StepFailed
 
-SHOP = Deployment(store_url="http://localhost:8500", driver="postgres", credentials={"x": "1"})
+SHOP = Deployment(store_url="http://localhost:8000", driver="postgres", credentials={"x": "1"})
 
 
 @pytest.fixture

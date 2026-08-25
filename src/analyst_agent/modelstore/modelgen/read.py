@@ -3,8 +3,8 @@ from dataclasses import dataclass, field
 import yaml
 
 from ...core.deployment import Deployment
-from ...modelstore import StoreError, open_store
-from ...modelstore.schema import CubeQuery
+from ..client import StoreError, open_store
+from ..schema import CubeQuery
 from .warehouse import Column, ForeignKey, Schema, Table
 
 # Its own ref, so the served model is neither read nor touched.
