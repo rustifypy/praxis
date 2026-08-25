@@ -88,6 +88,13 @@ Three ways a feature is kept from crossing a tier:
 - **`if TYPE_CHECKING:` is a cycle that hasn't failed yet**, not a fix. Move the thing down a tier
   or pass it in.
 
+**Seven modules at the top of `modelstore/`, and one rule picks them:** the top level is what
+asking a question needs (`client`, `catalog`, `schema`, `gate`, `shape`, `charts`) plus what both
+subpackages share (`definitions`, because each parses the model's YAML). `modelgen/` builds the
+model; `editing/` changes it by hand. Anything that fails that test has exactly one home, and the
+imports say which — which is how `drafts` reached `editing/`, `evidence` reached `modelgen/`, and
+`serving` left the package altogether for the one route that reads it.
+
 **`modelstore/` is one package because the semantic deployment is one address.** `store_url` serves
 the model *and* the queries; the store proxies Cube at `/refs/{ref}/…` and mints its JWT, so a
 second client would be a second connection pool and a second error type for one service. The model
@@ -108,8 +115,8 @@ yet* and a service that may not exist. `connection.py` is its only caller and re
 into one panel, so the two halves must classify a timeout, a refusal and a wrong service
 *identically* — which is the pressure a split would work against. See `docs/adr/0001`.
 
-`modelstore/drafts.py` is not a client at all — it imports only `core`, and a module's home is what
-it imports. It deliberately knows nothing about what a model file *may* be: that `cubes/*.yml` and
+`modelstore/editing/drafts.py` is not a client at all — it imports only `core`, and a module's home
+is what it imports. It deliberately knows nothing about what a model file *may* be: that `cubes/*.yml` and
 `views/*.yml` are the only legal paths is `workspace`'s rule, kept there so the agent and the routes
 are refused in the same words.
 
@@ -168,11 +175,11 @@ leftover candidate → create `candidate` from the target ref → replace the wh
 refuses stays readable at `candidate` and nothing serving moves until it compiles. This replaced
 unlinking every `*.yml` in the served model — the single worst trap the codebase used to have.
 
-### Editing on a ref — `modelstore/{drafts,editing}`, `agent/tools/editor.py`, `web/model.py`
+### Editing on a ref — `modelstore/editing/`, `agent/tools/editor.py`, `web/model.py`
 Changing a model by hand on a ref of its own, then merging to main.
 
 **A ref being edited has a draft on this machine, and the draft is the current model.**
-`modelstore/drafts.py` holds two trees per ref — `origin/` as the store last handed it over, `model/` as it
+`editing/drafts.py` holds two trees per ref — `origin/` as the store last handed it over, `model/` as it
 is being edited — plus `origin.json` carrying the store revision they came from. That is what
 makes "what have I changed" and "put it back" answerable without asking the store, and what makes
 staleness a `rev` comparison rather than a guess. **There is still no git here**: no repository, no
@@ -239,7 +246,7 @@ was two copies once and the copy always dropped something.
 
 **Rows are not in the trace.** `tool_end` holds `rows[:MAX_POINTS]` plus a `result_id`; the full set
 is its own transcript block from the `results` table. Header and chart are pure functions of (query,
-catalog, rows) in `modelstore/shape.py` / `modelstore/visualize.py` — derived, never asked for; `chart_for`
+catalog, rows) in `modelstore/shape.py` / `modelstore/charts.py` — derived, never asked for; `chart_for`
 returning `None` (no chart) is a normal, correct answer.
 
 **The HTTP surface is four nouns** in the order work happens: `/api/connection`, `/api/deployment`,
@@ -314,9 +321,14 @@ stale copy of `ls`.
 - **Tiers before packages.** A module's home is what it imports, not what it's about. `test_layering`
   will not let it import upward, and `FORBIDDEN` there covers the one edge a tier is too coarse to
   express: `modelstore` may not name `core.boards`.
-- **A name is taken once.** `modelstore/` now holds `gate.check`, `edits.check`, `impact.check` and
+- **A name is taken once.** `modelstore/` holds `gate.check`, `edits.check`, `impact.check` and
   `publish.check`. All four are qualified at every call site and none is ambiguous in context, but a
-  fifth `check` in that package should be refused.
+  fifth `check` in that package should be refused. `label_of` used to be taken twice here — the
+  deployment's name and a column header — and the first is now `Deployment.label`.
+- **`catalog` is the served model and nothing else.** The warehouse's tables are an
+  `Introspection`: `modelgen.read.introspect` produces one, `steps.cached_introspection` decodes
+  the cached one, and the deployment row carries it under `introspection`. The two meanings lived
+  in one package until they were separated, and the confusable pair was `catalog` beside `schema`.
 - **A name is taken once.** `Catalog`/`Entity`/`MemberDoc`/`Folder` mean the *served* model
   (`modelstore.catalog`); the generation side is `Introspection`/`Definition`/`MemberDescription`/
   `FolderDecision`. Grep before naming.

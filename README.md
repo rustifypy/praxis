@@ -77,7 +77,7 @@ did not run.
 The **data** is not in that trace. Each query's rows render as their own block below the
 answer they support — a formatted, sortable table with a chart above it where the query's
 shape suits one, and CSV beside it. Both the header and the chart are derived from the
-query in Python (`modelstore/shape.py`, `modelstore/visualize.py`), so they are free, testable, and
+query in Python (`modelstore/shape.py`, `modelstore/charts.py`), so they are free, testable, and
 cannot describe a column nobody fetched; **no chart is a normal outcome** and means the
 table is the better answer. Full result sets live in a `results` table keyed by a handle,
 which is what `Show all` and the CSV read.
