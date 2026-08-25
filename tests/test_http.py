@@ -364,8 +364,8 @@ CHINOOK = {
 def answering(monkeypatch):
     """Both services reachable, so a test can get past step two of connecting. The addresses in
     these tests answer nothing, and `PUT /deployment` stores only what passed."""
-    from analyst_agent import reachable
     from analyst_agent.web import connection as routes
+    from analyst_agent.web import reachable
 
     async def reached(deployment, service, url):
         return reachable.Reached(True, "ok")

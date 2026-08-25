@@ -1,12 +1,23 @@
 # Two questions, not one probe — see docs/adr/0001-reachability-is-two-questions.md before
 # merging them. None of these catches a wrong warehouse password; the `read` stage is the first
 # thing that connects to the database.
+#
+# Here and not split across `modelstore/` and `sandbox/`, though it asks about both: it speaks
+# HTTP itself rather than borrowing either client, because it is asked about an address that is
+# not on the row yet and a service that may not be there. `connection.py` is its only caller and
+# renders both answers into one panel, so the two halves have to classify a timeout, a refusal
+# and a wrong service *identically* — which is the pressure a split would work against.
 
 from dataclasses import dataclass, field
 
 import httpx
 
-from .core.deployment import CONTRACT, CUBE_PREFIX, Deployment
+from ..core.deployment import CONTRACT, MAIN, Deployment
+
+# Cube has no address of its own and no health route through the store, so the cheapest thing
+# that proves the store took the token *and* Cube is behind it is asking for main's metadata.
+# Its compiled model is cached, so this is one round trip after the first.
+SERVING = f"/refs/{MAIN}/meta"
 
 # A pasted address with someone watching, versus the recurring probe a page build waits on.
 CHECK_TIMEOUT_S = 10.0
@@ -73,17 +84,20 @@ def _body(response: httpx.Response) -> dict:
 
 
 async def _identified(
-    client: httpx.AsyncClient, root: str, what: str, timeout: float
+    client: httpx.AsyncClient, root: str, what: str, timeout: float, path: str = "/health"
 ) -> tuple[Reached, dict]:
     # Whether what answered is really this service — something else on the port would read as
     # healthy. The body comes back so the contract needs no second call.
     try:
-        answered = await client.get(f"{root}/health")
+        answered = await client.get(f"{root}{path}")
         if answered.status_code != 200:
-            where = f"{root}/health answered {answered.status_code}"
+            where = f"{root}{path} answered {answered.status_code}"
             return Reached(False, "unreachable", where), {}
         body = _body(answered)
-        if not body.get("ok"):
+        # Two services, two spellings: the sandbox is ours and says `ok`, the model store is
+        # not and says `status`. Neither is much of an identity claim on its own, which is why
+        # both callers below go on to prove the token against a real route.
+        if not (body.get("ok") or body.get("status") == "ok"):
             return Reached(False, "wrong service", f"{root} answered, but not as the {what}"), body
         return Reached(True, "ok"), body
     except httpx.RequestError as exc:
@@ -93,36 +107,40 @@ async def _identified(
 async def semantic(url: str, token: str) -> Reached:
     # The store, then Cube through it. Both, because Cube boots slower and is not published, so
     # "store up, Cube not answering" would otherwise pass onboarding and fail every question.
+    #
+    # No contract is checked here: the store is a separate product and its health route reports
+    # none, so a version handshake would be inventing agreement rather than confirming it.
     root = url.rstrip("/")
-    warnings: list[str] = []
-    # Cube's own path, forwarded verbatim — the same door a query goes through, so this proves
-    # the write token as well as the container. Named before the try so the handler can say
-    # which leg failed.
-    cube = f"{root}{CUBE_PREFIX}/readyz"
+    # Named before the try so the handler can say which leg failed.
+    cube = f"{root}{SERVING}"
     try:
         async with httpx.AsyncClient(timeout=CHECK_TIMEOUT_S) as client:
-            found, body = await _identified(client, root, "model store", CHECK_TIMEOUT_S)
+            found, _ = await _identified(client, root, "model store", CHECK_TIMEOUT_S, "/healthz")
             if not found.ok:
                 return found
-            if body.get("contract") != CONTRACT:
-                warnings.append(
-                    _mismatch("deployment", body.get("contract"), "something fails oddly")
-                )
             answered = await client.get(cube, headers={"Authorization": f"Bearer {token}"})
 
         if answered.status_code in (401, 403):
-            return _rejected("store", warnings)
+            return _rejected("store")
         if answered.status_code != 200:
-            detail = "Cube is not ready behind the store"
-            said = _body(answered)
-            for key in ("error", "message", "detail", "health"):
-                if said.get(key):
-                    detail = f"{detail}: {str(said[key])[:200]}"
-                    break
-            return Reached(False, "not ready", detail, warnings)
-        return Reached(True, "ok", "", warnings)
+            return Reached(False, "not ready", _not_serving(answered))
+        return Reached(True, "ok")
     except httpx.RequestError as exc:
-        return _failed(exc, cube, CHECK_TIMEOUT_S, warnings)
+        return _failed(exc, cube, CHECK_TIMEOUT_S)
+
+
+def _not_serving(answered: httpx.Response) -> str:
+    # 409 is the store refusing before Cube is involved — a ref with nothing published to it,
+    # which is a model that was never built rather than a Cube that is down. 502 and 504 are the
+    # store reporting on Cube. Blaming the warehouse for either is how this used to mislead.
+    said = _body(answered)
+    reason = next(
+        (str(said[key])[:200] for key in ("error", "message", "detail") if said.get(key)), ""
+    )
+    if answered.status_code == 409:
+        return reason or "the model store has nothing published to main yet"
+    where = "Cube is not ready behind the store"
+    return f"{where}: {reason}" if reason else where
 
 
 async def sandbox(url: str, token: str) -> Reached:
@@ -153,30 +171,21 @@ async def sandbox(url: str, token: str) -> Reached:
 
 
 async def querying(deployment: Deployment) -> Reached:
-    # One leg: `/cube/readyz` through the store already proves the store is up, that it took
-    # the token, and that Cube is behind it.
+    # One leg: asking the store for main's metadata already proves the store is up, that it took
+    # the token, and that Cube is behind it compiling something.
     if not deployment.store_url:
         return Reached(False, "unconfigured", "no semantic deployment has been set up")
-    where = f"{deployment.store_url.rstrip('/')}{CUBE_PREFIX}"
+    where = f"{deployment.store_url.rstrip('/')}{SERVING}"
     try:
         async with httpx.AsyncClient(timeout=LIVE_TIMEOUT_S) as client:
             answered = await client.get(
-                f"{where}/readyz",
-                headers={"Authorization": f"Bearer {deployment.store_token}"},
+                where, headers={"Authorization": f"Bearer {deployment.store_token}"}
             )
         if answered.status_code in (401, 403):
             return _rejected("store")
-        body = _body(answered)
-        status = str(body.get("health") or answered.status_code)
         if answered.status_code == 200:
-            return Reached(True, status)
-        # Only here is the warehouse a fair thing to blame: the store took the token and Cube
-        # answered, so what is left is what Cube itself is unhappy about.
-        detail = next(
-            (str(body[key])[:300] for key in ("error", "message", "detail") if body.get(key)),
-            "Cube reports the data source connection is down",
-        )
-        return Reached(False, status, detail)
+            return Reached(True, "ok")
+        return Reached(False, str(answered.status_code), _not_serving(answered))
     except httpx.RequestError as exc:
         return _failed(exc, where, LIVE_TIMEOUT_S)
 

@@ -9,8 +9,8 @@ import httpx
 import pytest
 import respx
 
-from analyst_agent import reachable
 from analyst_agent.core.deployment import CONTRACT, Deployment
+from analyst_agent.web import reachable
 
 STORE = "http://localhost:8000"
 SANDBOX = "http://localhost:8600"

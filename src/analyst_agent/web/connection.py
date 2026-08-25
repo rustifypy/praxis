@@ -11,11 +11,11 @@ import time
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from .. import reachable
 from ..core import deployenv
 from ..core import deployment as connection
 from ..core.deployment import Deployment
 from ..modelstore import StoreError, definitions, evidence, model_files, serving
+from . import reachable
 from .support import state
 
 router = APIRouter(prefix="/api")

@@ -72,7 +72,6 @@ modelstore/
   evidence.py     ← datamodel/evidence.py                       unchanged
   registry.py     ← datamodel/registry.py                       unchanged
   serving.py      ← datamodel/serving.py                        unchanged
-  reachable.py    ← reachable.semantic + reachable.querying     split from reachable.py
   editing/        ← datamodel/editing/                          impact.py signature change
   modelgen/       ← datamodel/modelgen/                          unchanged
 ```
@@ -86,13 +85,12 @@ dashboard code; `charts.py` says what it is — chart rules over a query's colum
 `drafts.py` moves in whole. A draft is a working copy of a **Ref**, which is a semantic-layer
 noun; nothing outside this package will import it after the move.
 
-### `sandbox/` — unchanged, plus its half of reachability
+### `sandbox/` — unchanged
 
 ```
 sandbox/
   client.py       unchanged
   profile.py      unchanged
-  reachable.py    ← reachable.sandbox + reachable.alive
 ```
 
 ### `core/` — gains the row accessors and the hand-over
@@ -144,7 +142,7 @@ is not in this plan.
 - `cube/` — every file moved; `cube/client.py` merged into `modelstore/client.py`
 - `datamodel/` — every file moved
 - `dashboards/` — split four ways
-- `reachable.py` — split two ways
+- `reachable.py` — moved whole to `web/`
 - `drafts.py`, `transcript.py` — moved
 
 ---
@@ -315,14 +313,17 @@ deployenv` to `from ..core import deployenv`.
 
 ### Step 3 — split `reachable.py`
 
-`semantic()` + `querying()` → `modelstore/reachable.py`, keeping both function names. `sandbox()` + `alive()` →
-`sandbox/reachable.py`. `test()` — the wizard's two-way dispatch — goes to `web/connection.py`,
-which is its only caller and the only place that has both.
+**Superseded during execution.** The plan said split it two ways, duplicating `Reached`,
+`_failed`, `_rejected`, `_body` and `_identified` — ~70 identical lines — into both integration
+packages, on `docs/adr/0002`'s precedent. What settled it instead: **`web/connection.py` is the
+only caller in the tree.** Reachability is not part of either integration's vocabulary — it speaks
+HTTP itself rather than borrowing a client, precisely because it is asked about an address that is
+not on the row yet. And one panel renders both answers, so the two halves have to classify a
+timeout, a refusal and a wrong service *identically*; that is ADR 0002's own named reopen
+condition, and it argues against a split rather than for one.
 
-`Reached`, `_failed`, `_rejected`, `_mismatch`, `_body` are shared by both halves. Duplicate them
-rather than making a third module: `docs/adr/0002` already accepted this exact duplication for the
-clients, and a shared `reachability.py` at tier 1 would be a third package at a tier this refactor
-just defined as holding two.
+So `reachable.py` → `web/reachable.py`, whole and unsplit, with `test()` staying put. One module
+moved, one import line changed inside it, no duplication and nothing added to `core`.
 
 `docs/adr/0001` is untouched by this: the two questions it defends (`semantic` vs `querying`) both
 land in `modelstore/reachable.py`, still separate, still for the reasons the ADR gives.
