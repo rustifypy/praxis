@@ -2,8 +2,8 @@
 
 import yaml
 
-from analyst_agent.sources.modelgen import build, publish
-from analyst_agent.sources.modelgen.decide import (
+from analyst_agent.modelstore.modelgen import build, publish
+from analyst_agent.modelstore.modelgen.decide import (
     CubeDecision,
     FolderDecision,
     MeasureDecision,
@@ -16,7 +16,7 @@ from analyst_agent.sources.modelgen.decide import (
     validate_paths,
     validate_views,
 )
-from analyst_agent.sources.modelgen.warehouse import Column, ForeignKey, Schema, Table
+from analyst_agent.modelstore.modelgen.warehouse import Column, ForeignKey, Schema, Table
 
 
 def col(name, data_type="integer", distinct=None, null_fraction=None):

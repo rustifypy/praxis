@@ -10,7 +10,7 @@ const pretty = (name: string) => name.replace(/_/g, " ");
 /**
  * Suggestions are built from what Cube actually exposes rather than hardcoded, so they
  * are never questions this model cannot answer. Views first — they are the curated
- * surface, and the grounding rules generally point the agent at them anyway.
+ * surface a question should reach.
  *
  * A described entity gets a question about its data; an undescribed one can only be asked
  * what it holds. Four buttons all asking "what can I analyse in X?" were four ways to

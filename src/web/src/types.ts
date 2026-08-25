@@ -5,6 +5,7 @@ type EventType =
   | "tool_start"
   | "output"
   | "approval"
+  | "proposal"
   | "tool_end"
   | "compacted"
   | "error"
@@ -27,7 +28,8 @@ export interface Chat {
   title: string;
   /** 'question' or 'model' — which agent this chat runs. */
   kind: string;
-  branch: string;
+  /** The model ref a 'model' chat edits. Empty on a question chat, which always reads main. */
+  ref: string;
   created_at: number;
   updated_at: number;
 }
@@ -154,6 +156,18 @@ export type Item =
    * authors its own events. `label` is the script that made them.
    */
   | { kind: "files"; label: string; paths: string[] }
+  /**
+   * A model file the editor agent wants to write, as its own block.
+   *
+   * The card is a pointer, not the review: clicking it opens the file in the editor pane, where
+   * the hunks are accepted or rejected. One implementation of "apply a hunk", in CodeMirror,
+   * because a second one in the transcript is how you end up with YAML neither side wrote.
+   *
+   * `text` is null for a proposed deletion. Whether it has been reviewed is not stored here — the
+   * editor owns that, because it is the editor that opened the diff, and a flag on the item would
+   * be a second answer to a question only one component can settle.
+   */
+  | { kind: "proposal"; path: string; text: string | null; ref: string }
   | { kind: "compacted"; before: number; after: number }
   | { kind: "error"; message: string };
 

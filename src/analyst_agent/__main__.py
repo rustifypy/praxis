@@ -9,9 +9,9 @@ def main() -> None:
 
     import uvicorn
 
+    from .api.server import TOKEN
+    from .api.server import app as web_app
     from .core.config import settings
-    from .web.server import TOKEN
-    from .web.server import app as web_app
 
     port = settings.web_port
     url = f"http://{settings.web_host}:{port}/?token={TOKEN}"

@@ -3,9 +3,9 @@ import type { ReactNode } from "react";
 import { Info } from "./Info";
 
 /**
- * One collapsible group in a master–detail list column, shared by the model and grounding
- * halves of the Serving panel. The header is the only place the difference between the
- * kinds is explained, and two copies would be two places to say what a view is.
+ * One collapsible group in a master–detail list column of the Serving panel. The header is the
+ * only place the difference between the kinds is explained, and two copies would be two places
+ * to say what a view is.
  *
  * The heading is the button, not the whole header — the info popover is a button too, and
  * nesting one inside the other is invalid and swallows its clicks. `kind` is a class

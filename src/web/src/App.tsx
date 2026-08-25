@@ -2,27 +2,23 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import * as api from "./api";
 import { AddSource } from "./components/AddSource";
-import { Answer } from "./components/Answer";
 import { ChatHeader } from "./components/ChatHeader";
 import { ChatNav } from "./components/ChatNav";
 import { Dashboard } from "./components/Dashboard";
 import { DashboardNav } from "./components/DashboardNav";
 import type { ComposerHandle } from "./components/Composer";
 import { Composer } from "./components/Composer";
-import { Connect } from "./components/Connect";
-import { FileBlock } from "./components/FileBlock";
 import { Rail } from "./components/Rail";
 import type { Mode } from "./components/Rail";
 import { McpPage } from "./components/McpPage";
-import { ResultBlock } from "./components/ResultBlock";
+import { Setup } from "./components/Setup";
 import { SourceDetail } from "./components/SourceDetail";
-import { Thinking } from "./components/Thinking";
-import { ToolCall } from "./components/ToolCall";
+import { Transcript } from "./components/Transcript";
 import { Welcome } from "./components/Welcome";
 import { applyEvent, buildTranscript } from "./events";
 import { useHash } from "./hooks";
 import * as sourcesApi from "./sources";
-import type { DriverSpec, JobState, SourceRow, System } from "./sources";
+import type { JobState, SourceRow } from "./sources";
 import type { Chat, DashboardRow, Item } from "./types";
 
 /** What the agent is doing right now, read off the tail of the transcript. */
@@ -42,8 +38,13 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [turnStart, setTurnStart] = useState<number | undefined>();
   const [cubeUrl, setCubeUrl] = useState("");
-  const [entities, setEntities] = useState<{ name: string; view: boolean; members: number }[]>([]);
+  const [entities, setEntities] = useState<
+    { name: string; view: boolean; members: number }[]
+  >([]);
   const [fatal, setFatal] = useState<string | null>(null);
+  // Whether the first load has answered. Without it `source` being null on the first paint
+  // would flash the setup wizard over every configured install.
+  const [booted, setBooted] = useState(false);
 
   // Which mode the rail is on. A hash rather than a router: four views do not justify
   // one, and the hash is the only state — a mirrored React copy let the two disagree.
@@ -61,11 +62,11 @@ export default function App() {
     ? decodeURIComponent(hash.slice("#boards/".length))
     : null;
   const [dashboards, setDashboards] = useState<DashboardRow[]>([]);
-  const [system, setSystem] = useState<System>({ ok: true });
   const [source, setSource] = useState<SourceRow | null>(null);
-  const [drivers, setDrivers] = useState<DriverSpec[]>([]);
-  const [driverMeta, setDriverMeta] = useState({ local_hosts: [] as string[], localhost_note: "" });
   const [job, setJob] = useState<JobState | null>(null);
+  // Whether the setup wizard is still building the model — reported by `BuildModel`, because the
+  // gap between one stage finishing and the next starting is invisible from here.
+  const [building, setBuilding] = useState(false);
   // The connection drawer: "new" to connect one, "edit" to change its credentials.
   const [drawer, setDrawer] = useState<"new" | "edit" | null>(null);
 
@@ -104,50 +105,68 @@ export default function App() {
 
   const showBoards = useCallback(
     (id?: string) => {
-      window.location.hash = id ? `#boards/${encodeURIComponent(id)}` : "#boards";
+      window.location.hash = id
+        ? `#boards/${encodeURIComponent(id)}`
+        : "#boards";
       void refreshDashboards();
     },
     [refreshDashboards],
   );
 
   const refreshSource = useCallback(async () => {
-    // All three concurrently: /api/system spawns docker, and awaiting it after the
-    // others serialised the slowest call for no reason.
-    const [connected, current, health] = await Promise.all([
-      sourcesApi.source(),
+    // Both concurrently: the connection body costs a health probe, and awaiting the job after
+    // it serialised the slowest call for no reason.
+    const [connected, current] = await Promise.all([
+      sourcesApi.connection(),
       sourcesApi.job(),
-      sourcesApi.system(),
     ]);
     setSource(connected);
-    setSystem(health);
     // The stream is the sole carrier of events; this only refreshes the header, so an
     // in-flight job keeps the events it has already received.
     setJob((prev) =>
-      current.id === null ? null : prev?.id === current.id ? { ...prev, ...current } : current,
+      current.id === null
+        ? null
+        : prev?.id === current.id
+          ? { ...prev, ...current }
+          : current,
     );
+    // Returned as well as set, so boot can route on it without asking a second time.
+    return connected;
   }, []);
 
   useEffect(() => {
     (async () => {
       try {
         await api.claimToken();
-        const [loaded, catalog] = await Promise.all([api.listChats(), api.catalog()]);
+        const loaded = await api.listChats();
         setChats(loaded);
-        setCubeUrl(catalog.cube_url ?? "");
-        setEntities(catalog.entities ?? []);
         if (loaded.length) await open(loaded[0].id);
         await refreshDashboards();
       } catch (err) {
         setFatal(String(err));
       }
+      // Not in the block above, and not fatal: it answers 503 until a deployment
+      // is configured, which is the state every install starts in. Failing it here took the
+      // whole portal down with the "cannot reach the server" page — including the data panel
+      // that is the only way to configure one.
+      try {
+        const served = await api.modelSummary();
+        setCubeUrl(served.cube_url ?? "");
+        setEntities(served.entities ?? []);
+      } catch {
+        /* No model to suggest from. `Welcome` renders without suggestions. */
+      }
       // The data page is independent of the chat: a broken Cube must not hide the panel
       // that is how you fix it.
       try {
-        const [meta] = await Promise.all([sourcesApi.drivers(), refreshSource()]);
-        setDrivers(meta.drivers);
-        setDriverMeta({ local_hosts: meta.local_hosts, localhost_note: meta.localhost_note });
+        await refreshSource();
       } catch {
-        /* /api/system reports why; the panel says so itself. */
+        /* The connection body carries the reason; the panel says so itself. */
+      } finally {
+        // In `finally`: a failure here must still let the app render. Otherwise a portal that
+        // could not reach one of these calls would sit on a blank screen forever, since the
+        // setup wizard is gated on this having happened.
+        setBooted(true);
       }
     })();
   }, [open, refreshSource, refreshDashboards]);
@@ -160,7 +179,8 @@ export default function App() {
       setJob((prev) => {
         if (!prev) return prev;
         // The buffer replay can repeat an event the snapshot already carried.
-        if ((prev.events ?? []).some((seen) => seen.seq === event.seq)) return prev;
+        if ((prev.events ?? []).some((seen) => seen.seq === event.seq))
+          return prev;
         const next = { ...prev, events: [...(prev.events ?? []), event] };
         if (event.type === "job_end") {
           next.done = true;
@@ -214,7 +234,12 @@ export default function App() {
     follow();
 
     try {
-      for await (const event of api.sendMessage(activeId, question, files, controller.signal)) {
+      for await (const event of api.sendMessage(
+        activeId,
+        question,
+        files,
+        controller.signal,
+      )) {
         setItems((prev) => applyEvent(prev, event));
       }
     } catch (err) {
@@ -264,10 +289,36 @@ export default function App() {
     );
   }
 
+  // Setup owns the whole screen until it finishes, rail included: until then there is no model,
+  // so chat cannot answer and a board cannot refresh, and offering three dead modes beside the
+  // one live one is an invitation to click them.
+  //
+  // `booted` is what keeps this from flashing over an install that *is* configured — `source`
+  // is null for the first paint of every session, and a wizard that appears for 200ms every
+  // time you open the portal is worse than one that appears a moment late.
+  // `building` is what keeps the wizard up through the whole pipeline. `onboarded` goes true the
+  // moment cubes land, which is mid-sequence — and unmounting there would take the queue of
+  // remaining stages with it, so descriptions and views would never run.
+  if (booted && (!source?.onboarded || building)) {
+    return (
+      <Setup
+        source={source}
+        job={job}
+        onJob={setJob}
+        onBuilding={setBuilding}
+        onChanged={() => {
+          void refreshSource();
+        }}
+      />
+    );
+  }
+
   // Data and agents have no list beside their page — one connection, one endpoint — so the
   // middle column is absent there rather than empty.
   return (
-    <div className={`app ${view === "data" || view === "agents" ? "no-nav" : ""}`}>
+    <div
+      className={`app ${view === "data" || view === "agents" ? "no-nav" : ""}`}
+    >
       <Rail
         view={view}
         jobRunning={Boolean(job && !job.done)}
@@ -307,26 +358,19 @@ export default function App() {
 
       {drawer && (
         <AddSource
-          drivers={drivers}
-          localHosts={driverMeta.local_hosts}
-          localhostNote={driverMeta.localhost_note}
           editing={drawer === "edit" && source ? source : undefined}
           onCancel={() => setDrawer(null)}
           onConnect={async (body) => {
             await sourcesApi.connect(body);
             setDrawer(null);
-            // Onto the data page — connecting is about to narrate progress there.
+            // Onto the data page, where the pipeline is. POST /api/onboarding/connection has already made
+            // the connection usable — there is no Connect action to fire after it.
             showData();
-            // Straight into connecting: a stored connection nobody starts is a dead end.
-            await sourcesApi.runAction("connect");
             await refreshSource();
           }}
           onSave={async (body) => {
             await sourcesApi.edit(body);
             setDrawer(null);
-            await refreshSource();
-            // Credentials only take effect on a fresh container, so reconnect for them.
-            await sourcesApi.runAction("connect");
             await refreshSource();
           }}
         />
@@ -356,160 +400,70 @@ export default function App() {
           <McpPage />
         </main>
       ) : view === "data" ? (
+        // `source` is non-null here by construction: setup owns the whole screen until it is
+        // finished, and finishing it requires a connection. There is no "nothing connected yet"
+        // state on this page any more, which is what the wizard replaced.
         <main className="main">
-          {source ? (
+          {source && (
             <SourceDetail
               source={source}
-              system={system}
               job={job}
-              busy={Boolean(job && !job.done)}
+              onJob={setJob}
               onRefresh={() => void refreshSource()}
               onEdit={() => setDrawer("edit")}
             />
-          ) : (
-            <Connect system={system} onAdd={() => setDrawer("new")} />
           )}
         </main>
       ) : (
-      <main className="main chat-main">
-        <ChatHeader source={source} cubeUrl={cubeUrl} onShowData={showData} />
+        <main className="main chat-main">
+          <ChatHeader source={source} cubeUrl={cubeUrl} onShowData={showData} />
 
-        <div
-          className="transcript"
-          ref={scroller}
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-            if (near !== pinned.current) {
-              pinned.current = near;
-              setTailing(near);
-            }
-          }}
-        >
-          {items.length === 0 && (
-            <Welcome
-              entities={entities}
-              onPick={(q) => {
-                if (!activeId) void create().then(() => composer.current?.fill(q));
-                else composer.current?.fill(q);
-              }}
-            />
+          <div
+            className="transcript"
+            ref={scroller}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              const near =
+                el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+              if (near !== pinned.current) {
+                pinned.current = near;
+                setTailing(near);
+              }
+            }}
+          >
+            {items.length === 0 && (
+              <Welcome
+                entities={entities}
+                onPick={(q) => {
+                  if (!activeId)
+                    void create().then(() => composer.current?.fill(q));
+                  else composer.current?.fill(q);
+                }}
+              />
+            )}
+
+            <Transcript items={items} chatId={activeId ?? ""} />
+          </div>
+
+          {/* Scrolling up to re-read something stops the transcript following the stream, and
+            without this nothing says so — an answer arriving off-screen looks like no answer. */}
+          {!tailing && items.length > 0 && (
+            <button className="jump" onClick={follow}>
+              ↓ {busy ? "Jump to what it is writing" : "Jump to the end"}
+            </button>
           )}
 
-          {items.map((item, i) => {
-            switch (item.kind) {
-              case "user":
-                return (
-                  <div key={i} className="row user">
-                    {item.text}
-                    {item.files.length > 0 && (
-                      <div className="attached sent">
-                        {item.files.map((path) => (
-                          <a
-                            key={path}
-                            className="attach"
-                            href={activeId ? api.chatFileUrl(activeId, path) : undefined}
-                            download
-                          >
-                            <span className="attach-name">{path.replace(/^uploads\//, "")}</span>
-                          </a>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              case "thinking":
-                return (
-                  <div key={i} className="row">
-                    <Thinking
-                      text={item.text}
-                      open={item.open}
-                      live={item.live}
-                      startedAt={item.startedAt}
-                      ms={item.ms}
-                    />
-                  </div>
-                );
-              case "tool":
-                return (
-                  <div key={i} className="row">
-                    <ToolCall
-                      chatId={activeId ?? ""}
-                      tool={item.tool}
-                      label={item.label}
-                      query={item.query}
-                      script={item.script}
-                      awaiting={item.awaiting}
-                      end={item.end}
-                      startedAt={item.startedAt}
-                      ms={item.ms}
-                      live={item.live}
-                    />
-                  </div>
-                );
-              case "answer":
-                return (
-                  <div key={i} className="row">
-                    <Answer text={item.text} live={item.live} />
-                  </div>
-                );
-              case "result":
-                return (
-                  <div key={i} className="row">
-                    <ResultBlock
-                      resultId={item.resultId}
-                      label={item.label}
-                      columns={item.columns}
-                      rows={item.rows}
-                      rowCount={item.rowCount}
-                      chart={item.chart}
-                    />
-                  </div>
-                );
-              case "files":
-                return (
-                  <div key={i} className="row">
-                    <FileBlock chatId={activeId ?? ""} label={item.label} paths={item.paths} />
-                  </div>
-                );
-              case "compacted":
-                return (
-                  <div key={i} className="row compacted">
-                    <span>
-                      Earlier messages were summarized to fit the context — {item.before} became{" "}
-                      {item.after}
-                    </span>
-                  </div>
-                );
-              case "error":
-                return (
-                  <div key={i} className="row error">
-                    {item.message}
-                  </div>
-                );
-            }
-          })}
-        </div>
-
-        {/* Scrolling up to re-read something stops the transcript following the stream, and
-            without this nothing says so — an answer arriving off-screen looks like no answer. */}
-        {!tailing && items.length > 0 && (
-          <button className="jump" onClick={follow}>
-            ↓ {busy ? "Jump to what it is writing" : "Jump to the end"}
-          </button>
-        )}
-
-        <Composer
-          ref={composer}
-          chatId={activeId}
-          busy={busy}
-          disabled={!activeId}
-          startedAt={turnStart}
-          status={statusOf(items, busy)}
-          onSend={(q, files) => void send(q, files)}
-          onStop={() => void stop()}
-        />
-      </main>
+          <Composer
+            ref={composer}
+            chatId={activeId}
+            busy={busy}
+            disabled={!activeId}
+            startedAt={turnStart}
+            status={statusOf(items, busy)}
+            onSend={(q, files) => void send(q, files)}
+            onStop={() => void stop()}
+          />
+        </main>
       )}
     </div>
   );

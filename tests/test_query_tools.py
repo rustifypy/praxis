@@ -12,9 +12,10 @@ import json
 import pytest
 
 from analyst_agent.agent.session import Session
-from analyst_agent.agent.tools.query import build_tools
+from analyst_agent.agent.tools import query as tools_module
+from analyst_agent.agent.tools import trace
+from analyst_agent.agent.tools.query import build_query_tools
 from analyst_agent.core.events import Event, emit
-from analyst_agent.sources.grounding import Grounding
 
 QUERY = {
     "measures": ["orders.net_revenue"],
@@ -26,9 +27,9 @@ ROWS = [{"orders.status": "paid", "orders.net_revenue": 100}]
 
 
 @pytest.fixture
-def tools(cube, catalog, tmp_path):
-    session = Session(catalog=catalog, client=cube, grounding=Grounding(tmp_path))
-    return {t.name: t for t in build_tools(session)}, session
+def tools(cube, catalog):
+    session = Session(catalog=catalog, client=cube)
+    return {t.name: t for t in build_query_tools(session)}, session
 
 
 async def test_emit_outside_a_graph_is_a_no_op_rather_than_an_error():
@@ -84,3 +85,26 @@ async def test_the_playground_order_shape_is_refused_by_name(tools):
     )
     assert "Playground" in answer
     assert '{"member": "asc"|"desc"}' in answer
+
+
+async def test_no_query_tool_invents_an_event_key(tools, cube, monkeypatch):
+    """`EVENT_KEYS` is the whole list of what a query event may carry. These events *do* hold
+    state — a replayed transcript draws the table from `tool_end` alone — so the guard is not
+    that they are stateless but that the browser knows every key it may be handed."""
+    captured: list[dict] = []
+    monkeypatch.setattr(trace, "emit", lambda event: captured.append(event.model_dump()))
+    cube.rows = ROWS
+    (registry, _) = tools
+
+    await registry["search_model"].ainvoke({"question": "revenue"})
+    await registry["run_query"].ainvoke({"query": QUERY})
+    await registry["run_query"].ainvoke({"query": {"measures": ["orders.nope"]}})
+    await registry["set_chart"].ainvoke(
+        {"spec": {"type": "bar", "x": "orders.status", "y": ["orders.net_revenue"]}}
+    )
+    await registry["explain_last_query"].ainvoke({})
+
+    assert captured, "the tools emitted nothing at all"
+    for event in captured:
+        extra = set(event["data"]) - tools_module.EVENT_KEYS
+        assert not extra, f"{event['data'].get('tool')} leaked {extra} into the transcript"

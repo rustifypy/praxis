@@ -1,14 +1,15 @@
 import pytest
 
 from analyst_agent.agent.session import replay
+from analyst_agent.core import db
+from analyst_agent.core import transcript as _transcript
 from analyst_agent.core.events import Event
-from analyst_agent.transcript import ChatStore
 
 
 @pytest.fixture
 async def store(tmp_path):
-    s = ChatStore(tmp_path / "analyst.db")
-    await s.init()
+    await db.create_tables()
+    s = _transcript
     return s
 
 
@@ -25,7 +26,7 @@ async def test_rename_and_delete(store):
     await store.rename(chat.id, "Q3 revenue")
     assert (await store.get(chat.id)).title == "Q3 revenue"
 
-    await store.delete(chat.id)
+    await store.delete_chat(chat.id)
     assert await store.get(chat.id) is None
     assert await store.events(chat.id) == []
 
@@ -59,7 +60,7 @@ async def test_deleting_a_chat_takes_its_events(store):
     await store.append(keep.id, "t1", Event(type="user"))
     await store.append(drop.id, "t1", Event(type="user"))
 
-    await store.delete(drop.id)
+    await store.delete_chat(drop.id)
     assert len(await store.events(keep.id)) == 1
 
 
@@ -142,6 +143,6 @@ async def test_deleting_a_chat_takes_its_results(store):
     kept = await store.save_result(keep.id, "t1", COLUMNS, [{"orders.count": 1}])
     dropped = await store.save_result(drop.id, "t1", COLUMNS, [{"orders.count": 2}])
 
-    await store.delete(drop.id)
+    await store.delete_chat(drop.id)
     assert await store.result(dropped) is None
     assert await store.result(kept) is not None

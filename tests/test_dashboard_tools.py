@@ -9,8 +9,11 @@ event-shape assertions need to observe.
 import pytest
 
 from analyst_agent.agent.tools import dashboards as tools
-from analyst_agent.dashboards import layout
-from analyst_agent.dashboards.store import DashboardStore, Tile
+from analyst_agent.agent.tools import trace
+from analyst_agent.core import boards as _dashboards
+from analyst_agent.core import boards as layout
+from analyst_agent.core import db
+from analyst_agent.core.boards import Tile
 
 QUERY = {"measures": ["orders.net_revenue"], "dimensions": ["orders.status"]}
 BAR = {"type": "bar", "x": "orders.status", "y": ["orders.net_revenue"]}
@@ -36,7 +39,9 @@ def fake_tile(tile_id: str, kind: str = "bar") -> Tile:
 
 def test_a_partial_layout_appends_the_rest_rather_than_hiding_it():
     live = [fake_tile("a"), fake_tile("b"), fake_tile("c")]
-    checked, errors = layout.validate({"columns": 2, "items": [{"tile": "c", "span": 1}]}, live)
+    checked, errors = layout.validate_layout(
+        {"columns": 2, "items": [{"tile": "c", "span": 1}]}, live
+    )
 
     assert errors == []
     # "Put c first" must not delete a and b.
@@ -44,14 +49,14 @@ def test_a_partial_layout_appends_the_rest_rather_than_hiding_it():
 
 
 def test_a_layout_naming_a_tile_that_is_not_there_is_rejected():
-    checked, errors = layout.validate({"items": [{"tile": "ghost"}]}, [fake_tile("a")])
+    checked, errors = layout.validate_layout({"items": [{"tile": "ghost"}]}, [fake_tile("a")])
     assert checked is None
     assert "not on this dashboard" in errors[0]
 
 
 def test_a_tile_cannot_be_placed_twice():
     live = [fake_tile("a")]
-    checked, errors = layout.validate(
+    checked, errors = layout.validate_layout(
         {"items": [{"tile": "a", "span": 1}, {"tile": "a", "span": 1}]}, live
     )
     assert checked is None
@@ -59,7 +64,7 @@ def test_a_tile_cannot_be_placed_twice():
 
 
 def test_a_span_wider_than_the_grid_is_rejected():
-    checked, errors = layout.validate(
+    checked, errors = layout.validate_layout(
         {"columns": 2, "items": [{"tile": "a", "span": 3}]}, [fake_tile("a")]
     )
     assert checked is None
@@ -67,7 +72,9 @@ def test_a_span_wider_than_the_grid_is_rejected():
 
 
 def test_more_columns_than_a_chart_stays_readable_in_is_rejected():
-    checked, errors = layout.validate({"columns": 9, "items": [{"tile": "a"}]}, [fake_tile("a")])
+    checked, errors = layout.validate_layout(
+        {"columns": 9, "items": [{"tile": "a"}]}, [fake_tile("a")]
+    )
     assert checked is None
     assert "columns must be" in errors[0]
 
@@ -91,17 +98,18 @@ def test_the_default_layout_leads_with_the_kpis():
 
 @pytest.fixture
 def events(monkeypatch):
-    """Collect what the dashboard tools emit."""
+    """Collect what the dashboard tools emit — patched on `trace`, which authors every
+    tool_start and tool_end in the codebase."""
     captured: list[dict] = []
-    monkeypatch.setattr(tools, "emit", lambda event: captured.append(event.model_dump()))
+    monkeypatch.setattr(trace, "emit", lambda event: captured.append(event.model_dump()))
     return captured
 
 
 @pytest.fixture
 async def kit(tmp_path, catalog):
-    store = DashboardStore(tmp_path / "analyst.db")
-    await store.init()
-    ctx = tools.DashboardContext(store=store, catalog=catalog)
+    await db.create_tables()
+    store = _dashboards
+    ctx = tools.DashboardContext(catalog=catalog)
     return store, {t.name: t for t in tools.build_dashboard_tools(ctx)}
 
 

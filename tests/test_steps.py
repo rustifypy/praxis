@@ -7,49 +7,44 @@ order rule, and what a failure leaves in the database.
 
 import pytest
 
-from analyst_agent.sources import vcs
-from analyst_agent.sources.modelgen import steps
-from analyst_agent.sources.modelgen.steps import StepFailed
-from analyst_agent.sources.registry import Source
-from analyst_agent.sources.store import SourceStore
+from analyst_agent.core import db
+from analyst_agent.core import deployment as _deployment
+from analyst_agent.core.deployment import Deployment
+from analyst_agent.modelstore.modelgen import steps
+from analyst_agent.modelstore.modelgen.steps import StepFailed
 
-SHOP = Source(description="", driver="postgres", credentials={"x": "1"})
+SHOP = Deployment(store_url="http://localhost:8000", driver="postgres", credentials={"x": "1"})
 
 
 @pytest.fixture
-async def store(tmp_path) -> SourceStore:
-    s = SourceStore(tmp_path / "analyst.db")
-    await s.init()
+async def store():
+    await db.create_tables()
+    s = _deployment
     await s.save(SHOP)
     return s
 
 
+@pytest.fixture(autouse=True)
+def no_store(monkeypatch):
+    """The model comes from the store over HTTP, and these tests are about the dispatcher."""
+
+    async def empty(ref="main"):
+        return {}
+
+    monkeypatch.setattr(steps, "model_files", empty)
+
+
 async def test_an_unknown_action_is_refused():
     with pytest.raises(StepFailed, match="unknown action"):
-        await steps.action("enrich", None)
+        await steps.action("enrich")
 
 
 async def test_a_step_cannot_run_before_the_one_it_depends_on(store):
     """Enforced here, not in the browser — the browser is advice, not a guarantee."""
-    with pytest.raises(StepFailed, match="run connect first"):
-        await steps.action("cubes", store)
     with pytest.raises(StepFailed, match="run cubes first"):
-        await store.save_step("connect", {"status": "done"})
-        await steps.action("describe", store)
-
-
-async def test_connect_is_always_reachable(store, monkeypatch):
-    """It is the first step; nothing precedes it."""
-    called = []
-
-    async def fake_connect(st, report=None):
-        called.append(st)
-        return steps.StepResult(summary={"ok": 1})
-
-    monkeypatch.setattr(steps, "connect", fake_connect)
-    result = await steps.action("connect", store)
-    assert called == [store]
-    assert result.summary == {"ok": 1}
+        await steps.action("describe")
+    with pytest.raises(StepFailed, match="run describe first"):
+        await steps.action("views")
 
 
 async def test_read_is_reachable_without_any_step_and_records_none(store, monkeypatch):
@@ -58,8 +53,8 @@ async def test_read_is_reachable_without_any_step_and_records_none(store, monkey
     async def fake_read(st, report=None):
         return {"schemas": [{"schema": "public", "tables": 3}]}
 
-    monkeypatch.setattr(steps, "read_catalog", fake_read)
-    result = await steps.action("read", store)
+    monkeypatch.setattr(steps, "introspect", fake_read)
+    result = await steps.action("read")
     assert result.summary["schemas"][0]["tables"] == 3
     assert await store.steps() == {}, "read has no row in the panel"
 
@@ -70,11 +65,10 @@ async def test_a_failing_step_is_recorded_before_it_is_re_raised(store, monkeypa
     async def boom(st, report=None):
         raise StepFailed("Cube rejected the model")
 
-    await store.save_step("connect", {"status": "done"})
     monkeypatch.setattr(steps, "cubes", lambda *a, **k: boom(a[0]))
 
     with pytest.raises(StepFailed, match="Cube rejected"):
-        await steps.action("cubes", store)
+        await steps.action("cubes")
 
     record = (await store.steps())["cubes"]
     assert record["status"] == "error"
@@ -88,9 +82,9 @@ async def test_a_failing_read_records_nothing(store, monkeypatch):
     async def boom(st, report=None):
         raise StepFailed("no schemas")
 
-    monkeypatch.setattr(steps, "read_catalog", boom)
+    monkeypatch.setattr(steps, "introspect", boom)
     with pytest.raises(StepFailed):
-        await steps.action("read", store)
+        await steps.action("read")
     assert await store.steps() == {}
 
 
@@ -98,53 +92,20 @@ async def test_a_stage_with_no_branch_is_refused_rather_than_run_as_views(store,
     """`STAGES` is what the membership check accepts, so a name added there with no branch in
     the dispatch has to be refused rather than fall through to whichever step is last."""
     monkeypatch.setattr(steps, "STAGES", (*steps.STAGES, "publish"))
-    await store.save_step("connect", {"status": "done"})
     with pytest.raises(StepFailed, match="stage with no branch"):
-        await steps.action("publish", store)
+        await steps.action("publish")
 
 
-async def test_only_the_model_writing_actions_commit(store, monkeypatch):
-    """Both the success and the failure path test `WRITES_MODEL` explicitly, rather than relying
-    on where `connect` and `read` leave the dispatch: a commit for a catalog read would put an
-    empty commit in the model repo under a name that claims it rewrote the model."""
-    committed: list[str] = []
-
-    async def fake_commit(path, message):
-        committed.append(message)
-        return vcs.Result(code=0, out="", err="")
-
-    async def nothing(path):
-        return vcs.Result(code=0, out="", err="")
-
-    async def ok(*args, **kwargs):
-        return steps.StepResult(summary={"cubes": 3})
-
-    async def catalog(*args, **kwargs):
-        return {"schemas": []}
-
-    async def boom(*args, **kwargs):
-        raise StepFailed("no schemas")
-
-    # Stubbed rather than mocked-out: `model_dir()` only computes a path, so with these two
-    # replaced nothing in this test touches git or the working directory.
-    monkeypatch.setattr(steps.vcs, "commit", fake_commit)
-    monkeypatch.setattr(steps.vcs, "ensure", nothing)
-    monkeypatch.setattr(steps, "connect", ok)
-    monkeypatch.setattr(steps, "read_catalog", catalog)
-    monkeypatch.setattr(steps, "cubes", ok)
-
-    await steps.action("connect", store)
-    await steps.action("read", store)
-    assert committed == [], "starting a container and caching a catalog write no model files"
-
-    monkeypatch.setattr(steps, "read_catalog", boom)
-    with pytest.raises(StepFailed):
-        await steps.action("read", store)
-    assert committed == [], "and a failed read has nothing to commit either"
-
-    await store.save_step("connect", {"status": "done"})
-    await steps.action("cubes", store)
-    assert committed == ["cubes — cubes=3"]
+def test_a_rejected_model_is_named_where_it_can_still_be_read():
+    """`install` leaves a model Cube refused on the candidate ref and the served model alone, so
+    the failure has somewhere to point. Quoting the compile error alone would send someone
+    looking for YAML that is not in the model being served."""
+    refused = steps.publish.Validation(compile_error="Unexpected YAML key", candidate="candidate")
+    message = steps._rejected("the model", refused)
+    assert "Unexpected YAML key" in message and "'candidate'" in message
+    assert "has not changed" in message
+    # Nothing to point at when the store never got as far as a candidate.
+    assert "candidate" not in steps._rejected("the model", steps.publish.Validation())
 
 
 async def test_generate_runs_the_actions_in_order(store, monkeypatch):
@@ -157,14 +118,14 @@ async def test_generate_runs_the_actions_in_order(store, monkeypatch):
 
         return call
 
-    for name in ("connect", "cubes", "describe", "views"):
+    for name in ("cubes", "describe", "views"):
         monkeypatch.setattr(steps, name, stub(name))
-    monkeypatch.setattr(steps, "read_catalog", stub("read"))
-    # The order rule reads the store, and the stubs never write it.
-    monkeypatch.setattr(store, "steps", _done)
+    monkeypatch.setattr(steps, "introspect", stub("read"))
+    # The order rule reads the state each step needs, and the stubs never write it.
+    monkeypatch.setattr(store, "state", _built)
 
-    await steps.generate(store, enrich=True)
-    assert order == ["connect", "read", "cubes", "describe", "views"]
+    await steps.generate(enrich=True)
+    assert order == ["read", "cubes", "describe", "views"]
 
 
 async def test_generate_stops_before_the_llm_steps_without_enrich(store, monkeypatch):
@@ -177,14 +138,15 @@ async def test_generate_stops_before_the_llm_steps_without_enrich(store, monkeyp
 
         return call
 
-    for name in ("connect", "cubes", "describe", "views"):
+    for name in ("cubes", "describe", "views"):
         monkeypatch.setattr(steps, name, stub(name))
-    monkeypatch.setattr(steps, "read_catalog", stub("read"))
-    monkeypatch.setattr(store, "steps", _done)
+    monkeypatch.setattr(steps, "introspect", stub("read"))
+    monkeypatch.setattr(store, "state", _built)
 
-    await steps.generate(store)
-    assert order == ["connect", "read", "cubes"]
+    await steps.generate()
+    assert order == ["read", "cubes"]
 
 
-async def _done() -> dict:
-    return {step: {"status": "done"} for step in ("connect", "cubes", "describe", "views")}
+async def _built() -> dict:
+    """What the earlier steps leave behind — `blocked` reads this, not a recorded tick."""
+    return {"introspection": {"public": {}}, "bodies": {"a": {}}, "enrichment": {}}

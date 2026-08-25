@@ -8,9 +8,8 @@ import { healthOf, servingNote } from "../sources";
  * rendering `CUBE_URL` as a bare `127.0.0.1:4001`, which says nothing about the database
  * behind it or whether it is built.
  *
- * The chip is a link out, not a disclosure. What can be asked about, and the grounding the
- * agent already believes, are the wrong depth for a dropdown over a live transcript — they
- * live on the data page, one deliberate click away.
+ * The chip is a link out, not a disclosure. What can be asked about is the wrong depth for a
+ * dropdown over a live transcript — it lives on the data page, one deliberate click away.
  */
 export function ChatHeader({
   source,
@@ -29,7 +28,9 @@ export function ChatHeader({
           <span className="health-dot warn" />
           <span className="src-chip-name">No database connected</span>
           <span className="src-chip-meta">
-            {cubeUrl ? cubeUrl.replace(/^https?:\/\//, "") : "CUBE_URL is unset"} — connect one
+            {cubeUrl
+              ? `${cubeUrl.replace(/^https?:\/\//, "")} — connect one`
+              : "Connect one to ask about it"}
           </span>
         </button>
       </header>
@@ -43,11 +44,6 @@ export function ChatHeader({
       <button className="src-chip" onClick={onShowData} title="Manage the data source">
         <span className={`health-dot ${health.tone}`} />
         <span className="src-chip-name">{source.label}</span>
-        {/* Only off main. The checked-out branch is the model being queried, and an answer
-            from an unmerged model must not look like an answer from main. */}
-        {source.branch && source.branch !== "main" && (
-          <span className="src-chip-branch">{source.branch}</span>
-        )}
         {/* The size of the model, in the one line there is room for. It is what tells you
             the model is actually built rather than merely connected, without opening
             anything. */}

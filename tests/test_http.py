@@ -6,67 +6,34 @@ derived fields the browser is forbidden from recomputing.
 
 No containers and no model calls, per the repo's rule. `app.state` is populated directly
 rather than by running the lifespan, because the real one opens `~/.analyst` — the databases
-here are all under tmp_path. `docker.state` is stubbed: asking this machine what is running
-would make the same test answer differently on a laptop and in CI.
+here are all under tmp_path. Nothing needs a container stubbed any more: the portal does not
+run the deployment, so "is it up" is an HTTP probe and respx answers it.
 """
 
 import httpx
 import pytest
+from fastapi import HTTPException
 
-from analyst_agent.core import jobs
-from analyst_agent.core.config import settings
-from analyst_agent.sources import docker
-from analyst_agent.sources.registry import Source
-from analyst_agent.web import server
+from analyst_agent.api import server
+from analyst_agent.core.deployment import Deployment
+from analyst_agent.modelstore.client import Ref
 
-SHOP = Source(description="Orders.", driver="postgres", credentials={"CUBEJS_DB_NAME": "shop"})
+SHOP = Deployment(
+    store_url="http://localhost:8000",
+    store_token="w" * 40,
+    api_secret="s" * 40,
+    description="Orders.",
+    driver="postgres",
+    credentials={"CUBEJS_DB_NAME": "shop"},
+)
 
-
-@pytest.fixture
-async def api(tmp_path, monkeypatch, cube):
-    """The app with its state wired to tmp databases and a fake Cube."""
-    from analyst_agent.dashboards.store import DashboardStore
-    from analyst_agent.sources.store import SourceStore
-    from analyst_agent.transcript import ChatStore
-
-    # Every store defaults to `settings.db_path`, so pointing the setting is what keeps these
-    # routes off the real ~/.analyst.
-    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-
-    chats = ChatStore(tmp_path / "analyst.db")
-    await chats.init()
-    boards = DashboardStore(tmp_path / "analyst.db")
-    await boards.init()
-    sources = SourceStore(tmp_path / "analyst.db")
-    await sources.init()
-
-    server.app.state.store = chats
-    server.app.state.dashboards = boards
-    server.app.state.sources = sources
-    server.app.state.jobs = jobs.Runner()
-    server.app.state.health = None
-    server.app.state.cube = cube
-    server.app.state.cancels = {}
-    server.app.state.approvals = {}
-    server.app.state.always = set()
-    server.app.state.saver = None
-
-    # Nothing is running, so the source reads as stopped — deterministic, and the state the
-    # `serving_state` assertions below care about.
-    monkeypatch.setattr(docker, "state", _no_container)
-
-    transport = httpx.ASGITransport(app=server.app)
-    async with httpx.AsyncClient(
-        transport=transport,
-        base_url="http://test",
-        cookies={server.COOKIE: server.TOKEN},
-    ) as client:
-        client.stores = (chats, boards, sources)  # type: ignore[attr-defined]
-        yield client
-
-
-async def _no_container() -> str:
-    return ""
+STORED = Deployment(
+    api_secret="s" * 40,
+    store_url="http://store:8000",
+    store_token="writetok",
+    driver="postgres",
+)
+"""A deployment with an address, for the routes that read the model rather than query it."""
 
 
 # --- the token middleware ----------------------------------------------------
@@ -84,7 +51,13 @@ async def test_every_other_route_is_refused_without_the_token():
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=server.app), base_url="http://test"
     ) as bare:
-        for path in ("/api/chats", "/api/catalog", "/api/source", "/api/dashboards", "/"):
+        for path in (
+            "/api/chats",
+            "/api/ide/model/summary",
+            "/api/onboarding/connection",
+            "/api/dashboard",
+            "/",
+        ):
             assert (await bare.get(path)).status_code == 401, path
 
 
@@ -162,324 +135,181 @@ async def test_an_invented_decision_is_refused_by_the_schema(api):
     assert response.status_code == 422
 
 
-async def test_deleting_a_chat_takes_its_workspace_with_it(api, tmp_path):
-    """The sandbox container is shared between chats, so it survives; the workspace directory is
-    this chat's alone and goes with it."""
-    from analyst_agent.sandbox import scratch
+class FakeSandbox:
+    """The sandbox service, as the routes see it. Its own suite covers what a real one does; what
+    matters here is that these routes proxy rather than touch a filesystem."""
 
-    chat = (await api.post("/api/chats", json={})).json()
-    workspace = scratch.ensure(chat["id"])
-    (workspace / "result.csv").write_text("a,b\n")
-    assert workspace.is_relative_to(tmp_path)
+    def __init__(self):
+        self.files: dict[str, bytes] = {}
+        self.uploaded: list[tuple[str, bytes]] = []
+        self.deleted: list[str] = []
+        self.forgotten: list[str] = []
 
-    assert (await api.delete(f"/api/chats/{chat['id']}")).status_code == 200
-    assert not workspace.exists()
+    async def __aenter__(self):
+        return self
 
+    async def __aexit__(self, *exc):
+        return None
 
-# --- files in and out of a workspace -----------------------------------------
+    async def upload(self, chat_id, filename, data):
+        """The path and the profile in one answer, as the real client returns them."""
+        self.uploaded.append((filename, data))
+        stored = f"uploads/{filename}"
+        self.files[stored] = data
+        return {
+            "path": stored,
+            "profile": {
+                "path": stored,
+                "rows": 2,
+                "columns": [
+                    {"name": "a", "type": "BIGINT"},
+                    {"name": "b", "type": "BIGINT"},
+                ],
+            },
+        }
+
+    async def _send(self, method, path, **kwargs):
+        if path.startswith("/files/") and method == "DELETE":
+            self.deleted.append(path.split("/", 3)[3])
+            return {}
+        if path.startswith("/workspace/"):
+            self.forgotten.append(path.rsplit("/", 1)[1])
+            return {}
+        return {}
+
+    async def read(self, chat_id, path):
+        from analyst_agent.sandbox import SandboxError
+
+        if path not in self.files:
+            raise SandboxError(f"no file at {path!r}", status=404)
+        return self.files[path], path.rsplit("/", 1)[-1]
+
+    async def delete(self, chat_id, path):
+        await self._send("DELETE", f"/files/{chat_id}/{path}")
+
+    async def forget(self, chat_id):
+        await self._send("DELETE", f"/workspace/{chat_id}")
+
+    async def listing(self, chat_id):
+        return sorted(self.files), sorted(p for p in self.files if p.startswith("uploads/"))
 
 
 @pytest.fixture
-def unprofiled(monkeypatch):
-    """Profiling runs a script in the sandbox, and this suite starts no containers. What the
-    route does with the answer is what is asserted here; the profile itself is its own test."""
-    from analyst_agent.sandbox.profile import Profile
-    from analyst_agent.web import files
+def fake_sandbox(monkeypatch):
+    from analyst_agent.api.chat import controller as workspace_controller
+    from analyst_agent.api.chat_management import controller as chat_controller
 
-    async def fake(chat_id: str, path: str) -> Profile:
-        return Profile(path=path, bytes=4, rows=2, note="not profiled")
+    fake = FakeSandbox()
 
-    monkeypatch.setattr(files.profile, "of", fake)
+    async def opened(*args, **kwargs):
+        return fake
+
+    monkeypatch.setattr(workspace_controller, "open_sandbox", opened)
+    monkeypatch.setattr(chat_controller, "open_sandbox", opened)
+    return fake
+
+
+@pytest.fixture
+def no_sandbox(monkeypatch):
+    """A deployment with none configured — which is every deployment until one is run."""
+    from analyst_agent.api.chat import controller as workspace_controller
+    from analyst_agent.api.chat_management import controller as chat_controller
+    from analyst_agent.sandbox import SandboxError
+
+    async def refused(*args, **kwargs):
+        raise SandboxError("no sandbox is configured for this deployment")
+
+    monkeypatch.setattr(workspace_controller, "open_sandbox", refused)
+    monkeypatch.setattr(chat_controller, "open_sandbox", refused)
+
+
+async def test_deleting_a_chat_asks_the_sandbox_to_drop_its_workspace(api, fake_sandbox):
+    """The workspace is the sandbox's, so this is a request rather than an `rmtree` — and a
+    best-effort one, since a transcript that is gone must not leave the chat undeletable."""
+    chat = (await api.post("/api/chats", json={})).json()
+    assert (await api.delete(f"/api/chats/{chat['id']}")).status_code == 200
+    assert fake_sandbox.forgotten == [chat["id"]]
+
+
+async def test_a_chat_still_deletes_with_the_sandbox_down(api, no_sandbox):
+    chat = (await api.post("/api/chats", json={})).json()
+    assert (await api.delete(f"/api/chats/{chat['id']}")).status_code == 200
+    assert (await api.get("/api/chats")).json() == []
+
+
+# --- files in and out of a workspace -----------------------------------------
+# The workspace lives in the sandbox service, so these routes are a proxy: what is asserted here
+# is the proxying and the statuses, and the path guard is covered by the service's own suite.
 
 
 async def upload(api, chat_id: str, name: str, body: bytes = b"a,b\n1,2\n"):
     return await api.post(f"/api/chats/{chat_id}/files", files={"file": (name, body, "text/csv")})
 
 
-async def test_an_uploaded_file_lands_in_the_chats_workspace(api, unprofiled, tmp_path):
+async def test_an_upload_is_handed_over_and_its_shape_reported_back(api, fake_sandbox):
+    """Profiled by the service on arrival, so this is one round trip and the columns are known
+    before the first question about the file."""
     chat = (await api.post("/api/chats", json={})).json()
     body = (await upload(api, chat["id"], "orders.csv")).json()
 
     assert body["path"] == "uploads/orders.csv"
-    written = tmp_path / "workspaces" / chat["id"] / "uploads" / "orders.csv"
-    assert written.read_bytes() == b"a,b\n1,2\n"
+    assert body["rows"] == 2 and body["columns"] == 2
+    assert fake_sandbox.uploaded == [("orders.csv", b"a,b\n1,2\n")]
 
 
-async def test_a_browser_filename_cannot_choose_where_the_file_goes(api, unprofiled, tmp_path):
-    """The name is untrusted input. `save_upload` takes the basename and `scratch.resolve`
-    checks the resolved target, which is the one check that covers `..`, an absolute path and a
-    symlink."""
-    chat = (await api.post("/api/chats", json={})).json()
-    secret = tmp_path / "analyst.db"
-    before = secret.read_bytes()
-
-    for name in ("../../analyst.db", "/etc/passwd", "a/../../b.csv"):
-        body = (await upload(api, chat["id"], name)).json()
-        assert body["path"].startswith("uploads/")
-        assert "/" not in body["path"][len("uploads/") :]
-    assert secret.read_bytes() == before
-
-
-async def test_a_dotted_filename_does_not_land_invisible(api, unprofiled):
-    """`scratch.listing` skips dotted paths, so `.secret.csv` would be on disk and invisible to
-    the agent, to the snapshot and to the profiler — an upload that appears to have worked."""
-    chat = (await api.post("/api/chats", json={})).json()
-    body = (await upload(api, chat["id"], ".secret.csv")).json()
-    assert body["path"] == "uploads/secret.csv"
-
-
-async def test_uploading_the_same_name_twice_keeps_both(api, unprofiled):
-    """A figure in an earlier answer came from the earlier file. Numbered, like a saved script."""
-    chat = (await api.post("/api/chats", json={})).json()
-    first = (await upload(api, chat["id"], "orders.csv")).json()
-    second = (await upload(api, chat["id"], "orders.csv")).json()
-    assert (first["path"], second["path"]) == ("uploads/orders.csv", "uploads/orders-2.csv")
-
-
-async def test_a_file_over_the_cap_is_refused_with_the_limit_named(api, unprofiled):
-    from analyst_agent.web import files
+async def test_a_file_over_the_cap_is_refused_before_it_is_handed_over(api, fake_sandbox):
+    """Content-Length is the cheap refusal and the running total is the real one — a chunked
+    upload sends no length at all."""
+    from analyst_agent.api.chat import controller as workspace_controller
 
     chat = (await api.post("/api/chats", json={})).json()
-    response = await upload(api, chat["id"], "big.csv", b"x" * (files.MAX_BYTES + 1))
+    over = b"x" * (workspace_controller.MAX_BYTES + 1)
+    response = await upload(api, chat["id"], "big.csv", over)
     assert response.status_code == 413
-    assert "100 MB" in response.json()["detail"]
+    assert "100 MB" in response.text
+    assert fake_sandbox.uploaded == []
 
 
-async def test_uploading_to_an_unknown_chat_is_a_404(api, unprofiled):
+async def test_uploading_to_an_unknown_chat_is_a_404(api, fake_sandbox):
     assert (await upload(api, "ghost", "orders.csv")).status_code == 404
 
 
-async def test_a_written_file_comes_back_out(api):
-    """The workspace is the store — there is no table behind this, and the route is a read
-    through the same `resolve` the tools use."""
-    from analyst_agent.sandbox import scratch
-
+async def test_no_sandbox_is_a_503_rather_than_a_500(api, no_sandbox):
+    """A deployment without one is a working deployment that cannot run Python, so the status
+    has to say "not here" rather than "broken"."""
     chat = (await api.post("/api/chats", json={})).json()
-    (scratch.ensure(chat["id"]) / "chart.png").write_bytes(b"\x89PNG\r\n")
+    assert (await upload(api, chat["id"], "orders.csv")).status_code == 503
+
+
+async def test_a_written_file_comes_back_out(api, fake_sandbox):
+    fake_sandbox.files["chart.png"] = b"\x89PNG\r\n"
+    chat = (await api.post("/api/chats", json={})).json()
 
     response = await api.get(f"/api/chats/{chat['id']}/files/chart.png")
     assert response.status_code == 200
     assert response.content == b"\x89PNG\r\n"
-    assert response.headers["content-type"] == "image/png"
-    # Inline, so the transcript can render it as an image rather than downloading it.
-    assert "content-disposition" not in response.headers
-    assert response.headers["x-content-type-options"] == "nosniff"
+    # Inline, so an image renders in the transcript rather than downloading.
+    assert "attachment" not in response.headers.get("content-disposition", "")
 
 
-async def test_a_csv_is_a_download_and_a_missing_file_is_a_404_not_a_400(api):
-    from analyst_agent.sandbox import scratch
-
+async def test_a_csv_is_a_download_and_a_missing_file_is_the_services_answer(api, fake_sandbox):
+    fake_sandbox.files["summary.csv"] = b"a,b\n1,2\n"
     chat = (await api.post("/api/chats", json={})).json()
-    (scratch.ensure(chat["id"]) / "summary.csv").write_text("a,b\n")
 
     served = await api.get(f"/api/chats/{chat['id']}/files/summary.csv")
     assert "attachment" in served.headers["content-disposition"]
-
     assert (await api.get(f"/api/chats/{chat['id']}/files/nope.csv")).status_code == 404
-    # Percent-encoded, because every client collapses a literal `../` before it is sent — which
-    # is exactly why the guard cannot be the URL's shape. `resolve` checks the resolved target.
-    escape = await api.get(f"/api/chats/{chat['id']}/files/%2e%2e%2f%2e%2e%2fanalyst.db")
-    assert escape.status_code == 400
-    assert "outside the workspace" in escape.json()["detail"]
 
 
-async def test_a_file_can_be_taken_back_before_the_question_is_sent(api, unprofiled):
-    """The composer's ✕. The prompt is built from the directory, so dropping the chip without
-    dropping the file would leave the agent still holding it."""
-    from analyst_agent.sandbox import profile, scratch
-
+async def test_taking_a_file_back_reaches_the_sandbox(api, fake_sandbox):
+    """The composer's ✕ deletes the file rather than only the chip: the prompt is built from
+    `uploads/` every turn, so a chip removed while the file stayed would keep describing it."""
+    fake_sandbox.files["uploads/orders.csv"] = b"a,b\n"
     chat = (await api.post("/api/chats", json={})).json()
-    path = (await upload(api, chat["id"], "orders.csv")).json()["path"]
-    assert scratch.uploaded(chat["id"]) == [path]
-
-    assert (await api.delete(f"/api/chats/{chat['id']}/files/{path}")).status_code == 200
-    assert scratch.uploaded(chat["id"]) == []
-    assert profile.saved(chat["id"]) == []
-    assert (await api.delete(f"/api/chats/{chat['id']}/files/{path}")).status_code == 404
-
-
-async def test_a_dotted_filename_does_not_swallow_the_download_route(api):
-    """`{path:path}` under a chat, and the fixed segments above it still match first."""
-    routes = {getattr(r, "path", "") for r in server.app.routes}
-    assert "/api/chats/{chat_id}/events" in routes
-    chat = (await api.post("/api/chats", json={})).json()
-    assert (await api.get(f"/api/chats/{chat['id']}/events")).json() == []
-
-
-# --- results: the rows the event does not carry ------------------------------
-
-COLUMNS = [
-    {
-        "id": "orders.status",
-        "label": "Status",
-        "kind": "dimension",
-        "type": "string",
-        "format": "",
-        "align": "left",
-    },
-    {
-        "id": "orders.count",
-        "label": "Orders",
-        "kind": "measure",
-        "type": "number",
-        "format": "",
-        "align": "right",
-    },
-]
-ROWS = [{"orders.status": f"s{i}", "orders.count": i} for i in range(5)]
-
-
-async def test_an_unknown_result_is_a_404(api):
-    assert (await api.get("/api/results/nope")).status_code == 404
-    assert (await api.get("/api/results/nope/csv")).status_code == 404
-
-
-async def test_a_result_is_paged_by_offset_and_limit(api):
-    chats, _, _ = api.stores
-    chat = await chats.create("c")
-    result_id = await chats.save_result(chat.id, "turn-1", COLUMNS, ROWS)
-
-    body = (await api.get(f"/api/results/{result_id}?offset=1&limit=2")).json()
-    assert [r["orders.count"] for r in body["rows"]] == [1, 2]
-    # The count is the whole set, not the page — it is what "showing 2 of 5" is built from.
-    assert body["row_count"] == 5
-    assert body["offset"] == 1
-
-
-async def test_the_csv_header_is_the_stored_header_not_the_row_keys(api):
-    """Cube returns a grouped time dimension under two keys, so `rows[0]` would invent a
-    column. The labels are what a person reads in a spreadsheet."""
-    chats, _, _ = api.stores
-    chat = await chats.create("c")
-    result_id = await chats.save_result(chat.id, "turn-1", COLUMNS, ROWS[:2])
-
-    response = await api.get(f"/api/results/{result_id}/csv")
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/csv")
-    assert "attachment" in response.headers["content-disposition"]
-    assert response.text.splitlines()[0] == "Status,Orders"
-
-
-async def test_a_dotted_result_id_does_not_swallow_the_csv_route(api):
-    """`/api/results/{id}.csv` would match the paging route with id "abc.csv", which is why
-    the CSV route is a segment. This asserts the shape rather than the bug."""
-    assert (await api.get("/api/results/abc.csv")).status_code == 404
-    routes = {getattr(r, "path", "") for r in server.app.routes}
-    assert "/api/results/{result_id}/csv" in routes
-
-
-# --- the served catalog ------------------------------------------------------
-
-
-async def test_the_catalog_route_reports_what_the_session_serves(api, catalog):
-    body = (await api.get("/api/catalog")).json()
-    names = {e["name"] for e in body["entities"]}
-    assert names == {e.name for e in catalog.entities}
-    assert next(e for e in body["entities"] if e["name"] == "revenue")["view"] is True
-
-
-# --- the data source ---------------------------------------------------------
-
-
-async def test_the_source_is_null_before_a_database_is_connected(api):
-    assert (await api.get("/api/source")).json() is None
-
-
-async def test_a_stopped_container_says_so_rather_than_reporting_no_model(api):
-    """`serving` is null both for a stopped container and for a model Cube will not compile, so
-    the row has to say which — the browser is given the answer rather than guessing."""
-    _, _, sources = api.stores
-    await sources.save(SHOP)
-
-    row = (await api.get("/api/source")).json()
-    assert row["serving"] is None
-    assert row["serving_state"] == "stopped"
-    assert row["running"] is False
-    assert "CUBEJS_DB_NAME" in row["credential_keys"]
-    assert row["label"] == "shop"
-
-
-async def test_the_source_carries_the_stage_rail_and_the_next_stage(api):
-    _, _, sources = api.stores
-    await sources.save(SHOP)
-    await sources.save_step("connect", {"status": "done"})
-
-    row = (await api.get("/api/source")).json()
-    assert [s["name"] for s in row["stages"]] == ["connect", "read", "cubes", "describe", "views"]
-    assert row["next_stage"] == "read"
-    assert next(s for s in row["stages"] if s["name"] == "describe")["blocked_by"] == "cubes"
-
-
-async def test_no_credential_value_ever_leaves_the_process(api):
-    _, _, sources = api.stores
-    await sources.save(Source(driver="postgres", credentials={"CUBEJS_DB_PASS": "hunter2"}))
-    assert "hunter2" not in (await api.get("/api/source")).text
-
-
-async def test_the_driver_form_ships_what_is_required_and_no_flag_to_re_derive_it(api):
-    """The form filtered booleans where the server filters fixed values, so `Connect` could
-    enable on a body `POST /source` would reject."""
-    drivers = {d["key"]: d for d in (await api.get("/api/drivers")).json()["drivers"]}
-    postgres = drivers["postgres"]
-    assert "CUBEJS_DB_NAME" in postgres["required_envs"]
-    assert "CUBEJS_DB_SSL" not in postgres["required_envs"]
-    assert all("required" not in f for f in postgres["fields"]), (
-        "a per-field flag is a second way to answer the same question"
-    )
-    # A fixed field is not offered at all, and is not in the required list either.
-    databricks = drivers["databricks-jdbc"]
-    offered = {f["env"] for f in databricks["fields"]}
-    assert "CUBEJS_DB_DATABRICKS_ACCEPT_POLICY" not in offered | set(databricks["required_envs"])
-
-
-async def test_connecting_without_a_required_field_is_refused_by_name(api):
-    response = await api.post(
-        "/api/source",
-        json={
-            "description": "",
-            "driver": "postgres",
-            "values": {"CUBEJS_DB_HOST": "host.docker.internal"},
-        },
-    )
-    assert response.status_code == 400
-    assert "CUBEJS_DB_NAME" in response.text
-
-
-async def test_connecting_replaces_whatever_was_there(api):
-    """One Cube deployment, so there is nothing to add to — and the steps go with the old
-    database, because they describe it."""
-    _, _, sources = api.stores
-    await sources.save(SHOP)
-    await sources.save_step("connect", {"status": "done"})
-
-    body = {
-        "description": "",
-        "driver": "postgres",
-        "values": {
-            "CUBEJS_DB_HOST": "h",
-            "CUBEJS_DB_PORT": "5432",
-            "CUBEJS_DB_NAME": "other",
-            "CUBEJS_DB_USER": "u",
-            "CUBEJS_DB_PASS": "p",
-        },
-    }
-    row = (await api.post("/api/source", json=body)).json()
-    assert row["label"] == "other"
-    assert row["steps"] == {}
-
-
-async def test_an_unknown_action_is_a_404_from_the_route(api):
-    """The route checks the stage list itself so the answer is 404 rather than a failed job."""
-    _, _, sources = api.stores
-    await sources.save(SHOP)
-    response = await api.post("/api/source/actions/enrich", json={})
-    assert response.status_code == 404
-    assert "enrich" in response.text
-
-
-async def test_reading_the_source_before_one_exists_is_a_404(api):
-    assert (await api.get("/api/source/model")).status_code == 200
-    assert (await api.post("/api/source/check")).status_code == 404
+    assert (
+        await api.delete(f"/api/chats/{chat['id']}/files/uploads/orders.csv")
+    ).status_code == 200
+    assert fake_sandbox.deleted == ["uploads/orders.csv"]
 
 
 # --- dashboards --------------------------------------------------------------
@@ -489,8 +319,8 @@ async def test_an_unknown_dashboard_reads_as_404_but_refreshes_as_a_failed_run(a
     """Not an inconsistency to fix here: `refresh._open` returns an outcome rather than raising,
     so that a check cannot apply to `validate` and not to `refresh`. The button renders the
     outcome, so a deleted board reports `failed` instead of throwing."""
-    assert (await api.get("/api/dashboards/nope")).status_code == 404
-    response = await api.post("/api/dashboards/nope/refresh")
+    assert (await api.get("/api/dashboard/nope")).status_code == 404
+    response = await api.post("/api/dashboard/nope/refresh")
     assert response.status_code == 200
     assert response.json()["status"] == "failed"
     assert "nope" in response.json()["error"]
@@ -501,7 +331,7 @@ async def test_refreshing_an_empty_board_is_refused_not_ok(api):
     is nothing to run. The status is what the button reports."""
     _, boards, _ = api.stores
     board = await boards.create("Weekly")
-    body = (await api.post(f"/api/dashboards/{board.id}/refresh")).json()
+    body = (await api.post(f"/api/dashboard/{board.id}/refresh")).json()
     assert body["ok"] is False
     assert body["status"] == "refused"
     assert body["tiles"] == []
@@ -511,11 +341,597 @@ async def test_a_dashboard_is_listed_renamed_and_deleted(api):
     _, boards, _ = api.stores
     board = await boards.create("Weekly")
 
-    listed = (await api.get("/api/dashboards")).json()
+    listed = (await api.get("/api/dashboard")).json()
     assert [b["title"] for b in listed] == ["Weekly"]
 
-    await api.patch(f"/api/dashboards/{board.id}", json={"title": "Monthly"})
-    assert (await api.get(f"/api/dashboards/{board.id}")).json()["title"] == "Monthly"
+    await api.patch(f"/api/dashboard/{board.id}", json={"title": "Monthly"})
+    assert (await api.get(f"/api/dashboard/{board.id}")).json()["title"] == "Monthly"
 
-    assert (await api.delete(f"/api/dashboards/{board.id}")).status_code == 200
-    assert (await api.get("/api/dashboards")).json() == []
+    assert (await api.delete(f"/api/dashboard/{board.id}")).status_code == 200
+    assert (await api.get("/api/dashboard")).json() == []
+
+
+# --- connecting --------------------------------------------------------------
+
+CHINOOK = {
+    "driver": "postgres",
+    "description": "Chinook",
+    "values": {
+        "CUBEJS_DB_HOST": "host.docker.internal",
+        "CUBEJS_DB_PORT": "5433",
+        "CUBEJS_DB_NAME": "chinook",
+        "CUBEJS_DB_USER": "analyst",
+        "CUBEJS_DB_PASS": "chinook",
+    },
+}
+
+
+@pytest.fixture
+def answering(monkeypatch):
+    """Both services reachable, so a test can get past step two of connecting. The addresses in
+    these tests answer nothing, and `PUT /deployment` stores only what passed."""
+    from analyst_agent.api.onboarding import reachable, routes
+
+    async def reached(deployment, service, url):
+        return reachable.Reached(True, "ok")
+
+    monkeypatch.setattr(routes.reachable, "test", reached)
+
+
+async def test_connecting_mints_every_secret_the_deployments_need(api):
+    """All three, at connect and never again — they go into files someone runs elsewhere.
+
+    Asserted through the route rather than on `render`, because the renderer's own tests hand
+    it a populated `Deployment`: `sandbox_token` was a column nothing minted, and every one of
+    them passed while the sandbox's file went out with `SANDBOX_TOKEN=`.
+    """
+    assert (await api.post("/api/onboarding/connection", json=CHINOOK)).status_code == 200
+
+    _, _, sources = api.stores
+    deployment = await sources.current()
+    minted = {
+        "api_secret": deployment.api_secret,
+        "store_token": deployment.store_token,
+        "sandbox_token": deployment.sandbox_token,
+    }
+    blank = [name for name, value in minted.items() if not value]
+    assert not blank, f"minted nothing for {blank}"
+    assert len(set(minted.values())) == 3, "a secret is reused across roles"
+
+
+async def test_the_handover_is_a_download_per_service(api):
+    """The compose files are the whole interface to whoever runs these, and a download rather
+    than a body the page renders — there is nothing to do with one but run it somewhere."""
+    await api.post("/api/onboarding/connection", json=CHINOOK)
+
+    for service in ("semantic", "sandbox"):
+        response = await api.get(f"/api/onboarding/deployment/{service}/compose")
+        assert response.status_code == 200, service
+        assert "attachment" in response.headers["content-disposition"]
+        assert "docker-compose.yml" in response.headers["content-disposition"]
+        # The guard that matters: an unresolved variable reads as a complete file and dies at
+        # `up` with compose's message about an environment nobody was told to set. A doubled
+        # `$` is the deliberate escape, since compose interpolates config content too.
+        assert "${" not in response.text, service
+        assert "$" not in response.text.replace("$$", ""), service
+
+    assert (await api.get("/api/onboarding/deployment/nonsense/compose")).status_code == 404
+
+
+async def test_nothing_is_running_after_connecting(api):
+    """Connecting stores credentials; the addresses arrive later from whoever ran the compose
+    file. So this state is neutral rather than unhealthy — a red dot on a deployment whose
+    environment file has not been handed over yet is a bug report waiting to happen."""
+    body = (await api.post("/api/onboarding/connection", json=CHINOOK)).json()
+    assert body["deployed"] is False
+    assert body["health"]["status"] == "not deployed"
+    assert body["store_url"] == ""
+
+
+async def test_both_addresses_are_not_finished_setup_without_a_model(api, answering):
+    """Computed and not a column, because `CREATE TABLE IF NOT EXISTS` cannot add one. Setup now
+    ends with a built model, so two answering addresses and an empty store is the state the
+    wizard's last step is entered in — not the state it is finished in."""
+    body = (await api.post("/api/onboarding/connection", json=CHINOOK)).json()
+    assert (body["deployed"], body["onboarded"]) == (False, False)
+
+    body = (
+        await api.put("/api/onboarding/deployment", json={"store_url": "http://store:8000"})
+    ).json()
+    source = body["connection"]
+    assert (source["deployed"], source["onboarded"]) == (True, False), "the sandbox is still owed"
+
+    body = (
+        await api.put("/api/onboarding/deployment", json={"sandbox_url": "http://sb:8600"})
+    ).json()
+    assert body["connection"]["onboarded"] is False, "the store holds no cubes yet"
+
+
+async def test_an_address_that_does_not_answer_is_never_stored(api):
+    """The check is what makes a typo recoverable: a stored-then-failed address is what makes a
+    half-configured deployment look configured."""
+    await api.post("/api/onboarding/connection", json=CHINOOK)
+
+    body = (
+        await api.put(
+            "/api/onboarding/deployment", json={"store_url": "http://127.0.0.1:9/nothing-here"}
+        )
+    ).json()
+
+    assert body["checked"]["semantic"]["ok"] is False
+    assert body["connection"]["store_url"] == ""
+    assert body["connection"]["deployed"] is False
+
+
+async def test_editing_the_connection_discards_nothing(api):
+    """A changed host may be the same database moved and a changed name may expose the same
+    tables, so which happened is not derivable from the values. Guessing it wrong either way is
+    worse than not guessing: `POST /source/reset` is the explicit answer."""
+    await api.post("/api/onboarding/connection", json=CHINOOK)
+    _, _, sources = api.stores
+    await sources.save_step("cubes", {"status": "done"})
+    await sources.save_state({"introspection": {"public": ["invoice"]}})
+
+    await api.patch(
+        "/api/onboarding/connection", json={"values": {"CUBEJS_DB_NAME": "somewhere-else"}}
+    )
+
+    assert "cubes" in await sources.steps()
+    assert await sources.state() != {}
+
+
+async def test_there_is_no_way_to_discard_what_was_built(api):
+    """It existed for re-pointing a connection at a different database, which is re-onboarding
+    now — and a rebuild runs every stage from `read`, so clearing the records first bought
+    nothing."""
+    await api.post("/api/onboarding/connection", json=CHINOOK)
+    assert (await api.delete("/api/onboarding/pipeline")).status_code == 404
+
+
+async def test_a_variable_that_is_not_a_warehouse_setting_is_refused(api):
+    """The one rule about a name, and what keeps arbitrary keys safe: everything else the
+    compose file sets is CUBEJS_ without the DB, so a typed key cannot overwrite the API
+    secret or dev mode."""
+    await api.post("/api/onboarding/connection", json=CHINOOK)
+
+    refused = await api.patch(
+        "/api/onboarding/connection", json={"values": {"CUBEJS_API_SECRET": "mine"}}
+    )
+
+    assert refused.status_code == 400
+    assert "CUBEJS_API_SECRET" in refused.json()["detail"]
+
+
+async def test_a_connection_that_cannot_open_is_refused_while_the_form_is_still_up(api):
+    """The form asks for these and will not submit without them; this is the same rule on the
+    near side of HTTP. Stored instead, it becomes a compose file that starts a deployment which
+    then refuses every query — a failure two screens away from the box that caused it."""
+    refused = await api.post(
+        "/api/onboarding/connection",
+        json={"driver": "postgres", "values": {"CUBEJS_DB_HOST": "db.internal"}},
+    )
+
+    assert refused.status_code == 400
+    detail = refused.json()["detail"]
+    assert "a database" in detail and "a user" in detail
+    assert "CUBEJS_DB" not in detail, "a person reads this, and they typed into a box called User"
+
+    _, _, sources = api.stores
+    assert await sources.current() is None, "a connection that cannot open was stored anyway"
+
+
+async def test_athenas_settings_are_aws_ones_and_still_accepted(api):
+    """Athena is why the name rule allows a second prefix: its settings are AWS ones rather than
+    database ones, so a single-prefix rule left the one warehouse on the list impossible to
+    configure at all."""
+    stored = await api.post(
+        "/api/onboarding/connection",
+        json={
+            "driver": "athena",
+            "values": {
+                "CUBEJS_AWS_KEY": "AKIA",
+                "CUBEJS_AWS_SECRET": "shh",
+                "CUBEJS_AWS_REGION": "us-east-1",
+                "CUBEJS_AWS_S3_OUTPUT_LOCATION": "s3://results/",
+            },
+        },
+    )
+
+    assert stored.status_code == 200, stored.text
+    _, _, sources = api.stores
+    assert (await sources.current()).credentials["CUBEJS_AWS_REGION"] == "us-east-1"
+
+
+async def test_a_warehouse_the_portal_has_no_field_list_for_still_connects(api):
+    """The free-form settings at the bottom of the form are the only way to connect something
+    unlisted, so nothing here may require a set of keys it invented for it."""
+    stored = await api.post(
+        "/api/onboarding/connection",
+        json={"driver": "timescale", "values": {"CUBEJS_DB_URL": "postgres://db/metrics"}},
+    )
+
+    assert stored.status_code == 200, stored.text
+
+
+async def test_there_is_no_way_to_rotate_the_secrets(api):
+    """Rotating means re-rendering both compose files and re-running both deployments, since a
+    container's environment cannot be changed in place. A button that silently stops everything
+    answering was worse than no button."""
+    await api.post("/api/onboarding/connection", json=CHINOOK)
+    assert (await api.post("/api/onboarding/deployment/secrets")).status_code == 404
+
+
+async def test_there_is_no_way_to_delete_a_connection(api):
+    """Removed deliberately: the edit form covers pointing somewhere else, and a delete is how
+    a model and four recorded steps get orphaned in the store."""
+    await api.post("/api/onboarding/connection", json=CHINOOK)
+    assert (await api.delete("/api/onboarding/connection")).status_code == 405
+
+
+async def test_the_catalog_is_a_503_before_a_deployment_rather_than_a_500(api, monkeypatch):
+    """503 and not 500, because it is the state every install starts in — nothing is broken.
+
+    The browser must not treat it as fatal either: for a while it did, and the page it replaced
+    with "cannot reach the server" was the data panel that is the only way to configure one.
+    """
+
+    from analyst_agent.api.support import state
+
+    async def unconfigured(_app):
+        raise HTTPException(503, "no Cube deployment is configured")
+
+    monkeypatch.setattr(state, "cube", unconfigured)
+    assert (await api.get("/api/ide/model/summary")).status_code == 503
+
+
+# --- the editor's two routes -------------------------------------------------
+# Both are thin mappings from a `workspace` refusal to a status code, so what is asserted is the
+# mapping and nothing under it — the tiers themselves are covered in test_workspace.py, and the
+# Cube leg is verified against a live deployment. These two cases are the ones that never reach
+# the store, which is why they need no respx.
+
+
+async def test_saving_on_main_is_a_409_at_the_edge(api):
+    """Main is generated: re-running the pipeline rewrites every file in it, so an edit there is
+    work waiting to be discarded. Refused before any ref is created."""
+    await api.post("/api/onboarding/connection", json=CHINOOK)
+    await api.stores[2].patch(store_url=STORED.store_url, store_token=STORED.store_token)
+    body = {"ref": "main"}
+    for route in ("/api/ide/check", "/api/ide/commit", "/api/ide/discard"):
+        assert (await api.post(route, json=body)).status_code == 409, route
+    saved = await api.put("/api/ide/files/views/s.yml", json={"ref": "main", "text": "views: []"})
+    assert saved.status_code == 409
+
+
+async def test_a_path_that_is_not_a_model_file_is_a_400(api):
+    """Refused where the bytes arrive, so a path Cube would ignore never reaches a draft."""
+    await api.post("/api/onboarding/connection", json=CHINOOK)
+    await api.stores[2].patch(store_url=STORED.store_url, store_token=STORED.store_token)
+    answered = await api.put(
+        "/api/ide/files/notes/escape.txt", json={"ref": "edit", "text": "views: []"}
+    )
+    assert answered.status_code == 400
+
+
+async def test_a_change_set_with_an_unknown_field_is_refused(api):
+    """`extra="forbid"` on `Draft`: a renamed field in the browser has to fail loudly rather
+    than act on the default ref."""
+    await api.post("/api/onboarding/connection", json=CHINOOK)
+    answered = await api.post("/api/ide/commit", json={"ref": "edit", "files": {}})
+    assert answered.status_code == 422
+
+
+async def test_every_path_the_browser_calls_is_a_real_route():
+    """The paths are the contract with `src/web/src/sources.ts`, and several of these have no
+    behaviour test of their own — so a rename that misses one shows up as a 404 in the browser
+    rather than here. Resolved against the routers rather than requested, so it asserts the
+    surface without standing up a deployment."""
+    from analyst_agent.api import onboarding
+    from analyst_agent.api.ide import routes as ide
+
+    surface = {
+        (method, route.path)
+        for router in (onboarding.router, onboarding.pipeline, ide.router)
+        for route in router.routes
+        for method in route.methods
+    }
+    called = {
+        ("GET", "/api/onboarding/connection"),
+        ("POST", "/api/onboarding/connection"),
+        ("PATCH", "/api/onboarding/connection"),
+        ("POST", "/api/onboarding/connection/probe"),
+        ("PUT", "/api/onboarding/deployment"),
+        ("GET", "/api/onboarding/deployment/{service}/compose"),
+        ("GET", "/api/ide/model"),
+        ("GET", "/api/ide/model/summary"),
+        ("GET", "/api/ide/refs"),
+        ("POST", "/api/ide/refs"),
+        ("DELETE", "/api/ide/refs/{ref}"),
+        ("GET", "/api/ide/refs/{ref}/diff"),
+        ("POST", "/api/ide/refs/{ref}/merge"),
+        ("GET", "/api/ide/files"),
+        ("GET", "/api/ide/files/{path:path}"),
+        ("POST", "/api/ide/check"),
+        ("POST", "/api/ide/commit"),
+        ("POST", "/api/ide/chats"),
+        ("POST", "/api/ide/chats/{chat_id}/messages"),
+        ("GET", "/api/onboarding/pipeline/tables"),
+        ("POST", "/api/onboarding/pipeline/tables/closure"),
+        ("POST", "/api/onboarding/pipeline/{stage}"),
+        ("GET", "/api/onboarding/pipeline/job"),
+        ("GET", "/api/onboarding/pipeline/job/stream"),
+        ("DELETE", "/api/onboarding/pipeline/job"),
+    }
+    assert not called - surface, f"the browser calls routes that do not exist: {called - surface}"
+
+
+async def test_a_stage_name_is_validated_rather_than_accepted(api):
+    """`POST /pipeline/{stage}` is as broad as a path parameter gets, so it has to refuse
+    anything that is not one of the four rather than start a job named after it."""
+    await api.post("/api/onboarding/connection", json=CHINOOK)
+    assert (await api.post("/api/onboarding/pipeline/nonsense", json={})).status_code == 404
+
+
+# --- the routes nothing else exercises ---------------------------------------
+# Written before `web/` is split into routes, controllers and DTOs (see mvc-migration.md, Phase
+# 0): these payloads become pydantic response models, and a shape nothing asserts is a shape the
+# split is free to change by accident. Each of these locks the keys the browser reads, not the
+# machinery underneath — that has its own suite.
+#
+# The monkeypatches target the *route module's* attribute rather than the defining module,
+# because the routes do `from ..modelstore import model_files`, which binds the name at import.
+# The same trap applies to the controllers this code is about to become.
+
+
+async def test_the_served_model_reports_entities_members_and_which_file_defined_each(
+    api, monkeypatch, catalog
+):
+    """The data page's whole payload. `file` per entity is read from the store rather than
+    guessed from `cubes/<name>.yml`, because a hand-edited model may put a cube anywhere."""
+    from analyst_agent.api.ide import routes
+
+    async def files(ref="main"):
+        return {"cubes/everything.yml": "cubes:\n  - name: orders\n  - name: customers\n"}
+
+    async def served(*, ref="main"):
+        return catalog
+
+    monkeypatch.setattr(routes, "model_files", files)
+    monkeypatch.setattr(routes, "served_catalog", served)
+
+    body = (await api.get("/api/ide/model")).json()
+    assert (body["serving"], body["error"]) == (True, "")
+    assert set(body) == {"serving", "error", "counts", "unloaded", "entities"}
+
+    orders = next(entity for entity in body["entities"] if entity["name"] == "orders")
+    assert orders["file"] == "cubes/everything.yml", "the defining file is not read off the store"
+    assert orders["is_view"] is False
+    assert set(orders) >= {"name", "file", "is_view", "title", "description", "members"}
+    assert {member["name"] for member in orders["members"]} >= {"count", "net_revenue", "status"}
+    # `name` is the member id's last segment, shipped rather than split in the browser.
+    assert all(member["id"].endswith(member["name"]) for member in orders["members"])
+
+    # The view is what carries `exposed_by`, and a view's own members carry none.
+    view = next(entity for entity in body["entities"] if entity["name"] == "revenue")
+    assert view["is_view"] is True
+    assert all(member["exposed_by"] == [] for member in view["members"])
+    # Defined in a file but never served by Cube — the signal that a file did not compile.
+    assert body["unloaded"] == []
+
+
+async def test_the_served_model_still_answers_when_cube_is_down(api, monkeypatch):
+    """One half being unreachable must not hide the other: the files are still readable and the
+    editor has to keep working, so this is a 200 saying `serving: false`."""
+    from analyst_agent.api.ide import routes
+    from analyst_agent.modelstore.client import StoreError
+
+    async def files(ref="main"):
+        return {"cubes/orders.yml": "cubes:\n  - name: orders\n"}
+
+    async def down(*, ref="main"):
+        raise StoreError("connection refused", where="cube")
+
+    monkeypatch.setattr(routes, "model_files", files)
+    monkeypatch.setattr(routes, "served_catalog", down)
+
+    body = (await api.get("/api/ide/model")).json()
+    assert body["serving"] is False
+    assert "connection refused" in body["error"]
+    assert body["entities"] == []
+    assert body["unloaded"] == ["cubes/orders.yml"], "a readable file is not reported as lost"
+
+
+async def test_the_ref_diff_reports_what_would_break(
+    api, monkeypatch, model_store, opening, catalog
+):
+    """Drives the route rather than the workspace, because the two things it needs — the served
+    catalog and the saved queries — are read in the controller and nothing else covered that.
+
+    The regression this exists for: the helper was called `impact` and so shadowed the `impact`
+    module it calls, from inside its own body. Ruff cannot see it, the unit tests never called it,
+    and the route answered 500 for every branch anyone asked about.
+    """
+    from analyst_agent.api.ide import controller
+
+    store = model_store(main={"cubes/orders.yml": "cubes: []"}, feature={})
+
+    async def diff(ref, base="main"):
+        return {"changed": [{"status": "A", "path": "views/revenue.yml"}], "patch": "diff --git…"}
+
+    async def served(ref="main", **kwargs):
+        return catalog
+
+    store.diff = diff
+    monkeypatch.setattr(controller, "open_store", opening(store))
+    monkeypatch.setattr(controller, "served_catalog", served)
+
+    answered = await api.get("/api/ide/refs/feature/diff")
+    assert answered.status_code == 200, answered.text
+    body = answered.json()
+    assert body["changed"] == [{"status": "A", "path": "views/revenue.yml"}]
+    assert body["impact"] == {"checked": 0, "broken": []}
+
+
+async def test_the_ref_list_counts_changed_files_and_never_counts_main(
+    api, monkeypatch, model_store, opening
+):
+    """Files changed and not commits: it is what a reviewer is about to read. Main has nothing to
+    compare against, so it is the one ref with no number."""
+    from analyst_agent.api.ide import controller
+
+    store = model_store(main={"cubes/orders.yml": "cubes: []"}, feature={})
+
+    async def diff(ref):
+        return {"changed": ["cubes/orders.yml", "views/revenue.yml"], "patch": "diff --git…"}
+
+    async def refs():
+        return [Ref("main", "a", 1, False), Ref("feature", "b", 2, False)]
+
+    store.diff = diff
+    store.refs = refs
+    monkeypatch.setattr(controller, "open_store", opening(store))
+
+    body = (await api.get("/api/ide/refs")).json()
+    assert body["main"] == "main"
+    assert body["refs"] == [{"name": "main", "changed": 0}, {"name": "feature", "changed": 2}]
+
+
+async def test_a_rejected_change_set_is_a_200_carrying_its_reasons(
+    api, monkeypatch, model_store, opening
+):
+    """The editor renders errors in one banner, so a rejection is the *answer* and not a failed
+    request. Splitting it across a 400 and a 200 would make one button read two code paths."""
+    from analyst_agent.api.ide import controller
+    from analyst_agent.modelstore.editing import workspace
+
+    async def verify(store, ref, *, saved):
+        return workspace.Verdict(
+            ok=False,
+            kind="rejected",
+            reason="it does not compile",
+            errors=["views/revenue.yml: no such member orders.nope"],
+            warnings=["a tile reads this view"],
+            compiled=False,
+            compile_error="Member not found: orders.nope",
+        )
+
+    monkeypatch.setattr(controller, "open_store", opening(model_store(edit={})))
+    monkeypatch.setattr(workspace, "verify", verify)
+
+    answered = await api.post("/api/ide/check", json={"ref": "edit"})
+    assert answered.status_code == 200, "a model Cube refuses is not a bad request"
+    body = answered.json()
+    assert body["ok"] is False
+    assert body["compiled"] is False
+    assert body["errors"] and body["warnings"]
+    assert set(body) == {
+        "ref",
+        "ok",
+        "errors",
+        "warnings",
+        "compiled",
+        "compile_error",
+        "member_errors",
+        "impact",
+    }
+    assert body["impact"] is None, "nothing compiled, so there was no catalog to check against"
+
+
+async def test_the_table_picker_reads_what_the_read_stage_cached(api):
+    """Never the warehouse: this fires on every checkbox tick. `read` is false before anything has
+    been read, which is what the picker shows its empty state from."""
+    await api.post("/api/onboarding/connection", json=CHINOOK)
+    body = (await api.get("/api/onboarding/pipeline/tables")).json()
+    assert body["read"] is False
+    assert body["schemas"] == []
+
+    _, _, sources = api.stores
+    await sources.save_state(
+        {
+            "introspection": {
+                "public": {
+                    "tables": [
+                        {
+                            "name": "invoice",
+                            "schema": "public",
+                            "columns": [{"name": "id", "data_type": "integer"}],
+                            "primary_key": ["id"],
+                            "foreign_keys": [],
+                        }
+                    ]
+                }
+            }
+        }
+    )
+    body = (await api.get("/api/onboarding/pipeline/tables")).json()
+    assert body["read"] is True
+    assert [schema["schema"] for schema in body["schemas"]] == ["public"]
+    assert set(body) == {"read", "truncated", "notes", "selection", "schemas"}
+
+
+async def test_a_stored_result_pages_and_exports_with_labels(api):
+    """The event carries only a head of the rows; this is where the rest is read from. The CSV
+    header is labels and not member ids — a person reads a spreadsheet."""
+    chat = (await api.post("/api/chats", json={})).json()
+    columns = [
+        {
+            "id": "orders.status",
+            "label": "Status",
+            "kind": "dimension",
+            "type": "string",
+            "format": "",
+            "align": "left",
+        },
+        {
+            "id": "orders.count",
+            "label": "Orders",
+            "kind": "measure",
+            "type": "number",
+            "format": "",
+            "align": "right",
+        },
+    ]
+    rows = [
+        {"orders.status": "paid", "orders.count": 3},
+        {"orders.status": "open", "orders.count": 1},
+    ]
+    result_id = await api.stores[0].save_result(chat["id"], "turn-1", columns, rows)
+
+    body = (await api.get(f"/api/results/{result_id}?offset=1&limit=1")).json()
+    assert (body["row_count"], body["offset"]) == (2, 1)
+    assert body["rows"] == [rows[1]], "the page is not sliced by offset and limit"
+
+    exported = await api.get(f"/api/results/{result_id}/csv")
+    assert exported.headers["content-type"].startswith("text/csv")
+    assert "attachment" in exported.headers["content-disposition"]
+    assert exported.text.splitlines()[0] == "Status,Orders"
+
+    assert (await api.get("/api/results/nope")).status_code == 404
+
+
+async def test_agent_access_reports_the_token_and_a_config_for_the_address_it_was_asked_on(api):
+    """`base_url` and not `settings.web_host`: reached over a tunnel, the settings pair still says
+    127.0.0.1, which is a config that cannot work from wherever the person actually is."""
+    from analyst_agent.core.access import Access
+
+    server.app.state.mcp = Access(enabled=True, token="tok-abc")
+    server.app.state.mcp_max_rows = 100
+
+    body = (await api.get("/api/mcp")).json()
+    assert body["enabled"] is True
+    assert body["token"] == "tok-abc"
+    assert body["url"] == "http://test/mcp"
+    assert "tok-abc" in body["desktop"] and "tok-abc" in body["cli"]
+    assert {tool["name"] for tool in body["tools"]} == {
+        "search_model",
+        "run_query",
+        "describe_model",
+    }
+
+    off = await api.post("/api/mcp/enabled", json={"enabled": False})
+    assert off.json() == {"enabled": False}
+    assert server.app.state.mcp.enabled is False
+
+    rotated = (await api.post("/api/mcp/rotate")).json()
+    assert rotated["token"] != "tok-abc"
+    assert rotated["token"] in rotated["desktop"], "a new token beside a stale config block"

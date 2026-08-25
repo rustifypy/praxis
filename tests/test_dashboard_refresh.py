@@ -6,8 +6,9 @@ them (`outgrown`, `deltas`, `layout.validate`) were covered and their only calle
 
 import pytest
 
-from analyst_agent.dashboards import refresh as runner
-from analyst_agent.dashboards.store import DashboardStore
+from analyst_agent.api.dashboard import controller as runner
+from analyst_agent.core import boards as _dashboards
+from analyst_agent.core import db
 
 QUERY = {"measures": ["orders.net_revenue"], "dimensions": ["orders.status"]}
 BAR = {"type": "bar", "x": "orders.status", "y": ["orders.net_revenue"]}
@@ -16,12 +17,12 @@ ROWS = [{"orders.status": "paid", "orders.net_revenue": 100}]
 
 @pytest.fixture
 async def boards(tmp_path):
-    store = DashboardStore(tmp_path / "analyst.db")
-    await store.init()
+    await db.create_tables()
+    store = _dashboards
     return store
 
 
-async def _board(store: DashboardStore, *queries: dict) -> str:
+async def _board(store, *queries: dict) -> str:
     board = await store.create("Revenue")
     for i, query in enumerate(queries):
         await store.add_tile(board.id, f"tile {i}", query, BAR)
@@ -32,7 +33,7 @@ async def _board(store: DashboardStore, *queries: dict) -> str:
 
 
 async def test_an_unknown_dashboard_fails_rather_than_refusing(boards, cube):
-    outcome = await runner.refresh("nope", boards, cube.served, cube, 5_000)
+    outcome = await runner.refresh("nope", cube.served, cube, 5_000)
     assert outcome.status == "failed"
     assert "no dashboard" in outcome.error
 
@@ -45,7 +46,7 @@ async def test_one_tile_that_cannot_compile_stops_every_tile_executing(boards, c
     half a refresh."""
     board = await _board(boards, QUERY, {"measures": ["orders.nope"]}, QUERY)
 
-    outcome = await runner.refresh(board, boards, cube.served, cube, 5_000)
+    outcome = await runner.refresh(board, cube.served, cube, 5_000)
 
     assert outcome.status == "refused"
     assert cube.loaded == []
@@ -60,7 +61,7 @@ async def test_a_tile_that_breaks_after_compiling_is_failed_not_refused(boards, 
     cube.fail_load = "relation does not exist"
     board = await _board(boards, QUERY)
 
-    outcome = await runner.refresh(board, boards, cube.served, cube, 5_000)
+    outcome = await runner.refresh(board, cube.served, cube, 5_000)
 
     assert outcome.status == "failed"
     assert cube.compiled and cube.loaded
@@ -72,7 +73,7 @@ async def test_validate_records_no_run_and_reads_no_data(boards, cube):
     cube.rows = ROWS
     board = await _board(boards, QUERY)
 
-    outcome = await runner.validate(board, boards, cube.served, cube, 5_000)
+    outcome = await runner.validate(board, cube.served, cube, 5_000)
 
     assert outcome.ok and outcome.status == "ok"
     assert outcome.run_id == ""
@@ -85,8 +86,8 @@ async def test_an_empty_dashboard_validates_but_will_not_refresh(boards, cube):
     validate and its Refresh button then returns `refused`."""
     board = await boards.create("Empty")
 
-    assert (await runner.validate(board.id, boards, cube.served, cube, 5_000)).status == "ok"
-    refreshed = await runner.refresh(board.id, boards, cube.served, cube, 5_000)
+    assert (await runner.validate(board.id, cube.served, cube, 5_000)).status == "ok"
+    refreshed = await runner.refresh(board.id, cube.served, cube, 5_000)
     assert refreshed.status == "refused"
     assert "no tiles" in refreshed.error
 
@@ -99,7 +100,7 @@ async def test_a_refresh_stores_its_rows_and_the_window_cube_resolved(boards, cu
     cube.resolved_ranges = {"orders.created_at": ["2026-01-01", "2026-01-31"]}
     board = await _board(boards, QUERY)
 
-    outcome = await runner.refresh(board, boards, cube.served, cube, 5_000)
+    outcome = await runner.refresh(board, cube.served, cube, 5_000)
 
     assert outcome.ok
     stored = await boards.results_for_run(outcome.run_id)
@@ -113,10 +114,10 @@ async def test_the_second_refresh_reports_change_against_the_first(boards, cube)
     genuinely the previous refresh rather than this one."""
     board = await _board(boards, {"measures": ["orders.net_revenue"]})
     cube.rows = [{"orders.net_revenue": 100}]
-    await runner.refresh(board, boards, cube.served, cube, 5_000)
+    await runner.refresh(board, cube.served, cube, 5_000)
     cube.rows = [{"orders.net_revenue": 150}]
 
-    outcome = await runner.refresh(board, boards, cube.served, cube, 5_000)
+    outcome = await runner.refresh(board, cube.served, cube, 5_000)
 
     change = outcome.tiles[0].deltas[0]
     assert (change.value, change.previous, change.percent) == (150, 100, 50.0)
@@ -127,7 +128,7 @@ async def test_a_chart_is_re_judged_against_the_rows_that_arrived(boards, cube):
     cube.rows = [{"orders.status": f"s{i}", "orders.net_revenue": i} for i in range(300)]
     board = await _board(boards, QUERY)
 
-    outcome = await runner.refresh(board, boards, cube.served, cube, 5_000)
+    outcome = await runner.refresh(board, cube.served, cube, 5_000)
 
     assert outcome.ok
     assert "past the" in outcome.tiles[0].degraded

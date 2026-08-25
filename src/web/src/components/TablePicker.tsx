@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import * as api from "../sources";
-import type { CatalogInfo, Closure, SchemaInfo } from "../sources";
+import type { TableCache, Closure, SchemaInfo } from "../sources";
 
 /**
  * Choose a schema and the tables to model.
@@ -16,14 +16,22 @@ import type { CatalogInfo, Closure, SchemaInfo } from "../sources";
 export function TablePicker({
   catalog,
   busy,
-  discards,
+  label,
+  confirm,
+  extra,
   onRun,
   onReread,
 }: {
-  catalog: CatalogInfo;
+  catalog: TableCache;
   busy: boolean;
-  /** Later stages this run would throw away — their output is rewritten from scratch. */
-  discards: string[];
+  /** What the run is called. Building for the first time and rebuilding are the same picker and
+   *  the same job, and the only honest difference is the word on the button. */
+  label: string;
+  /** Asked before the run, or "" for no question. Empty during onboarding, where there is no
+   *  model to lose; set for a rebuild, which rewrites every file in main. */
+  confirm: string;
+  /** Rendered beside the count, for a caller with one more decision to offer. */
+  extra?: React.ReactNode;
   onRun: (schema: string, tables: string[] | null) => void;
   onReread: () => void;
 }) {
@@ -187,26 +195,19 @@ export function TablePicker({
           )}
         </div>
 
+        {extra}
+
         <button
           className="primary"
           disabled={busy || modelled === 0}
           onClick={() => {
-            // Rebuilding cubes unlinks every model file, views included, and a described
-            // model costs one call per table to make again. Ask before spending that.
-            if (
-              discards.length &&
-              !window.confirm(
-                `Rebuilding the cubes discards ${discards.join(" and ")}. ` +
-                  `Every model file is rewritten, so commit anything you want to keep ` +
-                  `first — version control is the way back. Continue?`,
-              )
-            ) {
-              return;
-            }
+            // A rebuild replaces every model file in one commit. Recoverable from the store's
+            // history, which is not the same as intended — so it is still worth asking.
+            if (confirm && !window.confirm(confirm)) return;
             onRun(schema, everything ? null : [...picked]);
           }}
         >
-          Build {modelled} cube{modelled === 1 ? "" : "s"}
+          {label.replace("{n}", String(modelled))}
         </button>
       </div>
     </div>

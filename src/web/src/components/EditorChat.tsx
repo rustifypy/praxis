@@ -1,22 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 
-import * as api from "../sources";
-import type { AgentEvent } from "../types";
+import * as api from "../api";
+import { applyEvent } from "../events";
+import * as sourcesApi from "../sources";
+import type { Item } from "../types";
 
-interface Tool {
-  label: string;
-  ok?: boolean;
-  note?: string;
-  errors?: string[];
-}
-
-interface Turn {
-  role: "you" | "agent";
-  text: string;
-  tools: Tool[];
-}
+import { Transcript } from "./Transcript";
 
 const EXAMPLES = [
   "Describe the measures on invoice_line",
@@ -25,82 +14,92 @@ const EXAMPLES = [
 ];
 
 /**
- * The model editor's chat.
+ * The model editor's chat: the third pane, beside the tree and the file.
  *
- * Markdown, not plain text: this agent answers with the YAML it wrote, and a fenced block
- * rendered as literal backticks was the worst of it. `.edchat-*` rather than the chat page's
- * `.answer`, which carries a streaming caret on its last child.
+ * The same reducer and the same blocks as the question chat, because it is the same event stream
+ * — this had its own four-type reducer once, so the editor's reasoning was emitted and never
+ * shown. Only the frame is local: one branch, no uploads, no chat list.
+ *
+ * **It sends the unsaved buffer with every message.** Staging is the browser's, so the server has
+ * no idea what the model currently looks like; an agent reading only the committed branch would
+ * propose a change that silently reverts whatever was accepted a minute ago.
+ *
+ * **Nothing it says is saved.** The agent proposes; each proposal arrives as a card, and clicking
+ * it opens the diff in the editor pane where hunks are accepted one at a time. This component
+ * never writes to the buffer itself — it hands the proposal up to the editor, which owns it.
+ *
+ * The pane starts empty each session and creates a chat on the first message. Every turn is still
+ * stored and replayable, but a history list would be a fourth column in a three-column layout.
  */
-export function EditorChat({ onChanged }: { onChanged: () => void }) {
+export function EditorChat({
+  modelRef,
+  textOf,
+  reviewed,
+  onReview,
+}: {
+  /** The branch this conversation edits. Not `ref` — React reserves that prop name. */
+  modelRef: string;
+  /** What the editor currently holds for a path, so a proposal card can size its own diff. */
+  textOf: (path: string) => string;
+  /** Paths already opened for review, so a settled card says so. */
+  reviewed: Set<string>;
+  onReview: (path: string, text: string | null) => void;
+}) {
   const [chat, setChat] = useState<string | null>(null);
-  const [turns, setTurns] = useState<Turn[]>([]);
+  const [items, setItems] = useState<Item[]>([]);
   const [question, setQuestion] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const abort = useRef<AbortController | null>(null);
   const tail = useRef<HTMLDivElement>(null);
 
+  // A branch switch is a different model, so it is a different conversation.
+  useEffect(() => {
+    setChat(null);
+    setItems([]);
+    setError("");
+  }, [modelRef]);
+
   useEffect(() => {
     tail.current?.scrollIntoView({ block: "end" });
-  }, [turns]);
-
-  /** Fold one event into the open agent turn, copying rather than mutating it. */
-  const apply = (event: AgentEvent) =>
-    setTurns((prev) => {
-      const turns = [...prev];
-      const last = { ...turns[turns.length - 1] };
-      const tools = [...last.tools];
-      if (event.type === "tool_start") {
-        tools.push({ label: String(event.data.label ?? event.data.tool) });
-      } else if (event.type === "tool_end" && tools.length) {
-        tools[tools.length - 1] = {
-          ...tools[tools.length - 1],
-          ok: Boolean(event.data.ok),
-          note: event.data.note,
-          errors: event.data.errors,
-        };
-      } else if (event.type === "text") {
-        last.text += String(event.data.delta ?? event.data.text ?? "");
-      } else if (event.type === "error") {
-        last.text += `\n\n${event.data.message}`;
-      }
-      last.tools = tools;
-      turns[turns.length - 1] = last;
-      return turns;
-    });
+  }, [items]);
 
   const ask = async (text: string) => {
     if (!text.trim() || busy) return;
     setBusy(true);
     setError("");
     setQuestion("");
+    const controller = new AbortController();
+    abort.current = controller;
     try {
-      const id = chat ?? (await api.createEditChat()).id;
+      const id = chat ?? (await sourcesApi.createEditChat(modelRef)).id;
       setChat(id);
-      setTurns((prev) => [
-        ...prev,
-        { role: "you", text, tools: [] },
-        { role: "agent", text: "", tools: [] },
-      ]);
-      abort.current = new AbortController();
-      for await (const event of api.sendEditMessage(id, text, abort.current.signal)) {
-        if (event.type !== "user") apply(event);
+      for await (const event of sourcesApi.sendEditMessage(id, text, controller.signal)) {
+        setItems((prev) => applyEvent(prev, event));
       }
-      // Files, branch state and the dirty list all move underneath the panel above.
-      onChanged();
     } catch (e) {
-      setError((e as Error).message);
+      // An aborted fetch is the stop button working, not a failure.
+      if (!controller.signal.aborted) setError((e as Error).message);
     } finally {
       setBusy(false);
       abort.current = null;
     }
   };
 
+  const stop = async () => {
+    if (chat) await api.stopChat(chat);
+    abort.current?.abort();
+    setBusy(false);
+  };
+
   return (
     <div className="edchat">
-      {turns.length === 0 ? (
+      {items.length === 0 ? (
         <div className="edchat-empty">
-          <p>It reads before it writes, and every write goes through the same gate. It cannot merge.</p>
+          <p>
+            It reads before it proposes, and it saves nothing — every change comes back as a diff
+            for you to accept. It cannot commit or merge.
+          </p>
           <div className="edchat-examples">
             {EXAMPLES.map((e) => (
               <button key={e} onClick={() => setQuestion(e)} disabled={busy}>
@@ -111,37 +110,11 @@ export function EditorChat({ onChanged }: { onChanged: () => void }) {
         </div>
       ) : (
         <div className="edchat-log">
-          {turns.map((turn, i) =>
-            turn.role === "you" ? (
-              <p key={i} className="edchat-you">
-                {turn.text}
-              </p>
-            ) : (
-              <div key={i} className="edchat-agent">
-                {turn.tools.map((t, j) => (
-                  <div key={j} className={`edchat-tool ${t.ok === false ? "bad" : ""}`}>
-                    <span className="edchat-tick" aria-hidden>
-                      {t.ok === undefined ? "·" : t.ok ? "✓" : "✕"}
-                    </span>
-                    <span className="edchat-label">{t.label}</span>
-                    {t.note && <span className="edchat-note">{t.note}</span>}
-                    {t.errors?.map((e, k) => (
-                      <span key={k} className="edchat-note">
-                        {e}
-                      </span>
-                    ))}
-                  </div>
-                ))}
-                {turn.text ? (
-                  <div className="edchat-md">
-                    <Markdown remarkPlugins={[remarkGfm]}>{turn.text}</Markdown>
-                  </div>
-                ) : (
-                  busy && i === turns.length - 1 && <p className="edchat-wait">Working…</p>
-                )}
-              </div>
-            ),
-          )}
+          <Transcript
+            items={items}
+            chatId={chat ?? ""}
+            proposals={{ textOf, reviewed, onReview }}
+          />
           <div ref={tail} />
         </div>
       )}
@@ -157,12 +130,12 @@ export function EditorChat({ onChanged }: { onChanged: () => void }) {
       >
         <input
           value={question}
-          placeholder="Ask for a change to this model…"
+          placeholder={`Ask for a change to ${modelRef}…`}
           onChange={(e) => setQuestion(e.target.value)}
           disabled={busy}
         />
         {busy ? (
-          <button type="button" onClick={() => abort.current?.abort()}>
+          <button type="button" onClick={() => void stop()}>
             Stop
           </button>
         ) : (

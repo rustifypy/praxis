@@ -1,0 +1,563 @@
+{
+  "agent access: enabled": {
+    "cli": "<minted>",
+    "desktop": "<minted>",
+    "enabled": true,
+    "token": "<minted>",
+    "tools": [
+      {
+        "description": "Find the measures and dimensions available for a question. Returns member ids,\n        types, notes, and the valid filter operators for each. Call this before building\n        any query.",
+        "name": "search_model"
+      },
+      {
+        "description": "Execute a Cube JSON query. Keys: measures, dimensions, timeDimensions, filters,\n        segments, order, limit, offset. Returns rows and the SQL that produced them, or a\n        rejection explaining what to fix.",
+        "name": "run_query"
+      },
+      {
+        "description": "List every cube and view in the semantic model, with its member count. The map of\n        what can be asked about at all, where search_model answers one question.",
+        "name": "describe_model"
+      }
+    ],
+    "url": "http://test/mcp"
+  },
+  "chats: none yet": [],
+  "chats: one created": {
+    "created_at": "<time>",
+    "id": "<id>",
+    "kind": "question",
+    "ref": "",
+    "title": "Revenue",
+    "updated_at": "<time>"
+  },
+  "connection: read back": {
+    "credential_keys": [
+      "CUBEJS_DB_HOST",
+      "CUBEJS_DB_NAME",
+      "CUBEJS_DB_PASS",
+      "CUBEJS_DB_PORT",
+      "CUBEJS_DB_TYPE",
+      "CUBEJS_DB_USER"
+    ],
+    "cubes": [],
+    "deployed": false,
+    "description": "Chinook",
+    "driver": "postgres",
+    "health": {
+      "detail": "",
+      "ok": false,
+      "status": "not deployed",
+      "warnings": []
+    },
+    "label": "chinook",
+    "onboarded": false,
+    "sandbox_reason": "no sandbox is configured for this deployment",
+    "sandbox_url": "",
+    "serving": null,
+    "serving_state": "not deployed",
+    "steps": {},
+    "store_error": "",
+    "store_url": "",
+    "views": []
+  },
+  "connection: stored": {
+    "credential_keys": [
+      "CUBEJS_DB_HOST",
+      "CUBEJS_DB_NAME",
+      "CUBEJS_DB_PASS",
+      "CUBEJS_DB_PORT",
+      "CUBEJS_DB_TYPE",
+      "CUBEJS_DB_USER"
+    ],
+    "cubes": [],
+    "deployed": false,
+    "description": "Chinook",
+    "driver": "postgres",
+    "health": {
+      "detail": "",
+      "ok": false,
+      "status": "not deployed",
+      "warnings": []
+    },
+    "label": "chinook",
+    "onboarded": false,
+    "sandbox_reason": "no sandbox is configured for this deployment",
+    "sandbox_url": "",
+    "serving": null,
+    "serving_state": "not deployed",
+    "steps": {},
+    "store_error": "",
+    "store_url": "",
+    "views": []
+  },
+  "dashboard: no tiles, never refreshed": {
+    "checks": {
+      "available": true,
+      "broken": [],
+      "reason": ""
+    },
+    "created_at": "<time>",
+    "history": [],
+    "id": "<id>",
+    "layout": {
+      "columns": 2,
+      "items": []
+    },
+    "layout_version": null,
+    "max_columns": 3,
+    "results": {},
+    "run": null,
+    "tiles": [],
+    "title": "Sales",
+    "updated_at": "<time>"
+  },
+  "dashboards: created": {
+    "created_at": "<time>",
+    "id": "<id>",
+    "title": "Sales",
+    "updated_at": "<time>"
+  },
+  "dashboards: none yet": [],
+  "model: a change set Cube refuses": {
+    "detail": [
+      {
+        "input": {},
+        "loc": [
+          "body",
+          "write"
+        ],
+        "msg": "Extra inputs are not permitted",
+        "type": "extra_forbidden"
+      }
+    ]
+  },
+  "model: files on a ref": {
+    "deleted": [],
+    "dirty": [],
+    "editable": true,
+    "files": [
+      "cubes/orders.yml",
+      "views/revenue.yml"
+    ],
+    "ref": "feature",
+    "rev": 1
+  },
+  "model: refs": {
+    "main": "main",
+    "refs": [
+      {
+        "changed": 0,
+        "name": "main"
+      },
+      {
+        "changed": 1,
+        "name": "feature"
+      }
+    ]
+  },
+  "model: served": {
+    "counts": {
+      "cubes": 2,
+      "described": 0,
+      "exposed": 4,
+      "members": 7,
+      "views": 1
+    },
+    "entities": [
+      {
+        "ai_context": "",
+        "description": "",
+        "draws_from": [],
+        "exposed_by": [
+          "revenue"
+        ],
+        "file": "cubes/everything.yml",
+        "folders": [],
+        "is_view": false,
+        "members": [
+          {
+            "ai_context": "",
+            "alias": "",
+            "description": "",
+            "exposed_by": [
+              "revenue"
+            ],
+            "granularities": [],
+            "id": "orders.count",
+            "kind": "measure",
+            "name": "count",
+            "operators": [
+              "equals",
+              "notEquals",
+              "gt",
+              "gte",
+              "lt",
+              "lte",
+              "set",
+              "notSet",
+              "measureFilter"
+            ],
+            "title": "",
+            "type": "count"
+          },
+          {
+            "ai_context": "default revenue measure",
+            "alias": "",
+            "description": "",
+            "exposed_by": [
+              "revenue"
+            ],
+            "granularities": [],
+            "id": "orders.net_revenue",
+            "kind": "measure",
+            "name": "net_revenue",
+            "operators": [
+              "equals",
+              "notEquals",
+              "gt",
+              "gte",
+              "lt",
+              "lte",
+              "set",
+              "notSet",
+              "measureFilter"
+            ],
+            "title": "",
+            "type": "sum"
+          },
+          {
+            "ai_context": "",
+            "alias": "",
+            "description": "",
+            "exposed_by": [
+              "revenue"
+            ],
+            "granularities": [],
+            "id": "orders.status",
+            "kind": "dimension",
+            "name": "status",
+            "operators": [
+              "equals",
+              "notEquals",
+              "contains",
+              "notContains",
+              "startsWith",
+              "notStartsWith",
+              "endsWith",
+              "notEndsWith",
+              "set",
+              "notSet"
+            ],
+            "title": "",
+            "type": "string"
+          },
+          {
+            "ai_context": "",
+            "alias": "",
+            "description": "",
+            "exposed_by": [
+              "revenue"
+            ],
+            "granularities": [
+              "month",
+              "day"
+            ],
+            "id": "orders.created_at",
+            "kind": "dimension",
+            "name": "created_at",
+            "operators": [
+              "equals",
+              "notEquals",
+              "inDateRange",
+              "notInDateRange",
+              "beforeDate",
+              "beforeOrOnDate",
+              "afterDate",
+              "afterOrOnDate",
+              "gt",
+              "gte",
+              "lt",
+              "lte",
+              "set",
+              "notSet"
+            ],
+            "title": "",
+            "type": "time"
+          },
+          {
+            "ai_context": "",
+            "alias": "",
+            "description": "",
+            "exposed_by": [],
+            "granularities": [],
+            "id": "orders.paid_only",
+            "kind": "segment",
+            "name": "paid_only",
+            "operators": [],
+            "title": "",
+            "type": ""
+          }
+        ],
+        "name": "orders",
+        "title": ""
+      },
+      {
+        "ai_context": "",
+        "description": "",
+        "draws_from": [],
+        "exposed_by": [],
+        "file": "cubes/everything.yml",
+        "folders": [],
+        "is_view": false,
+        "members": [
+          {
+            "ai_context": "",
+            "alias": "",
+            "description": "",
+            "exposed_by": [],
+            "granularities": [],
+            "id": "customers.count",
+            "kind": "measure",
+            "name": "count",
+            "operators": [
+              "equals",
+              "notEquals",
+              "gt",
+              "gte",
+              "lt",
+              "lte",
+              "set",
+              "notSet",
+              "measureFilter"
+            ],
+            "title": "",
+            "type": "count"
+          },
+          {
+            "ai_context": "",
+            "alias": "",
+            "description": "",
+            "exposed_by": [],
+            "granularities": [],
+            "id": "customers.country",
+            "kind": "dimension",
+            "name": "country",
+            "operators": [
+              "equals",
+              "notEquals",
+              "contains",
+              "notContains",
+              "startsWith",
+              "notStartsWith",
+              "endsWith",
+              "notEndsWith",
+              "set",
+              "notSet"
+            ],
+            "title": "",
+            "type": "string"
+          }
+        ],
+        "name": "customers",
+        "title": ""
+      },
+      {
+        "ai_context": "",
+        "description": "Revenue and order volume.",
+        "draws_from": [
+          "orders"
+        ],
+        "exposed_by": [],
+        "file": "",
+        "folders": [],
+        "is_view": true,
+        "members": [
+          {
+            "ai_context": "",
+            "alias": "orders.count",
+            "description": "",
+            "exposed_by": [],
+            "granularities": [],
+            "id": "revenue.count",
+            "kind": "measure",
+            "name": "count",
+            "operators": [
+              "equals",
+              "notEquals",
+              "gt",
+              "gte",
+              "lt",
+              "lte",
+              "set",
+              "notSet",
+              "measureFilter"
+            ],
+            "title": "",
+            "type": "count"
+          },
+          {
+            "ai_context": "",
+            "alias": "orders.net_revenue",
+            "description": "",
+            "exposed_by": [],
+            "granularities": [],
+            "id": "revenue.net_revenue",
+            "kind": "measure",
+            "name": "net_revenue",
+            "operators": [
+              "equals",
+              "notEquals",
+              "gt",
+              "gte",
+              "lt",
+              "lte",
+              "set",
+              "notSet",
+              "measureFilter"
+            ],
+            "title": "",
+            "type": "sum"
+          },
+          {
+            "ai_context": "",
+            "alias": "orders.status",
+            "description": "",
+            "exposed_by": [],
+            "granularities": [],
+            "id": "revenue.status",
+            "kind": "dimension",
+            "name": "status",
+            "operators": [
+              "equals",
+              "notEquals",
+              "contains",
+              "notContains",
+              "startsWith",
+              "notStartsWith",
+              "endsWith",
+              "notEndsWith",
+              "set",
+              "notSet"
+            ],
+            "title": "",
+            "type": "string"
+          },
+          {
+            "ai_context": "",
+            "alias": "orders.created_at",
+            "description": "",
+            "exposed_by": [],
+            "granularities": [
+              "month"
+            ],
+            "id": "revenue.created_at",
+            "kind": "dimension",
+            "name": "created_at",
+            "operators": [
+              "equals",
+              "notEquals",
+              "inDateRange",
+              "notInDateRange",
+              "beforeDate",
+              "beforeOrOnDate",
+              "afterDate",
+              "afterOrOnDate",
+              "gt",
+              "gte",
+              "lt",
+              "lte",
+              "set",
+              "notSet"
+            ],
+            "title": "",
+            "type": "time"
+          }
+        ],
+        "name": "revenue",
+        "title": ""
+      }
+    ],
+    "error": "",
+    "serving": true,
+    "unloaded": []
+  },
+  "pipeline: a schema was read": {
+    "notes": [],
+    "read": true,
+    "schemas": [
+      {
+        "schema": "public",
+        "tables": [
+          {
+            "columns": 1,
+            "fact": false,
+            "name": "invoice",
+            "primary_key": [
+              "id"
+            ],
+            "references": []
+          },
+          {
+            "columns": 1,
+            "fact": true,
+            "name": "invoice_line",
+            "primary_key": [],
+            "references": [
+              "invoice"
+            ]
+          }
+        ]
+      }
+    ],
+    "selection": {},
+    "truncated": false
+  },
+  "pipeline: closing over one table": {
+    "added": [
+      "invoice"
+    ],
+    "cut_joins": [],
+    "keyless": [
+      "invoice_line"
+    ],
+    "tables": [
+      "invoice",
+      "invoice_line"
+    ]
+  },
+  "pipeline: no job running": {
+    "current": "",
+    "done": false,
+    "error": "",
+    "events": [],
+    "id": null,
+    "started_at": 0.0,
+    "steps": []
+  },
+  "pipeline: nothing read yet": {
+    "notes": [],
+    "read": false,
+    "schemas": [],
+    "selection": {},
+    "truncated": false
+  },
+  "result: one page": {
+    "columns": [
+      {
+        "align": "left",
+        "format": "",
+        "id": "orders.status",
+        "kind": "dimension",
+        "label": "Status",
+        "type": "string"
+      }
+    ],
+    "id": "<id>",
+    "offset": 0,
+    "row_count": 1,
+    "rows": [
+      {
+        "orders.status": "paid"
+      }
+    ]
+  }
+}
