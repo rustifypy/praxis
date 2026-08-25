@@ -9,10 +9,10 @@ later — so these exist to keep it from quietly becoming true again.
 import pytest
 import yaml
 
-from analyst_agent import transcript as _transcript
 from analyst_agent.agent.tools import editor as tools
 from analyst_agent.agent.tools import trace
 from analyst_agent.core import db
+from analyst_agent.core import transcript as _transcript
 from analyst_agent.core.deployment import MAIN
 
 ALBUM = {

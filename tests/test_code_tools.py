@@ -11,11 +11,11 @@ import csv
 
 import pytest
 
-from analyst_agent import transcript as _transcript
 from analyst_agent.agent.session import QueryRecord, Session
 from analyst_agent.agent.tools import code as tools
 from analyst_agent.agent.tools import trace
 from analyst_agent.core import db
+from analyst_agent.core import transcript as _transcript
 from analyst_agent.core.events import Event, emit
 from analyst_agent.sandbox import Run
 

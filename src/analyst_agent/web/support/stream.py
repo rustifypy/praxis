@@ -18,7 +18,7 @@ from fastapi import Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ..core.events import Event
+from ...core.events import Event
 
 
 def sse(events: AsyncIterator[Any]) -> StreamingResponse:

@@ -3,7 +3,7 @@ from dataclasses import asdict
 
 from langchain.tools import tool
 
-from ... import transcript
+from ...core import transcript
 from ...modelstore import gate
 from ...modelstore.shape import Column, columns_of, describe_query
 from ...modelstore.visualize import MAX_POINTS, chart_for, validate_spec

@@ -15,8 +15,8 @@ from . import db
 ROW = 1
 MAIN = "main"
 
+# The sandbox's contract. The model store is a separate product and reports none.
 CONTRACT = 1
-CUBE_PREFIX = "/cube"
 
 
 @dataclass
@@ -24,7 +24,6 @@ class Deployment:
     store_url: str = ""
     store_token: str = ""
     api_secret: str = ""
-    store_read_token: str = ""
     sandbox_url: str = ""
     sandbox_token: str = ""
     driver: str = "postgres"
@@ -35,9 +34,9 @@ class Deployment:
     def deployed(self) -> bool:
         return bool(self.store_url)
 
-    @property
-    def onboarded(self) -> bool:
-        return bool(self.store_url and self.sandbox_url)
+    # There is no `onboarded` here. Setup now finishes with a built model, which is a fact about
+    # the model store rather than about this row — `evidence.onboarded` asks both questions, and
+    # a column could not hold the answer anyway: `CREATE TABLE IF NOT EXISTS` does not diff.
 
 
 async def current() -> Deployment | None:
@@ -73,7 +72,6 @@ async def patch(
     *,
     store_url: str | None = None,
     store_token: str | None = None,
-    store_read_token: str | None = None,
     api_secret: str | None = None,
     sandbox_url: str | None = None,
     sandbox_token: str | None = None,
@@ -86,7 +84,6 @@ async def patch(
         for column, value in (
             ("store_url", store_url),
             ("store_token", store_token),
-            ("store_read_token", store_read_token),
             ("api_secret", api_secret),
             ("sandbox_url", sandbox_url),
             ("sandbox_token", sandbox_token),
@@ -99,10 +96,6 @@ async def patch(
         await _write(changed)
 
 
-async def reset_progress() -> None:
-    await _write({"steps": {}, "state": {}})
-
-
 async def steps() -> dict:
     return await _blob("steps")
 
@@ -110,15 +103,6 @@ async def steps() -> dict:
 async def save_step(step: str, payload: dict) -> None:
     current = await steps()
     current[step] = payload
-    await _write({"steps": current})
-
-
-async def drop_steps(names: list[str]) -> None:
-    if not names:
-        return
-    current = await steps()
-    for name in names:
-        current.pop(name, None)
     await _write({"steps": current})
 
 

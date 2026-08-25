@@ -22,8 +22,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
-from .. import transcript
 from ..agent.turn import stream_edit_turn
+from ..core import transcript
 from ..core.deployment import MAIN
 from ..modelstore import StoreError, definitions, drafts, model_files, served_catalog
 from ..modelstore.client import open_store

@@ -16,9 +16,9 @@ from pathlib import Path
 import sqlalchemy as sa
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from .core import db
-from .core.config import settings
-from .core.events import Event
+from . import db
+from .config import settings
+from .events import Event
 
 # TODO: this file does not survive the refactor. Not to the chat controller though — `agent/turn.py`
 # and the query and code tools all append here, and `agent` sits below `web`. It goes to `core/`,

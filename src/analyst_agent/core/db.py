@@ -168,7 +168,6 @@ deployment = Table(
     Column("id", Integer, primary_key=True),
     Column("store_url", String, nullable=False, default=""),
     Column("store_token", String, nullable=False, default=""),
-    Column("store_read_token", String, nullable=False, default=""),
     Column("api_secret", String, nullable=False, default=""),
     Column("sandbox_url", String, nullable=False, default=""),
     Column("sandbox_token", String, nullable=False, default=""),

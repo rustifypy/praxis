@@ -9,7 +9,7 @@ one layer that cannot see the request.
 import csv
 import io
 
-from ... import transcript
+from ...core import transcript
 from ...modelstore.shape import Column, export_value
 from .dto import ResultPage
 

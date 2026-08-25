@@ -5,7 +5,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessageChunk
 
-from .. import transcript
+from ..core import transcript
 from ..core.config import settings
 from ..core.deployment import MAIN
 from ..core.events import Event

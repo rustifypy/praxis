@@ -9,12 +9,15 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from ..core import access
 from ..core.config import settings
-from ..transcript import checkpointer
-from . import chats, connection, dashboards, files, mcp, model, pipeline, results, state
+from ..core.transcript import checkpointer
+from ..sandbox import SandboxError
+from . import agentaccess, chat, connection, dashboards, model, pipeline, result, workspace
+from .support import state
 
 STATIC = Path(__file__).parent / "static"
 COOKIE = "analyst_token"
@@ -40,7 +43,7 @@ async def lifespan(app: FastAPI):
         app.state.mcp_max_rows = settings.max_rows
         # Read once and written through by the routes, so the guard tests memory rather than
         # opening the database on every tool call. After `init_state`, which creates the table.
-        app.state.mcp = await mcp.load()
+        app.state.mcp = await access.load()
         # The session manager is started by the mounted app's own lifespan, which a mount does
         # not run — Starlette only runs the outermost. So it is entered here, inside ours, and
         # the tools read `app.state` for a catalog that is already open.
@@ -51,9 +54,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="analyst-agent web", lifespan=lifespan)
 
 # The products.
-app.include_router(chats.router)
-app.include_router(files.router)
-app.include_router(results.router)
+app.include_router(chat.router)
+app.include_router(workspace.router)
+app.include_router(result.router)
 app.include_router(dashboards.router)
 # What they run on: the connection, the deployment serving it, the pipeline that builds the
 # model, and the model itself.
@@ -61,12 +64,28 @@ app.include_router(connection.router)
 app.include_router(pipeline.router)
 app.include_router(model.router)
 # What something else gets to call.
-app.include_router(mcp.router)
+app.include_router(agentaccess.router)
 
-mcp_server = mcp.build(app)
+mcp_server = agentaccess.build(app)
 app.state.mcp_server = mcp_server
 mcp_app = mcp_server.streamable_http_app(streamable_http_path="/")
 app.mount("/mcp", mcp_app)
+
+
+@app.exception_handler(SandboxError)
+async def sandbox_failed(request: Request, exc: SandboxError) -> Response:
+    """A sandbox failure as a status, in one place instead of in every route that touches one.
+
+    The service's own status when it gave one; 503 when it did not, which covers both "no sandbox
+    is configured" and "it did not answer" — a working deployment that cannot run Python either
+    way, never a broken portal.
+
+    Here rather than in the workspace controller because it is the same three lines for four routes,
+    and because a controller that raises `HTTPException` is one that cannot be called from anything
+    but a request. The chat routes do *not* rely on this: they suppress `SandboxError` deliberately,
+    so deleting a chat still succeeds when the sandbox is down.
+    """
+    return JSONResponse({"detail": str(exc)}, status_code=exc.status or 503)
 
 
 @app.middleware("http")
@@ -74,12 +93,14 @@ async def guard(request: Request, call_next):
     if request.url.path == "/api/healthz":
         return await call_next(request)
     if request.url.path.startswith("/mcp"):
-        access = request.app.state.mcp
-        if not access.enabled:
+        # Not `access`, which is now the module this reads its type from — a local of that name
+        # would shadow it, and the next person to call `access.load()` in here would get a row.
+        granted = request.app.state.mcp
+        if not granted.enabled:
             return Response("Not Found", status_code=404)
         header = request.headers.get("authorization", "")
         offered = header.removeprefix("Bearer ").strip() if header.startswith("Bearer ") else ""
-        if not offered or not secrets.compare_digest(offered, access.token):
+        if not offered or not secrets.compare_digest(offered, granted.token):
             return Response("Unauthorized.", status_code=401)
         if request.url.path == "/mcp":
             request.scope["path"] = "/mcp/"

@@ -5,7 +5,7 @@ import time
 
 from langchain.tools import tool
 
-from ... import transcript
+from ...core import transcript
 from ...core.events import Event, emit
 from ...modelstore.shape import Column, export_value
 from ...sandbox import SandboxError, open_sandbox

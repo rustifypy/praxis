@@ -1,8 +1,8 @@
 import pytest
 
-from analyst_agent import transcript as _transcript
 from analyst_agent.agent.session import replay
 from analyst_agent.core import db
+from analyst_agent.core import transcript as _transcript
 from analyst_agent.core.events import Event
 
 

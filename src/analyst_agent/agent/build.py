@@ -28,8 +28,6 @@ async def build_agent(
             *build_code_tools(session),
         ],
         system_prompt=build_system_prompt(
-            always_rules=session.grounding.always_rules,
-            skill_catalog=session.grounding.catalog_lines(),
             dashboards=True,
             sandbox=True,
             files="\n\n".join(shape.as_prompt() for shape in await profile.saved(session.chat_id))
