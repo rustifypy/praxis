@@ -376,6 +376,21 @@ def _result(row) -> TileResult:
     return TileResult(**{k: v for k, v in row.items() if k != "data"}, rows=row["data"])
 
 
+async def saved_queries() -> list[dict]:
+    """Every stored query, with enough context to name the thing that would break.
+
+    `{kind, where, title, query}` and not a type of its own, because the only consumer is
+    `modelstore.editing.impact`, which must not import from here — a model edit asking "what
+    would this break" is handed the answer rather than looking it up. The shape it wants is
+    declared there; this fills it.
+    """
+    return [
+        {"kind": "tile", "where": board.title, "title": tile.title, "query": tile.query}
+        for board in await list_dashboards()
+        for tile in await tiles(board.id)
+    ]
+
+
 # --- layout ------------------------------------------------------------------
 #
 # Geometry over the rows above rather than a module of its own: it reads nothing but

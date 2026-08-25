@@ -757,7 +757,7 @@ async def test_a_rejected_change_set_is_a_200_carrying_its_reasons(
     from analyst_agent.modelstore.editing import workspace
     from analyst_agent.web import model as routes
 
-    async def verify(store, ref):
+    async def verify(store, ref, *, saved):
         return workspace.Verdict(
             ok=False,
             kind="rejected",

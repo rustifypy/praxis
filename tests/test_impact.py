@@ -19,7 +19,7 @@ async def boards(tmp_path):
 
 
 async def test_nothing_breaks_when_every_member_survives(catalog, boards):
-    report = await impact.check(catalog)
+    report = impact.check(catalog, await boards.saved_queries())
     assert report.ok
     assert report.checked == 1
 
@@ -28,7 +28,7 @@ async def test_a_tile_naming_a_dropped_member_is_reported(catalog, boards):
     """`revenue` is a view in the fixture catalog, so dropping its alias is exactly the rename
     an edit ref is allowed to make — and exactly what a tile cannot survive."""
     trimmed = type(catalog)([e for e in catalog.entities if e.name != "revenue"])
-    report = await impact.check(trimmed)
+    report = impact.check(trimmed, await boards.saved_queries())
     assert not report.ok
     broken = report.broken[0]
     assert broken.kind == "tile"
@@ -38,7 +38,7 @@ async def test_a_tile_naming_a_dropped_member_is_reported(catalog, boards):
 
 async def test_the_report_suggests_what_is_nearest(catalog, boards):
     trimmed = type(catalog)([e for e in catalog.entities if e.name != "revenue"])
-    report = await impact.check(trimmed)
+    report = impact.check(trimmed, await boards.saved_queries())
     assert "orders.net_revenue" in report.broken[0].nearest["revenue.net_revenue"]
     assert "no longer serves" in report.as_message()
 
@@ -47,7 +47,7 @@ async def test_a_deleted_tile_is_not_checked(catalog, boards):
     board = next(b for b in await boards.list_dashboards() if b.title == "Sales")
     tile = (await boards.tiles(board.id))[0]
     await boards.set_tile_deleted(tile.id)
-    report = await impact.check(type(catalog)([]))
+    report = impact.check(type(catalog)([]), await boards.saved_queries())
     assert report.ok and report.checked == 0
 
 

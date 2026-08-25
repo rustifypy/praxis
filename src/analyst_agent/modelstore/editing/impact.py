@@ -2,7 +2,6 @@ from dataclasses import dataclass, field
 
 from pydantic import ValidationError
 
-from ...core import boards  # noqa: F401 — cut in the next commit; see test_layering.FORBIDDEN
 from ..catalog import Catalog
 from ..schema import CubeQuery
 
@@ -54,15 +53,23 @@ def missing_members(query: dict, catalog: Catalog) -> tuple[list[str], dict[str,
         return [], {}
 
 
-async def check(catalog: Catalog) -> Impact:
-    # Every saved query against the model being served, and deliberately not a diff of main's
-    # members against the ref's: "is what this tile reads still here" catches breakage
-    # whatever caused it — a renamed view, a changed alias, an include quietly dropped.
-    impact = Impact()
-    for board in await boards.list_dashboards():
-        for tile in await boards.tiles(board.id):
-            impact.checked += 1
-            absent, nearest = missing_members(tile.query, catalog)
-            if absent:
-                impact.broken.append(Broken("tile", board.title, tile.title, absent, nearest))
+def check(catalog: Catalog, saved: list[dict]) -> Impact:
+    """Which of `saved` reads a member this catalog no longer serves.
+
+    The queries are passed in rather than read, and that is the whole arrangement: they live in
+    `core.boards`, and a model store that reached for them would make dashboards a dependency of
+    the semantic layer. `test_layering.FORBIDDEN` is what keeps it that way. Each entry is
+    `{kind, where, title, query}` — see `core.boards.saved_queries`.
+
+    Deliberately not a diff of main's members against the ref's: "is what this tile reads still
+    here" catches breakage whatever caused it — a renamed view, a changed alias, an include
+    quietly dropped.
+    """
+    impact = Impact(checked=len(saved))
+    for entry in saved:
+        absent, nearest = missing_members(entry["query"], catalog)
+        if absent:
+            impact.broken.append(
+                Broken(entry["kind"], entry["where"], entry["title"], absent, nearest)
+            )
     return impact

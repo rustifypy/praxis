@@ -61,7 +61,7 @@ def compiling(monkeypatch, catalog):
     async def served(ref=MAIN, **kwargs):
         return catalog
 
-    async def broken(*args, **kwargs):
+    def broken(*args, **kwargs):
         return impact.Impact(checked=0)
 
     monkeypatch.setattr(workspace, "compiles", check)
@@ -156,7 +156,7 @@ async def test_the_guard_applies_to_deletes_too(store):
 
 async def test_main_is_not_verifiable_either(store):
     """Verify is Save, and there is no Save on main. Refused before any ref is created."""
-    verdict = await workspace.verify(store, MAIN, {"cubes/album.yml": ADDED})
+    verdict = await workspace.verify(store, MAIN, {"cubes/album.yml": ADDED}, saved=[])
     assert (verdict.ok, verdict.kind) == (False, "ref")
     assert store.made == []
 
@@ -244,7 +244,7 @@ async def test_a_store_that_does_not_answer_is_a_refusal_and_not_an_exception(st
 
 
 async def test_verify_compiles_on_a_throwaway_ref_and_leaves_the_branch_alone(store, compiling):
-    verdict = await workspace.verify(store, "edit", {"cubes/album.yml": ADDED})
+    verdict = await workspace.verify(store, "edit", {"cubes/album.yml": ADDED}, saved=[])
     assert (verdict.ok, verdict.compiled) == (True, True)
     # Created from the ref being edited, so what compiles is that ref plus the change set.
     assert store.made == [(workspace.PREVIEW, "edit")]
@@ -257,7 +257,10 @@ async def test_verify_compiles_on_a_throwaway_ref_and_leaves_the_branch_alone(st
 async def test_a_gate_refusal_never_reaches_cube(store, compiling):
     """Tiers 1-2 first, so a rejected change set costs no ref and no ten-second compile."""
     verdict = await workspace.verify(
-        store, "edit", {"cubes/album.yml": ALBUM.replace("public.album", "public.album_v2")}
+        store,
+        "edit",
+        {"cubes/album.yml": ALBUM.replace("public.album", "public.album_v2")},
+        saved=[],
     )
     assert (verdict.ok, verdict.kind) == (False, "rejected")
     assert store.made == []
@@ -266,7 +269,7 @@ async def test_a_gate_refusal_never_reaches_cube(store, compiling):
 async def test_an_empty_change_set_asks_about_the_ref_as_committed(store, compiling):
     """This is the Validate action: no edits, so the throwaway ref is a copy of the ref and the
     answer is about the ref itself."""
-    verdict = await workspace.verify(store, "edit")
+    verdict = await workspace.verify(store, "edit", saved=[])
     assert verdict.compiled
     assert store.made == [(workspace.PREVIEW, "edit")]
 
@@ -276,7 +279,7 @@ async def test_a_model_cube_refuses_is_not_ok_and_says_why(store, monkeypatch, c
         return publish.Validation(compiled=False, compile_error="Compile errors: no such member")
 
     monkeypatch.setattr(workspace, "compiles", refused)
-    verdict = await workspace.verify(store, "edit", {"cubes/album.yml": ADDED})
+    verdict = await workspace.verify(store, "edit", {"cubes/album.yml": ADDED}, saved=[])
     assert not verdict.ok
     assert "no such member" in verdict.compile_error
     # Cleaned up even on a refusal: the next Save creates it again from scratch.
@@ -287,7 +290,7 @@ async def test_a_stale_preview_ref_is_cleared_on_the_way_in(store, compiling):
     """A crashed verify leaves one behind. Compiling whatever it happens to contain would report
     someone else's change set as this one's verdict."""
     store.refs[workspace.PREVIEW] = {"cubes/album.yml": "cubes: [broken"}
-    verdict = await workspace.verify(store, "edit", {"cubes/album.yml": ADDED})
+    verdict = await workspace.verify(store, "edit", {"cubes/album.yml": ADDED}, saved=[])
     assert verdict.ok
     assert store.dropped == [workspace.PREVIEW, workspace.PREVIEW]
 
@@ -302,7 +305,7 @@ async def test_member_errors_do_not_fail_a_save(store, monkeypatch, compiling):
         )
 
     monkeypatch.setattr(workspace, "compiles", with_errors)
-    verdict = await workspace.verify(store, "edit", {"cubes/album.yml": ADDED})
+    verdict = await workspace.verify(store, "edit", {"cubes/album.yml": ADDED}, saved=[])
     assert verdict.ok
     assert verdict.member_errors == {"album.titles": "ambiguous column"}
 

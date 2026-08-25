@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 from langchain.tools import tool
 
+from ...core import boards
 from ...core.events import Event, emit
 from ...modelstore import StoreError, drafts
 from ...modelstore.client import ModelStore
@@ -203,7 +204,8 @@ def build_editor_tools(ctx: EditContext) -> list:
         """
         start("validate_model", "Compiling the proposed model")
         write, delete = ctx.change_set()
-        verdict = await workspace.verify(ctx.store, ctx.ref, write, delete)
+        saved = await boards.saved_queries()
+        verdict = await workspace.verify(ctx.store, ctx.ref, write, delete, saved=saved)
         if verdict.kind and verdict.kind != "rejected":
             end("validate_model", False, errors=[verdict.reason[:200]])
             return verdict.reason

@@ -23,7 +23,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
 from ..agent.turn import stream_edit_turn
-from ..core import transcript
+from ..core import boards, transcript
 from ..core.deployment import MAIN
 from ..modelstore import StoreError, definitions, drafts, model_files, served_catalog
 from ..modelstore.client import open_store
@@ -91,7 +91,7 @@ async def _store():
 
 async def _impact(ref: str) -> impact.Impact:
     try:
-        return await impact.check(await served_catalog(ref=ref))
+        return impact.check(await served_catalog(ref=ref), await boards.saved_queries())
     except StoreError as exc:
         raise HTTPException(409, f"cannot read the model to check impact: {exc}") from None
 
@@ -403,7 +403,7 @@ async def check_changes(body: Draft) -> dict:
     posts.
     """
     async with _store() as store:
-        verdict = await workspace.verify(store, body.ref)
+        verdict = await workspace.verify(store, body.ref, saved=await boards.saved_queries())
     if verdict.kind and verdict.kind != "rejected":
         raise HTTPException(STATUS[verdict.kind], verdict.reason)
     return {

@@ -254,6 +254,8 @@ async def verify(
     ref: str,
     write: dict[str, str] | None = None,
     delete: list[str] | None = None,
+    *,
+    saved: list[dict],
 ) -> Verdict:
     """Tiers 1-3 plus impact on the draft, publishing nothing.
 
@@ -266,6 +268,10 @@ async def verify(
     A clean draft with no overlay still goes through the throwaway ref, which compiles a copy of
     `ref` and so answers about `ref` itself. One path rather than two, because the branch that
     matters is the one with edits in it and a second path would be the one nobody exercises.
+
+    `saved` is the stored queries this change is checked against, and it is keyword-only and
+    has no default on purpose: the queries live in `core.boards`, which this package may not
+    read, and a default of `()` would report "nothing breaks" for a change that breaks a board.
 
     It is one function on purpose. Deleting a stale ref, creating one, writing to it, asking Cube,
     checking saved queries and deleting it again is a single thing that happens once in one order,
@@ -303,7 +309,7 @@ async def verify(
             validation = await compiles(ref=PREVIEW)
             broken = None
             if validation.compiled:
-                broken = await impact.check(await served_catalog(ref=PREVIEW))
+                broken = impact.check(await served_catalog(ref=PREVIEW), saved)
             return Verdict(
                 ok=validation.compiled,
                 warnings=staged.warnings,
