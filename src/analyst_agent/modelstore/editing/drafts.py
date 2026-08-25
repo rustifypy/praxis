@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..core.config import settings
+from ...core.config import settings
 
 MARKER = "origin.json"
 

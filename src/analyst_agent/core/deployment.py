@@ -34,6 +34,12 @@ class Deployment:
     def deployed(self) -> bool:
         return bool(self.store_url)
 
+    @property
+    def label(self) -> str:
+        # The database's own name where the driver reports one, so two Postgres deployments do
+        # not both read as "postgres".
+        return self.credentials.get("CUBEJS_DB_NAME") or self.driver
+
     # There is no `onboarded` here. Setup now finishes with a built model, which is a fact about
     # the model store rather than about this row — `evidence.onboarded` asks both questions, and
     # a column could not hold the answer anyway: `CREATE TABLE IF NOT EXISTS` does not diff.

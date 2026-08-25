@@ -16,9 +16,9 @@ from langchain.tools import tool
 
 from ...core import boards
 from ...core.events import Event, emit
-from ...modelstore import StoreError, drafts
+from ...modelstore import StoreError
 from ...modelstore.client import ModelStore
-from ...modelstore.editing import workspace
+from ...modelstore.editing import drafts, workspace
 from .trace import end, start
 
 EVENT_KEYS = frozenset({"tool", "label", "ok", "note", "errors"})

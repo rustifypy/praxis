@@ -5,8 +5,8 @@ from langchain.tools import tool
 
 from ...core import transcript
 from ...modelstore import gate
+from ...modelstore.charts import MAX_POINTS, chart_for, validate_spec
 from ...modelstore.shape import Column, columns_of, describe_query
-from ...modelstore.visualize import MAX_POINTS, chart_for, validate_spec
 from ..retrieval import LexicalRetriever, render
 from ..session import QueryRecord, Session
 from .trace import end, start

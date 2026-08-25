@@ -7,6 +7,7 @@ Two nouns, one module, because connecting is two steps and the second one is the
 
 import secrets
 import time
+from dataclasses import dataclass
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
@@ -14,7 +15,9 @@ from pydantic import BaseModel, Field
 from ..core import deployenv
 from ..core import deployment as connection
 from ..core.deployment import Deployment
-from ..modelstore import StoreError, definitions, evidence, model_files, serving
+from ..modelstore import StoreError, definitions, model_files
+from ..modelstore.client import ADMIN_TIMEOUT_S, served_catalog
+from ..modelstore.modelgen import evidence
 from . import reachable
 from .support import state
 
@@ -27,6 +30,73 @@ HEALTH_TTL_S = 15.0
 ENV_PREFIXES = ("CUBEJS_DB_", "CUBEJS_AWS_")
 
 RENDERERS = {"semantic": deployenv.semantic, "sandbox": deployenv.sandbox}
+
+
+# --- what Cube is serving ------------------------------------------------------
+#
+# Here rather than in `modelstore/`: `STATES` is what the browser's copy is keyed on, so these
+# are the words a chip reads and this route is the only thing that asks for them.
+
+
+@dataclass
+class Serving:
+    cubes: int
+    views: list[str]
+    described: int
+
+
+STATES = ("not deployed", "unreachable", "broken", "empty", "ok")
+
+
+def serving_state(deployed: bool, ok: bool, served: "Serving | None") -> str:
+    # `deployed` and not `running`: the portal starts nothing, so it can never observe a stop.
+    if not deployed:
+        return "not deployed"
+    if not ok:
+        return "unreachable"
+    if served is None:
+        return "broken"
+    return "ok" if served.cubes else "empty"
+
+
+async def read_serving(timeout: float = ADMIN_TIMEOUT_S) -> Serving | None:
+    # Counted over cubes only: a view's members are the same members re-exported, so counting
+    # every entity counts the model twice.
+    try:
+        catalog = await served_catalog(timeout=timeout)
+        return Serving(
+            cubes=sum(1 for entity in catalog.entities if not entity.is_view),
+            views=[entity.name for entity in catalog.views],
+            described=sum(1 for entity in catalog.entities if entity.description),
+        )
+    except StoreError:
+        return None
+
+
+def public(
+    deployment: Deployment,
+    steps: dict,
+    health: dict,
+    found: evidence.Evidence,
+) -> dict:
+    # Every field except the secrets.
+    return {
+        "label": deployment.label,
+        "description": deployment.description,
+        "driver": deployment.driver,
+        "store_url": deployment.store_url,
+        # Not part of `deployed`: a deployment without a sandbox answers questions perfectly
+        # well and just cannot run Python.
+        "sandbox_url": deployment.sandbox_url,
+        "deployed": deployment.deployed,
+        "onboarded": evidence.onboarded(deployment, found),
+        # Names only, never values, so the edit form can show which fields are set.
+        "credential_keys": sorted(deployment.credentials),
+        "steps": steps,
+        "health": health,
+        "cubes": list(found.cubes),
+        "views": list(found.views),
+    }
 
 
 class NewConnection(BaseModel):
@@ -66,15 +136,15 @@ async def probe(app, deployment: Deployment) -> dict:
         probed = {
             "health": reachable.Reached(False, "not deployed").as_dict(),
             "serving": None,
-            "serving_state": serving.state(False, False, None),
+            "serving_state": serving_state(False, False, None),
         }
     else:
         result = await reachable.querying(deployment)
-        served = await serving.read() if result.ok else None
+        served = await read_serving() if result.ok else None
         probed = {
             "health": result.as_dict(),
             "serving": served and served.__dict__,
-            "serving_state": serving.state(True, result.ok, served),
+            "serving_state": serving_state(True, result.ok, served),
         }
     probed["sandbox_reason"] = "" if found.ok else found.detail
     app.state.health = (now, probed)
@@ -92,7 +162,7 @@ async def view(request: Request, deployment: Deployment, steps: dict) -> dict:
     found_files, _ = definitions.read(files)
     found = evidence.of(found_files, await connection.state())
     return {
-        **evidence.public(deployment, steps=steps, health=probed["health"], found=found),
+        **public(deployment, steps=steps, health=probed["health"], found=found),
         "store_error": store_error,
         "serving": probed["serving"],
         "serving_state": probed["serving_state"],

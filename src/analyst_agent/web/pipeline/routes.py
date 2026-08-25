@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from ...core import jobs as job_runner
-from ...modelstore.evidence import STAGES
+from ...modelstore.modelgen.evidence import STAGES
 from ..support.stream import sse
 from . import controller
 from .dto import Cancelled, Closure, JobSnapshot, StageRequest, TableCatalog

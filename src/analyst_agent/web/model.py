@@ -25,9 +25,9 @@ from pydantic import BaseModel, ConfigDict
 from ..agent.turn import stream_edit_turn
 from ..core import boards, transcript
 from ..core.deployment import MAIN
-from ..modelstore import StoreError, definitions, drafts, model_files, served_catalog
+from ..modelstore import StoreError, definitions, model_files, served_catalog
 from ..modelstore.client import open_store
-from ..modelstore.editing import impact, workspace
+from ..modelstore.editing import drafts, impact, workspace
 from ..modelstore.modelgen import publish
 from .support import state
 from .support.stream import turn_stream

@@ -1,9 +1,8 @@
 from dataclasses import dataclass
 from typing import Literal, get_args
 
-from ..core.deployment import Deployment
-from .definitions import Definition
-from .registry import label_of
+from ...core.deployment import Deployment
+from ..definitions import Definition
 
 # In order. Connecting is not a step: a step records that something once succeeded, while being
 # reachable is a condition checked now.
@@ -94,29 +93,3 @@ def onboarded(deployment: Deployment, found: Evidence) -> bool:
     someone in setup over work they chose to skip.
     """
     return bool(deployment.store_url and deployment.sandbox_url) and found.done("cubes")
-
-
-def public(
-    deployment: Deployment,
-    steps: dict,
-    health: dict,
-    found: Evidence,
-) -> dict:
-    # Every field except the secrets.
-    return {
-        "label": label_of(deployment),
-        "description": deployment.description,
-        "driver": deployment.driver,
-        "store_url": deployment.store_url,
-        # Not part of `deployed`: a deployment without a sandbox answers questions perfectly
-        # well and just cannot run Python.
-        "sandbox_url": deployment.sandbox_url,
-        "deployed": deployment.deployed,
-        "onboarded": onboarded(deployment, found),
-        # Names only, never values, so the edit form can show which fields are set.
-        "credential_keys": sorted(deployment.credentials),
-        "steps": steps,
-        "health": health,
-        "cubes": list(found.cubes),
-        "views": list(found.views),
-    }

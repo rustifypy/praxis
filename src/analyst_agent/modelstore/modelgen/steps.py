@@ -3,10 +3,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from ...core import deployment
-from .. import definitions, evidence
+from .. import definitions
 from ..client import model_files
-from ..evidence import STAGES, STEPS
-from . import build, decide, publish, read, selection
+from . import build, decide, evidence, publish, read, selection
+from .evidence import STAGES, STEPS
 from .warehouse import Schema, dump_schema, load_schema
 
 # Synchronous progress sink. Returns `object` because the web's sink returns the Event it

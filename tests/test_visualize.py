@@ -1,5 +1,5 @@
+from analyst_agent.modelstore.charts import MAX_BARS, MAX_SERIES, chart_for, validate_spec
 from analyst_agent.modelstore.shape import columns_of
-from analyst_agent.modelstore.visualize import MAX_BARS, MAX_SERIES, chart_for, validate_spec
 
 MONTH = {"dimension": "orders.created_at", "granularity": "month"}
 

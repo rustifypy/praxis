@@ -13,8 +13,7 @@ that a refusal short-circuits before any of it.
 import pytest
 
 from analyst_agent.core.deployment import MAIN
-from analyst_agent.modelstore import drafts
-from analyst_agent.modelstore.editing import impact, workspace
+from analyst_agent.modelstore.editing import drafts, impact, workspace
 from analyst_agent.modelstore.modelgen import publish
 
 ALBUM = """cubes:

@@ -8,10 +8,10 @@ it reports a working model as unstarted.
 import json
 
 from analyst_agent.core.deployment import Deployment
-from analyst_agent.modelstore import evidence
 from analyst_agent.modelstore.definitions import Definition
-from analyst_agent.modelstore.evidence import STEPS, onboarded, public
-from analyst_agent.modelstore.registry import label_of
+from analyst_agent.modelstore.modelgen import evidence
+from analyst_agent.modelstore.modelgen.evidence import STEPS, onboarded
+from analyst_agent.web.connection import public
 
 CREDENTIALS = {"CUBEJS_DB_NAME": "chinook", "CUBEJS_DB_PASS": "secret"}
 SHOP = Deployment(
@@ -147,7 +147,7 @@ def test_the_label_is_the_database_the_credentials_open():
     the browser's and nothing here has a prettier name to reach for."""
     body = public(SHOP, steps={}, health={}, found=evidence.of({}, {}))
     assert body["label"] == "chinook"
-    assert label_of(Deployment(driver="postgres")) == "postgres"
+    assert Deployment(driver="postgres").label == "postgres"
 
 
 def test_the_body_no_longer_carries_a_stage_rail():
