@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type { SourceRow } from "../sources";
+import { Button } from "./Button";
 import { Collapse } from "./Collapse";
 
 /** Values that cannot work from inside a container: the deployment would be dialling itself.
@@ -573,13 +574,13 @@ export function ConnectionForm({
               the box is sometimes a hint, sometimes a complaint and sometimes nothing, so
               anything positioned against it lands somewhere different per field. */}
           {field.kind === "secret" && value && (
-            <button
+            <Button
               className="conn-reveal"
               type="button"
               onClick={() => setShown((prev) => ({ ...prev, [field.env]: !prev[field.env] }))}
             >
               {shown[field.env] ? "Hide" : "Show"}
-            </button>
+            </Button>
           )}
         </span>
 
@@ -697,12 +698,12 @@ export function ConnectionForm({
       {host && (
         <div className="nudge">
           A database on this machine is host.docker.internal from inside the container.
-          <button
+          <Button
             type="button"
             onClick={() => setValues((prev) => ({ ...prev, [host.env]: "host.docker.internal" }))}
           >
             Use host.docker.internal
-          </button>
+          </Button>
         </div>
       )}
 
@@ -711,12 +712,12 @@ export function ConnectionForm({
           {named
             ? `The key you pasted belongs to ${mismatch}, not ${named}.`
             : `The key you pasted belongs to ${mismatch}.`}
-          <button
+          <Button
             type="button"
             onClick={() => setValues((prev) => ({ ...prev, [filled.env]: mismatch }))}
           >
             Use {mismatch}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -779,24 +780,24 @@ export function ConnectionForm({
                     )
                   }
                 />
-                <button
+                <Button
                   className="env-drop"
                   type="button"
                   title="Remove"
                   onClick={() => setExtras((prev) => prev.filter((_, at) => at !== i))}
                 >
                   ×
-                </button>
+                </Button>
               </div>
             ))}
 
-            <button
+            <Button
               className="env-add"
               type="button"
               onClick={() => setExtras((prev) => [...prev, { env: "", value: "" }])}
             >
               + Add a setting
-            </button>
+            </Button>
           </div>
         </Collapse>
       </div>
@@ -819,13 +820,13 @@ export function ConnectionForm({
 
       <footer>
         {onCancel && (
-          <button type="button" onClick={onCancel}>
+          <Button type="button" onClick={onCancel}>
             Cancel
-          </button>
+          </Button>
         )}
-        <button className="primary" type="button" disabled={saving} onClick={() => void submit()}>
+        <Button variant="primary" type="button" disabled={saving} onClick={() => void submit()}>
           {saving ? "Saving…" : editing ? "Save" : "Store the connection"}
-        </button>
+        </Button>
       </footer>
     </div>
   );
@@ -845,9 +846,9 @@ export function AddSource(
       <aside className="drawer wide" onClick={(e) => e.stopPropagation()}>
         <header>
           <h2>{props.editing ? "Edit the connection" : "Connect a database"}</h2>
-          <button className="icon" onClick={props.onCancel} title="Close">
+          <Button icon onClick={props.onCancel} title="Close">
             ×
-          </button>
+          </Button>
         </header>
         <ConnectionForm {...props} />
       </aside>

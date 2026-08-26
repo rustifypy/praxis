@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import * as api from "../sources";
 import type { Service, SourceRow } from "../sources";
+import { Button } from "./Button";
 
 /**
  * The hand-over: the compose file each deployment is run with, and the box its address comes
@@ -66,13 +67,13 @@ export function Deploy({
     <section className="detail-panel">
       <div className="panel-head">
         <h3>Deployment</h3>
-        <button
-          className="link"
+        <Button
+          variant="link"
           onClick={() => setOpen(!open)}
           aria-expanded={open}
         >
           {open ? "Hide" : source.deployed ? "Show the files" : "Show"}
-        </button>
+        </Button>
       </div>
 
       {!source.deployed && (
@@ -136,8 +137,8 @@ export function Deploy({
                 spellCheck={false}
               />
             </label>
-            <button
-              className="primary"
+            <Button
+              variant="primary"
               disabled={saving || !changed || !storeUrl.trim()}
               onClick={() => void save()}
             >
@@ -146,7 +147,7 @@ export function Deploy({
                 : source.deployed
                   ? "Update the addresses"
                   : "Connect to it"}
-            </button>
+            </Button>
           </div>
 
           {error && <p className="banner bad">{error}</p>}

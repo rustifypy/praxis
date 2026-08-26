@@ -2,6 +2,7 @@ import { useMemo } from "react";
 
 import { formatCell } from "../format";
 import type { ChartSpec, TileChart, TileResultRow, TileRow } from "../types";
+import { Empty } from "./Empty";
 import { ResultChart } from "./ResultChart";
 
 /**
@@ -127,14 +128,14 @@ export function Tile({
             <span />
             <span />
           </div>
-          <p className="dash-tile-empty">Not refreshed yet — press Refresh to load it.</p>
+          <Empty tight>Not refreshed yet — press Refresh to load it.</Empty>
         </div>
       ) : result.pruned ? (
-        <p className="dash-tile-empty">
+        <Empty tight>
           {result.row_count.toLocaleString()} rows, since pruned. Refresh to load them again.
-        </p>
+        </Empty>
       ) : !rows.length ? (
-        <p className="dash-tile-empty">No data matched.</p>
+        <Empty tight>No data matched.</Empty>
       ) : chart.type === "kpi" ? (
         <div className="dash-kpi-row">
           {(chart.y ?? []).map((id) => {

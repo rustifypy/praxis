@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import * as api from "../api";
+import { Button } from "./Button";
 
 /**
  * The click that lets a script run, inside the step that is about to run it.
@@ -50,7 +51,7 @@ export function Approval({ chatId }: { chatId: string }) {
       <span className="ask-label">Run this script?</span>
       <div className="ask-choices">
         {CHOICES.map((choice) => (
-          <button
+          <Button
             key={choice.decision}
             className={`ask-choice ask-${choice.decision}`}
             title={choice.hint}
@@ -58,7 +59,7 @@ export function Approval({ chatId }: { chatId: string }) {
             onClick={() => void decide(choice.decision)}
           >
             {choice.label}
-          </button>
+          </Button>
         ))}
       </div>
       {failed && <div className="ask-failed">{failed}</div>}

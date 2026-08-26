@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import * as api from "../api";
 import { compareCells, formatCell } from "../format";
 import type { ChartSpec, ResultColumn } from "../types";
+import { Button } from "./Button";
 import { ResultChart } from "./ResultChart";
 
 /**
@@ -80,9 +81,9 @@ export function ResultBlock({
           {held > 0 && ` of ${rowCount.toLocaleString()}`} row{rowCount === 1 ? "" : "s"}
         </span>
         {held > 0 && resultId && (
-          <button className="res-more" onClick={showAll} disabled={loading}>
+          <Button className="res-more" onClick={showAll} disabled={loading}>
             {loading ? "Loading…" : `Show all ${rowCount.toLocaleString()}`}
-          </button>
+          </Button>
         )}
         {resultId && (
           <a className="res-csv" href={api.resultCsvUrl(resultId)} download>
@@ -115,12 +116,12 @@ export function ResultBlock({
                       sort?.id === c.id ? (sort.dir === "asc" ? "ascending" : "descending") : "none"
                     }
                   >
-                    <button className="res-sort" onClick={() => toggle(c.id)} title={c.id}>
+                    <Button className="res-sort" onClick={() => toggle(c.id)} title={c.id}>
                       {c.label}
                       <span className="res-arrow">
                         {sort?.id === c.id ? (sort.dir === "asc" ? "↑" : "↓") : ""}
                       </span>
-                    </button>
+                    </Button>
                   </th>
                 ))}
               </tr>

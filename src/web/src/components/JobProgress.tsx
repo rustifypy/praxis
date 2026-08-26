@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { duration, useElapsed } from "../hooks";
 import type { JobEvent, JobState } from "../sources";
 import { ACTION_LABEL } from "../sources";
+import { Button } from "./Button";
 
 /** Per-step state read off the event stream, so nothing has to be tracked separately. */
 function statusOf(job: JobState, step: string): "waiting" | "running" | "done" | "failed" {
@@ -82,9 +83,9 @@ export function JobProgress({ job, onCancel }: { job: JobState; onCancel: () => 
         </span>
         <Elapsed since={job.started_at ? job.started_at * 1000 : undefined} running={!job.done} />
         {!job.done && (
-          <button className="danger" onClick={onCancel}>
+          <Button variant="danger" onClick={onCancel}>
             Cancel
-          </button>
+          </Button>
         )}
       </div>
 

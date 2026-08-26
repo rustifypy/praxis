@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import * as api from "../sources";
 import type { JobState, StageName, TableCache } from "../sources";
+import { Button } from "./Button";
 import { JobProgress } from "./JobProgress";
 import { TablePicker } from "./TablePicker";
 
@@ -163,9 +164,9 @@ export function BuildModel({
             {running ? "Reading the database…" : "The database has not been read yet."}
           </p>
           {!running && (
-            <button className="primary" onClick={() => void run("read")}>
+            <Button variant="primary" onClick={() => void run("read")}>
               Read the database
-            </button>
+            </Button>
           )}
         </div>
       ) : (

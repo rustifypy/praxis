@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 
 import * as api from "../sources";
 import type { TableCache, Closure, SchemaInfo } from "../sources";
+import { Button } from "./Button";
+import { Empty } from "./Empty";
 
 /**
  * Choose a schema and the tables to model.
@@ -116,24 +118,24 @@ export function TablePicker({
         />
 
         <span className="picker-bulk">
-          <button onClick={() => setPicked(new Set(tables.map((t) => t.name)))} disabled={busy}>
+          <Button onClick={() => setPicked(new Set(tables.map((t) => t.name)))} disabled={busy}>
             All
-          </button>
-          <button onClick={() => setPicked(new Set())} disabled={busy}>
+          </Button>
+          <Button onClick={() => setPicked(new Set())} disabled={busy}>
             None
-          </button>
-          <button
+          </Button>
+          <Button
             title="Tables nothing points at — where additive facts live"
             onClick={() => setPicked(new Set(tables.filter((t) => t.fact).map((t) => t.name)))}
             disabled={busy}
           >
             Facts
-          </button>
+          </Button>
         </span>
 
-        <button className="link" disabled={busy} onClick={onReread} title="Pick up a migration">
+        <Button variant="link" disabled={busy} onClick={onReread} title="Pick up a migration">
           Re-read
-        </button>
+        </Button>
       </div>
 
       <div className="picker-list">
@@ -169,7 +171,7 @@ export function TablePicker({
             </label>
           );
         })}
-        {shown.length === 0 && <p className="empty">Nothing matches “{filter}”.</p>}
+        {shown.length === 0 && <Empty tight>Nothing matches “{filter}”.</Empty>}
       </div>
 
       <div className="picker-foot">
@@ -197,8 +199,8 @@ export function TablePicker({
 
         {extra}
 
-        <button
-          className="primary"
+        <Button
+          variant="primary"
           disabled={busy || modelled === 0}
           onClick={() => {
             // A rebuild replaces every model file in one commit. Recoverable from the store's
@@ -208,7 +210,7 @@ export function TablePicker({
           }}
         >
           {label.replace("{n}", String(modelled))}
-        </button>
+        </Button>
       </div>
     </div>
   );

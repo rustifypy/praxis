@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ago, dayGroup } from "../hooks";
 import type { Chat } from "../types";
+import { Button } from "./Button";
+import { Empty } from "./Empty";
 
 /**
  * Renaming and deleting happen in place.
@@ -79,19 +81,23 @@ function Row({
 
       {confirming ? (
         <span className="chat-actions open">
-          <button
-            className="danger"
+          <Button
+            variant="danger"
+            size="sm"
             onClick={(e) => {
               e.stopPropagation();
               onDelete();
             }}
           >
             Delete
-          </button>
+          </Button>
         </span>
       ) : (
         <span className="chat-actions">
-          <button
+          <Button
+            variant="subtle"
+            size="sm"
+            icon
             title="Rename"
             onClick={(e) => {
               e.stopPropagation();
@@ -99,8 +105,8 @@ function Row({
             }}
           >
             ✎
-          </button>
-          <button
+          </Button>
+          <Button
             title="Delete"
             onClick={(e) => {
               e.stopPropagation();
@@ -108,7 +114,7 @@ function Row({
             }}
           >
             ×
-          </button>
+          </Button>
         </span>
       )}
     </div>
@@ -159,9 +165,9 @@ export function ChatNav({
     <aside className="nav">
       <header className="nav-head">
         <h2>Chats</h2>
-        <button className="nav-add" onClick={onCreate} title="New chat  ⌘K" aria-label="New chat">
+        <Button className="nav-add" onClick={onCreate} title="New chat  ⌘K" aria-label="New chat">
           +
-        </button>
+        </Button>
       </header>
 
       {chats.length > 4 && (
@@ -190,9 +196,9 @@ export function ChatNav({
           </div>
         ))}
 
-        {chats.length === 0 && <p className="empty">No chats yet.</p>}
+        {chats.length === 0 && <Empty tight>No chats yet.</Empty>}
         {chats.length > 0 && groups.length === 0 && (
-          <p className="empty">Nothing matches “{filter}”.</p>
+          <Empty tight>Nothing matches “{filter}”.</Empty>
         )}
       </div>
     </aside>
