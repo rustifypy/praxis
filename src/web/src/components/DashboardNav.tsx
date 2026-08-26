@@ -1,5 +1,7 @@
 import { ago } from "../hooks";
 import type { DashboardRow } from "../types";
+import { Button } from "./Button";
+import { Empty } from "./Empty";
 
 /** The dashboard list column. */
 export function DashboardNav({
@@ -17,15 +19,13 @@ export function DashboardNav({
     <nav className="nav">
       <div className="nav-head">
         <h2>Dashboards</h2>
-        <button className="nav-add" onClick={onCreate} title="New dashboard" aria-label="New dashboard">
+        <Button className="nav-add" onClick={onCreate} title="New dashboard" aria-label="New dashboard">
           +
-        </button>
+        </Button>
       </div>
 
       {dashboards.length === 0 ? (
-        <p className="empty">
-          None yet. Create one, then ask in chat to add tiles to it.
-        </p>
+        <Empty tight>None yet. Create one, then ask in chat to add tiles to it.</Empty>
       ) : (
         <ul className="nav-list">
           {dashboards.map((board) => (

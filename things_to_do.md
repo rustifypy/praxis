@@ -1,5 +1,5 @@
 1. We need to make it data warehouse friendly 
-2. Make frontend UI nice- mayank 
+~~2. Make frontend UI nice- mayank ~~
 ~~3. add option to manually add cube, initiate pause and restart ~~
 4. make dashboard nicer and option to add pdf 
 ~~5. Make chat per datasource only~~

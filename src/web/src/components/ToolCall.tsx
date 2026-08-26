@@ -4,6 +4,7 @@ import * as api from "../api";
 import { duration, useElapsed } from "../hooks";
 import type { ToolEnd } from "../types";
 import { Approval } from "./Approval";
+import { Button } from "./Button";
 import { Collapse } from "./Collapse";
 import { Copy } from "./Copy";
 
@@ -220,9 +221,9 @@ function Script({
         {all || hidden <= 0 ? text : lines.slice(0, PEEK_LINES).join("\n")}
       </pre>
       {hidden > 0 && (
-        <button className="script-more" onClick={() => setAll(!all)}>
+        <Button className="script-more" onClick={() => setAll(!all)}>
           {all ? "Show less" : `Show all ${lines.length} lines`}
-        </button>
+        </Button>
       )}
     </div>
   );

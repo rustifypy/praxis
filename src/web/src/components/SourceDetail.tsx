@@ -4,6 +4,7 @@ import { ago } from "../hooks";
 import * as api from "../sources";
 import type { JobState, SourceRow } from "../sources";
 import { healthOf, servingNote } from "../sources";
+import { Button } from "./Button";
 import { warehouseName } from "./AddSource";
 import { BuildModel } from "./BuildModel";
 import { Confirm } from "./Confirm";
@@ -66,6 +67,11 @@ export function SourceDetail({
 
   return (
     <div className="detail">
+      {/* Everything about the *connection* scrolls; the model below fills what is left. The
+          editor is an IDE and an IDE cannot be a section of a scrolling page — a pane that grows
+          with its content has no height to give CodeMirror, which is what pinned the old editor
+          to 560px. */}
+      <div className="detail-scroll">
       <header className="detail-head">
         <span className={`health-dot ${health.tone}`} title={source.health.status} />
         <h1>{source.label}</h1>
@@ -76,9 +82,9 @@ export function SourceDetail({
         </span>
 
         <span className="detail-primary">
-          <button className="primary" disabled={checking} onClick={() => void test()}>
+          <Button variant="primary" disabled={checking} onClick={() => void test()}>
             {checking ? "Testing…" : "Test connection"}
-          </button>
+          </Button>
 
           {/* No link to Cube. Its port is not published — every call goes through the store,
               which is what makes that the one authenticated door — so a link would be a browser
@@ -111,9 +117,9 @@ export function SourceDetail({
         <p className="banner bad">
           Cube is answering but the database is not reachable from it: {health.label}. The
           credentials are in the deployment's own compose file, so fixing them means{" "}
-          <button className="link" onClick={onEdit}>
+          <Button variant="link" onClick={onEdit}>
             editing the connection
-          </button>{" "}
+          </Button>{" "}
           here and re-running that file — a container's environment cannot be changed in place.
         </p>
       )}
@@ -137,30 +143,21 @@ export function SourceDetail({
               which is why edits belong on a branch.
             </Info>
             {!busy && (
-              <button className="link" onClick={() => setRebuilding(false)}>
+              <Button variant="link" onClick={() => setRebuilding(false)}>
                 Cancel
-              </button>
+              </Button>
             )}
           </div>
           <BuildModel job={job} rebuilding onJob={onJob} />
         </section>
       )}
 
-      <section className="detail-panel">
-        <div className="panel-head">
-          <h3>Model</h3>
-          <Info label="About the model">
-            Everything the agent brings to a question, and where you change it. The file tree is
-            what the model store holds for the branch you are on; the Served model tab is read
-            live from Cube's <code>/v1/meta</code> and parsed by the same code the agent queries
-            through, so it is what a question can actually reach rather than what the YAML says.
-            Main is generated and read-only — edits go on a branch, and Cube serves every branch
-            at once, so a commit is live on that branch immediately and main is untouched until
-            you merge.
-          </Info>
-        </div>
-        <ModelEditor deployed={source.deployed} onChanged={onRefresh} />
-      </section>
+      </div>
+
+      {/* No heading and no rule above it. The editor carries its own bar, and a "Model" title
+          over a full-height IDE reads as a section of something larger — which is exactly what
+          this stopped being. What the heading used to explain is now the bar's own Info. */}
+      <ModelEditor deployed={source.deployed} onChanged={onRefresh} />
 
       {confirmRebuild && (
         <Confirm

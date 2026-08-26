@@ -1,10 +1,16 @@
+import { Layout, Tab, Tabs } from "@cube-dev/ui-kit";
 import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 
 import * as api from "../sources";
 import type { CheckResult, ModelFiles, RefDiff, Refs, ServedModel } from "../sources";
+import { Button } from "./Button";
+import { BranchPicker } from "./BranchPicker";
+import { Changes } from "./Changes";
 import { EditorChat } from "./EditorChat";
 import { FileTree } from "./FileTree";
-import { Breakage, MergeDialog } from "./MergeDialog";
+import { Info } from "./Info";
+import { MergeDialog } from "./MergeDialog";
+import { Problems } from "./Problems";
 import { ServedModel as ModelList } from "./ServedModel";
 
 /**
@@ -71,6 +77,10 @@ export function ModelEditor({
   const [listing, setListing] = useState<ModelFiles | null>(null);
   const [buffer, setBuffer] = useState<Record<string, Buffered>>({});
   const [openPath, setOpenPath] = useState("");
+  // Which files have a tab, left to right. `buffer` already holds every file that has been
+  // touched — including ones closed and reopened — so it cannot double as this: a tab strip is
+  // an ordering someone arranged, and dropping a tab must not drop what was typed into it.
+  const [order, setOrder] = useState<string[]>([]);
   // The committed text a proposal is being diffed against, which is what puts the editor in
   // review mode. Null is plain editing.
   const [reviewing, setReviewing] = useState<string | null>(null);
@@ -85,6 +95,9 @@ export function ModelEditor({
   const [newName, setNewName] = useState("");
   const [merging, setMerging] = useState(false);
   const [diff, setDiff] = useState<RefDiff | null>(null);
+  // Held here rather than left to the panel, so the bar can offer the toggle — a pane you can
+  // only close by dragging it to nothing is one nobody closes.
+  const [chatOpen, setChatOpen] = useState(true);
 
   const main = refs?.main ?? "main";
   const editable = on !== main;
@@ -97,6 +110,10 @@ export function ModelEditor({
       .map(([path]) => path),
   );
   const dirty = new Set([...(listing?.dirty ?? []), ...(listing?.deleted ?? [])]);
+  // How far along the publish path this branch is. Derived and never stored: every input is
+  // already state, and a fourth copy of "what can I do next" is a fourth thing to keep in step.
+  const stage =
+    unsaved.size > 0 ? "save" : dirty.size === 0 ? "none" : check?.ok ? "publish" : "validate";
 
   /** Every action reports the same way, so the panel has one place errors can appear. */
   const guard = async (label: string, work: () => Promise<void>) => {
@@ -146,12 +163,46 @@ export function ModelEditor({
     return body.text;
   };
 
+  /** Give a path a tab if it has not got one, and make it the active one. */
+  const focus = (path: string) => {
+    setOrder((prev) => (prev.includes(path) ? prev : [...prev, path]));
+    setOpenPath(path);
+  };
+
   const open = (path: string) =>
     void guard("open", async () => {
       await load(path);
-      setOpenPath(path);
+      focus(path);
       setReviewing(null);
     });
+
+  /**
+   * Drop a tab, and with it everything the browser was holding for that file.
+   *
+   * The draft on the server is untouched — closing a tab is not discarding a change — so what is
+   * actually at risk is only what has been typed since the last Save, which is exactly what the
+   * question asks about. Reopening re-reads the draft.
+   *
+   * The neighbour on the right inherits focus, falling back to the left at the end of the strip:
+   * closing the last of several tabs should not empty the editor.
+   */
+  const close = (path: string) => {
+    if (buffer[path] && typed(buffer[path])) {
+      const what = buffer[path].text === null ? "the pending deletion of" : "unsaved edits to";
+      if (!window.confirm(`Discard ${what} ${path}?`)) return;
+    }
+    const at = order.indexOf(path);
+    const rest = order.filter((p) => p !== path);
+    setOrder(rest);
+    setBuffer((prev) => {
+      const next = { ...prev };
+      delete next[path];
+      return next;
+    });
+    if (openPath !== path) return;
+    setOpenPath(order[at + 1] ?? order[at - 1] ?? "");
+    setReviewing(null);
+  };
 
   /**
    * Take a proposal from the chat into the buffer, and show it as a diff.
@@ -167,7 +218,7 @@ export function ModelEditor({
         ...prev,
         [path]: { saved: prev[path]?.saved ?? base, text },
       }));
-      setOpenPath(path);
+      focus(path);
       // A proposed deletion has no diff to show — accepting it is the click on the card, and the
       // pane says what will happen instead.
       setReviewing(text === null ? null : base);
@@ -193,7 +244,12 @@ export function ModelEditor({
         else delete next[path];
         return next;
       });
-      if (!body && openPath === path) setOpenPath("");
+      // A file the draft only ever added is gone once the draft's change to it is undone, so its
+      // tab goes too — there is nothing left for it to show.
+      if (!body) {
+        setOrder((prev) => prev.filter((p) => p !== path));
+        if (openPath === path) setOpenPath("");
+      }
       setCheck(null);
     });
 
@@ -205,7 +261,7 @@ export function ModelEditor({
     }
     // `saved: ""` means the file is not in the draft yet, so it reads as unsaved at once.
     setBuffer((prev) => ({ ...prev, [path]: { saved: "", text: NEW_VIEW } }));
-    setOpenPath(path);
+    focus(path);
     setReviewing(null);
     setTab("files");
   };
@@ -230,8 +286,16 @@ export function ModelEditor({
       // A save invalidates the last verdict: it was about a draft that has since moved.
       setCheck(null);
       setListing(await api.modelFiles(on));
-      if (openPath && buffer[openPath]?.text === null) setOpenPath("");
-      setNote({ tone: "ok", lines: [`Saved ${unsaved.size} file${unsaved.size === 1 ? "" : "s"}.`] });
+      // A saved deletion leaves nothing to show, so those tabs close with it.
+      const gone = [...unsaved].filter((path) => buffer[path].text === null);
+      if (gone.length) {
+        setOrder((prev) => prev.filter((path) => !gone.includes(path)));
+        if (gone.includes(openPath)) setOpenPath("");
+      }
+      setNote({
+        tone: "ok",
+        lines: [`Saved ${unsaved.size} file${unsaved.size === 1 ? "" : "s"}.`],
+      });
     });
 
   /** Validate: would Cube accept the draft as it stands? Nothing is published. */
@@ -239,17 +303,9 @@ export function ModelEditor({
     void guard("validate", async () => {
       const result = await api.checkChanges(on);
       setCheck(result);
-      if (!result.ok) {
-        setNote({
-          tone: "bad",
-          lines: [
-            "The model would not compile.",
-            ...result.errors,
-            ...(result.compile_error ? [result.compile_error] : []),
-          ],
-        });
-        return;
-      }
+      // The failure is not restated here: `Problems` renders the same `check` under the editor,
+      // and a list of compile errors in two places is two places to keep in step.
+      if (!result.ok) return;
       setNote({ tone: "ok", lines: ["Cube compiled it. Ready to publish.", ...result.warnings] });
     });
 
@@ -277,6 +333,7 @@ export function ModelEditor({
     if (unsaved.size && !window.confirm(`Discard ${unsaved.size} unsaved edit(s)?`)) return;
     setOn(ref);
     setBuffer({});
+    setOrder([]);
     setOpenPath("");
     setReviewing(null);
     setReviewed(new Set());
@@ -292,24 +349,16 @@ export function ModelEditor({
           right. It is the top of the model section rather than of the page, because the header
           above it is the *connection* and these two are different questions. */}
       <div className="editor-bar">
-        <span className="editor-branch" aria-hidden>
-          ⎇
-        </span>
-        <select
-          value={on}
-          disabled={Boolean(busy)}
-          onChange={(e) => switchTo(e.target.value)}
-          title="Which branch of the model you are looking at"
-        >
-          {refs?.refs.map((r) => (
-            <option key={r.name} value={r.name}>
-              {r.name}
-              {r.changed ? ` (${r.changed} changed)` : ""}
-            </option>
-          ))}
-        </select>
+        <BranchPicker
+          refs={refs}
+          on={on}
+          main={main}
+          busy={Boolean(busy)}
+          onSwitch={switchTo}
+          onCreate={() => setNaming(true)}
+        />
 
-        {naming ? (
+        {naming && (
           <form
             className="editor-name"
             onSubmit={(e) => {
@@ -329,40 +378,81 @@ export function ModelEditor({
               placeholder="add-margin"
               onChange={(e) => setNewName(e.target.value)}
             />
-            <button type="submit" className="primary" disabled={!newName.trim()}>
+            <Button type="submit" variant="primary" disabled={!newName.trim()}>
               Create
-            </button>
-            <button type="button" onClick={() => setNaming(false)}>
+            </Button>
+            <Button type="button" variant="subtle" onClick={() => setNaming(false)}>
               Cancel
-            </button>
+            </Button>
           </form>
-        ) : (
-          <button onClick={() => setNaming(true)} disabled={Boolean(busy)}>
-            New branch
-          </button>
         )}
+
+        {/* Moved off the page's "Model" heading, which went with it: the bar is what this screen
+            has instead of a section title. Beside the branch rather than after the spacer — on
+            main every action to its right is hidden, which left it stranded against the far edge
+            of the window with nothing to belong to. */}
+        <Info label="About the model">
+          Everything the agent brings to a question, and where you change it. The file tree is what
+          the model store holds for the branch you are on; the Served model tab is read live from
+          Cube's <code>/v1/meta</code> and parsed by the same code the agent queries through, so it
+          is what a question can actually reach rather than what the YAML says. Main is generated
+          and read-only — edits go on a branch, and Cube serves every branch at once, so a commit is
+          live on that branch immediately and main is untouched until you merge.
+        </Info>
+
+        {/* Out of the slot above the editor, which now belongs to the open files. It is not a
+            document but a choice of what this whole screen is showing, and the bar's rule is
+            already that what you are *looking at* lives on the left with the branch and what you
+            can *do* lives on the right. */}
+        <div className="segmented" role="group" aria-label="What to show">
+          <button className={tab === "files" ? "on" : ""} onClick={() => setTab("files")}>
+            Files
+          </button>
+          <button className={tab === "model" ? "on" : ""} onClick={() => setTab("model")}>
+            Served model
+          </button>
+        </div>
 
         <span className="editor-spacer" />
 
-        {/* One slot, three states in the order they happen: write it down, ask Cube, land it.
-            Three buttons side by side would leave two of them permanently dead. */}
-        {editable && unsaved.size > 0 && (
-          <button className="primary" disabled={Boolean(busy)} onClick={save}>
-            {busy === "save" ? "Saving…" : `Save ${unsaved.size} file${unsaved.size === 1 ? "" : "s"}`}
-          </button>
-        )}
-        {editable && unsaved.size === 0 && dirty.size > 0 && !check?.ok && (
-          <button className="primary" disabled={Boolean(busy)} onClick={validate}>
-            {busy === "validate" ? "Compiling…" : `Validate ${dirty.size}`}
-          </button>
-        )}
-        {editable && unsaved.size === 0 && dirty.size > 0 && check?.ok && (
-          <button className="primary" disabled={Boolean(busy)} onClick={publish}>
-            {busy === "publish" ? "Publishing…" : `Publish ${dirty.size}`}
-          </button>
+        {/* Three steps in the order they happen — write it down, ask Cube, land it — with the one
+            you are up to live and the others ahead of it dimmed.
+
+            This was one slot that changed its label, on the argument that three buttons would
+            leave two permanently dead. The cost was that the path was invisible: Validate did not
+            exist until you had saved, so there was no way to learn the shape of the thing from
+            looking at it. Dimmed *steps* read as "not yet" where dead *buttons* read as broken —
+            and the whole group is hidden when there is nothing to publish, which is what the
+            original objection was actually about. */}
+        {editable && stage !== "none" && (
+          <div className="segmented pipeline" role="group" aria-label="Publishing a change">
+            <button
+              className={stage === "save" ? "on" : undefined}
+              disabled={stage !== "save" || Boolean(busy)}
+              onClick={save}
+            >
+              {busy === "save" ? "Saving…" : `Save${unsaved.size ? ` ${unsaved.size}` : ""}`}
+            </button>
+            <span aria-hidden>›</span>
+            <button
+              className={stage === "validate" ? "on" : undefined}
+              disabled={stage !== "validate" || Boolean(busy)}
+              onClick={validate}
+            >
+              {busy === "validate" ? "Compiling…" : "Validate"}
+            </button>
+            <span aria-hidden>›</span>
+            <button
+              className={stage === "publish" ? "on" : undefined}
+              disabled={stage !== "publish" || Boolean(busy)}
+              onClick={publish}
+            >
+              {busy === "publish" ? "Publishing…" : `Publish${dirty.size ? ` ${dirty.size}` : ""}`}
+            </button>
+          </div>
         )}
         {editable && (
-          <button
+          <Button
             disabled={Boolean(busy)}
             onClick={() =>
               void guard("merge", async () => {
@@ -373,19 +463,24 @@ export function ModelEditor({
             }
           >
             Merge…
-          </button>
+          </Button>
+        )}
+
+        {/* Only where there is a pane to toggle: on main the chat is not rendered at all. */}
+        {editable && tab === "files" && (
+          <Button
+            onClick={() => setChatOpen((open) => !open)}
+            aria-pressed={chatOpen}
+            title="Show or hide the assistant"
+          >
+            {chatOpen ? "Hide assistant" : "Assistant"}
+          </Button>
         )}
       </div>
 
-      {/* What a refresh costs, said once and where the buttons are. Only what is typed is at
-          risk now: the draft is on the server and survives a reload. */}
-      {editable && unsaved.size > 0 && (
-        <p className="editor-warn">
-          {unsaved.size} file{unsaved.size === 1 ? " has" : "s have"} edits that are not saved to
-          the branch's draft yet — a reload discards them.
-        </p>
-      )}
-
+      {/* What went wrong is under the editor now, in `Problems` — a compile failure used to push
+          CodeMirror down by a third of the screen at the exact moment you needed to read it. What
+          is left here is the short confirmation: what a click just did. */}
       {note && (
         <div className={`editor-note ${note.tone}`}>
           {note.lines.map((line, i) => (
@@ -394,43 +489,94 @@ export function ModelEditor({
         </div>
       )}
 
-      {/* Member errors and broken queries are reported and never refuse a Save: a model that
-          compiles with a measure that fails at query time still beats one that will not compile,
-          and a tile this would break is the merge's business. */}
-      {check?.ok && Object.keys(check.member_errors).length > 0 && (
-        <div className="editor-note bad">
-          <p>Compiled, but these fail at query time:</p>
-          {Object.entries(check.member_errors).map(([member, message]) => (
-            <p key={member}>
-              <code>{member}</code> {message}
-            </p>
-          ))}
-        </div>
-      )}
-      {check?.ok && check.impact && <Breakage impact={check.impact} />}
-
-      <div className="editor-tabs">
-        <button className={tab === "files" ? "on" : ""} onClick={() => setTab("files")}>
-          Files
-        </button>
-        <button className={tab === "model" ? "on" : ""} onClick={() => setTab("model")}>
-          Served model
-        </button>
-      </div>
-
       {tab === "files" ? (
-        <div className="editor-panes">
-          <FileTree
-            files={files.concat(Object.keys(buffer).filter((path) => !files.includes(path)))}
-            open={openPath}
-            unsaved={unsaved}
-            dirty={dirty}
-            onOpen={open}
-            onNew={create}
-            editable={editable}
-          />
+        /* `Layout` positions each side panel absolutely and insets the content by its size, which
+           is what lets a pane be dragged without the middle one being re-measured by hand. The
+           sizes persist per pane: an editor that forgets how wide you made the tree is one you
+           re-drag every visit. `contentPadding="0"` because both panes bring their own. */
+        <Layout doNotOverflow hasTransition className="editor-panes">
+          <Layout.Panel
+            side="left"
+            isResizable
+            defaultSize={220}
+            minSize={170}
+            maxSize={420}
+            contentPadding="0"
+            sizeStorageKey="analyst.editor.tree"
+          >
+            {/* Changes above the tree, because on a branch it is the shorter list and the one
+                being worked on — the tree is where you go to find something, this is where you
+                go to see what you have done to it. */}
+            <div className="pane-left">
+              <Changes
+                unsaved={unsaved}
+                dirty={dirty}
+                open={openPath}
+                busy={Boolean(busy)}
+                onOpen={open}
+                onRevert={revert}
+                onDiscard={discard}
+              />
+              <FileTree
+                files={files.concat(Object.keys(buffer).filter((path) => !files.includes(path)))}
+                open={openPath}
+                unsaved={unsaved}
+                dirty={dirty}
+                onOpen={open}
+                onNew={create}
+                editable={editable}
+              />
+            </div>
+          </Layout.Panel>
 
           <div className="editor-file">
+            {/* The strip, and only the strip: every tab's panel is empty and the file renders
+                below it, because there is one CodeMirror and it is reconfigured per file rather
+                than one per tab. A view per open file would multiply the most expensive thing on
+                the screen by however many tabs someone left open.
+
+                The mark is the tree's, deliberately — a file is marked in one vocabulary
+                wherever it appears, so a filled dot means "typed, not saved to the draft" in both
+                places rather than two similar things in two. */}
+            {order.length > 0 && (
+              /* Wrapped rather than given the class directly: a tasty component does not put
+                 `className` on its DOM node, so the rule silently never applied and the strip
+                 was living on the kit's defaults. */
+              <div className="editor-filetabs">
+                <Tabs
+                  type="file"
+                  size="small"
+                  label="Open files"
+                  activeKey={openPath}
+                  onChange={(key) => open(String(key))}
+                  onDelete={(key) => close(String(key))}
+                  isReorderable
+                  keyOrder={order}
+                  onReorder={setOrder}
+                  showTabPicker="auto"
+                >
+                  {order.map((path) => (
+                    <Tab
+                      key={path}
+                      id={path}
+                      tooltip={path}
+                      title={
+                        <span className="filetab">
+                          <span
+                            className={`tree-mark ${
+                              unsaved.has(path) ? "dirty" : dirty.has(path) ? "staged" : ""
+                            }`}
+                            aria-hidden
+                          />
+                          {path.slice(path.indexOf("/") + 1)}
+                        </span>
+                      }
+                    />
+                  ))}
+                </Tabs>
+              </div>
+            )}
+
             {!openPath || !current ? (
               <p className="muted editor-blank">
                 {editable
@@ -446,25 +592,14 @@ export function ModelEditor({
                       reviewing a proposal — accept or reject each change
                     </span>
                   )}
-                  {unsaved.has(openPath) && reviewing === null && (
-                    <span className="editor-dirty">unsaved</span>
-                  )}
-                  {!unsaved.has(openPath) && dirty.has(openPath) && (
-                    <span className="editor-dirty ok">in the draft</span>
-                  )}
+                  {/* No state word and no undo here any more. The dot on this file's tab already
+                      says which state it is in, and Changes owns both undos — saying "unsaved" a
+                      third time next to a Revert that is also in the list was the redundancy this
+                      row contributed. Delete stays: it is not an undo but an edit, and it applies
+                      to the file that is open. */}
                   <span className="editor-spacer" />
-                  {typed(current) && (
-                    <button onClick={() => revert(openPath)} disabled={Boolean(busy)}>
-                      Revert
-                    </button>
-                  )}
-                  {!unsaved.has(openPath) && dirty.has(openPath) && (
-                    <button onClick={() => discard(openPath)} disabled={Boolean(busy)}>
-                      Discard
-                    </button>
-                  )}
                   {editable && current.text !== null && (
-                    <button
+                    <Button
                       onClick={() =>
                         setBuffer((prev) => ({
                           ...prev,
@@ -474,7 +609,7 @@ export function ModelEditor({
                       disabled={Boolean(busy)}
                     >
                       Delete
-                    </button>
+                    </Button>
                   )}
                 </div>
 
@@ -483,9 +618,7 @@ export function ModelEditor({
                     <code>{openPath}</code> will be deleted when you save. Revert to keep it.
                   </p>
                 ) : (
-                  <Suspense
-                    fallback={<p className="muted editor-blank">Loading the editor…</p>}
-                  >
+                  <Suspense fallback={<p className="muted editor-blank">Loading the editor…</p>}>
                     <CodeEditor
                       path={openPath}
                       value={current.text}
@@ -498,27 +631,48 @@ export function ModelEditor({
                 )}
               </>
             )}
+
+            {/* Under the editor and inside its column, so a verdict about the whole draft is
+                read where the draft is — and so finding out what is wrong no longer shortens the
+                thing you need to read to fix it. */}
+            {check && <Problems check={check} />}
           </div>
 
-          {/* Only on a branch: on main there is nothing it could propose that could be saved. */}
+          {/* Only on a branch: on main there is nothing it could propose that could be saved.
+              Collapsible now rather than a fixed column, because reviewing a wide diff and
+              talking to the agent are not things you do in the same minute. */}
           {editable && (
-            <EditorChat
-              modelRef={on}
-              textOf={(path) => buffer[path]?.text ?? ""}
-              reviewed={reviewed}
-              onReview={review}
-            />
+            <Layout.Panel
+              side="right"
+              isResizable
+              defaultSize={320}
+              minSize={260}
+              maxSize={560}
+              contentPadding="0"
+              sizeStorageKey="analyst.editor.chat"
+              isOpen={chatOpen}
+              onOpenChange={setChatOpen}
+            >
+              <EditorChat
+                modelRef={on}
+                textOf={(path) => buffer[path]?.text ?? ""}
+                reviewed={reviewed}
+                onReview={review}
+              />
+            </Layout.Panel>
           )}
-        </div>
+        </Layout>
       ) : (
-        <>
+        /* The page no longer scrolls, so this scrolls itself — it is a long list and the tab
+           beside it is a full-height pane. */
+        <div className="editor-served">
           {model && model.unloaded.length > 0 && (
             <p className="editor-notice">
               In the model but not being served:{" "}
               {model.unloaded.map((f) => (
-                <button key={f} className="link" onClick={() => open(f)}>
+                <Button key={f} variant="link" onClick={() => open(f)}>
                   {f}
-                </button>
+                </Button>
               ))}{" "}
               — usually a file Cube could not compile. Save says why.
             </p>
@@ -534,7 +688,7 @@ export function ModelEditor({
             }
             onEdit={editable ? open : undefined}
           />
-        </>
+        </div>
       )}
 
       {merging && (

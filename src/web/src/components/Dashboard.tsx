@@ -3,6 +3,8 @@ import { useCallback, useEffect, useState } from "react";
 import * as api from "../api";
 import { ago } from "../hooks";
 import type { DashboardDetail, LayoutItem, RefreshOutcome } from "../types";
+import { Button } from "./Button";
+import { Empty } from "./Empty";
 import { Tile } from "./Tile";
 
 /**
@@ -157,12 +159,12 @@ export function Dashboard({
         </div>
         <div className="dash-actions">
           {undo && (
-            <button
+            <Button
               className="dash-undo"
               onClick={() => void save(undo.items, undo.columns, "undo", false)}
             >
               Undo
-            </button>
+            </Button>
           )}
           {detail.tiles.length > 0 && (
             <select
@@ -178,14 +180,14 @@ export function Dashboard({
               ))}
             </select>
           )}
-          <button
-            className="primary"
+          <Button
+            variant="primary"
             onClick={() => void refresh()}
             disabled={busy || detail.tiles.length === 0}
           >
             {busy ? "Refreshing…" : "Refresh"}
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={async () => {
               const title = window.prompt("Rename dashboard", detail.title);
               if (!title) return;
@@ -195,9 +197,9 @@ export function Dashboard({
             }}
           >
             Rename
-          </button>
-          <button
-            className="danger"
+          </Button>
+          <Button
+            variant="danger"
             onClick={async () => {
               if (!window.confirm(`Delete ${detail.title}? Its tiles go with it.`)) return;
               await api.deleteDashboard(id);
@@ -205,7 +207,7 @@ export function Dashboard({
             }}
           >
             Delete
-          </button>
+          </Button>
         </div>
       </header>
 
@@ -244,13 +246,10 @@ export function Dashboard({
       {busy && <div className="dash-progress" role="status" aria-label="Refreshing" />}
 
       {detail.tiles.length === 0 ? (
-        <div className="dash-empty">
-          <h3>No tiles yet</h3>
-          <p>
-            Ask in chat: run a query you want to keep, then say “save that to the{" "}
-            {detail.title} dashboard”.
-          </p>
-        </div>
+        <Empty title="No tiles yet">
+          Ask in chat: run a query you want to keep, then say “save that to the{" "}
+          {detail.title} dashboard”.
+        </Empty>
       ) : (
         <div
           className="dash-grid"

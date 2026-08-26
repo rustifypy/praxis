@@ -4,6 +4,7 @@ import type { Ref } from "react";
 import * as api from "../api";
 import type { Upload } from "../api";
 import { duration, useElapsed } from "../hooks";
+import { Button } from "./Button";
 
 export interface ComposerHandle {
   fill: (text: string) => void;
@@ -201,23 +202,23 @@ export function Composer({
             e.target.value = "";
           }}
         />
-        <button
+        <Button
           className="attach-add"
           disabled={disabled || busy}
           title="Attach a file"
           onClick={() => picker.current?.click()}
         >
           +
-        </button>
+        </Button>
 
         {busy ? (
-          <button className="stop" onClick={onStop} title="Stop the agent">
+          <Button variant="danger" className="stop" onClick={onStop} title="Stop the agent">
             <span className="square" /> Stop
-          </button>
+          </Button>
         ) : (
-          <button className="send" onClick={submit} disabled={disabled || !value.trim()}>
+          <Button variant="primary" className="send" onClick={submit} disabled={disabled || !value.trim()}>
             Send
-          </button>
+          </Button>
         )}
       </div>
     </div>

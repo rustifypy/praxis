@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 
 import type { ServedEntity, ServedMember, ServedModel as Model } from "../sources";
+import { Button } from "./Button";
+import { Empty } from "./Empty";
 import { Section } from "./Section";
 
 /**
@@ -141,7 +143,7 @@ export function ServedModel({
             ? "Cube answered, but is serving no cubes."
             : null);
 
-  if (!model && loading) return <p className="served-empty">Reading…</p>;
+  if (!model && loading) return <Empty tight>Reading…</Empty>;
 
   return (
     <div className="served">
@@ -165,9 +167,9 @@ export function ServedModel({
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
-        <button onClick={onRefresh} disabled={loading}>
+        <Button onClick={onRefresh} disabled={loading}>
           {loading ? "Reading…" : "Refresh"}
-        </button>
+        </Button>
       </div>
 
       {/* Above the split, not instead of it. A compile failure leaves /v1/meta empty while
@@ -192,12 +194,12 @@ export function ServedModel({
             onToggle={() => toggle("views")}
             info="A view is the curated surface: it re-exports members from one or more cubes under names chosen for the business, with the joins already decided. A question is best asked here, because a query inside a single view cannot pick a wrong join path."
             empty={
-              <p className="served-empty">
+              <Empty tight>
                 {modelNote ??
                   (totals.views === 0
                     ? "None yet. Run Build views — until then every question has to reach into the cubes directly, and the gate can only warn about joins, not choose them."
                     : "No view matches.")}
-              </p>
+              </Empty>
             }
           >
             {shown.views.map((entity) => (
@@ -218,7 +220,7 @@ export function ServedModel({
             open={isOpen("cubes")}
             onToggle={() => toggle("cubes")}
             info="One cube per table, with its keys and joins. Queryable directly, but a question spanning two cubes depends on the join path the gate happens to compile — which is what views exist to settle. A cube no view exposes is reachable only this way."
-            empty={<p className="served-empty">{modelNote ?? "No cube matches."}</p>}
+            empty={<Empty tight>{modelNote ?? "No cube matches."}</Empty>}
           >
             {shown.cubes.map((entity) => (
               <Row
@@ -236,9 +238,9 @@ export function ServedModel({
           {entity ? (
             <Detail entity={entity} needle={needle} onEdit={onEdit} />
           ) : (
-            <p className="served-empty">
+            <Empty tight>
               {filter ? `Nothing matches “${filter}”.` : "Open a section and pick a view or cube."}
-            </p>
+            </Empty>
           )}
         </div>
       </div>
@@ -303,9 +305,9 @@ function Detail({
         <code className="served-detail-id">{entity.name}</code>
         {/* In the header rather than a bar of its own: it acts on the thing named beside it. */}
         {onEdit && entity.file && (
-          <button className="served-detail-edit" onClick={() => onEdit(entity.file)}>
+          <Button className="served-detail-edit" onClick={() => onEdit(entity.file)}>
             Edit
-          </button>
+          </Button>
         )}
       </header>
 

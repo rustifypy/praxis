@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import * as api from "../sources";
 import type { JobState, Reached, Service, SourceRow } from "../sources";
+import { Button } from "./Button";
 import { ConnectionForm, warehouseName } from "./AddSource";
 import { BuildModel } from "./BuildModel";
 
@@ -250,13 +251,13 @@ function Handover({
         </small>
       </label>
 
-      <button
-        className="primary"
+      <Button
+        variant="primary"
         disabled={checking || !url.trim()}
         onClick={() => void check()}
       >
         {checking ? "Checking…" : stored ? "Check again" : "Check and continue"}
-      </button>
+      </Button>
 
       {error && <p className="banner bad">{error}</p>}
       {result && !result.ok && (

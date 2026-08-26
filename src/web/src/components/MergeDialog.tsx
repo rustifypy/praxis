@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import type { Impact, RefDiff } from "../sources";
+import { Button } from "./Button";
 
 /**
  * Landing a branch on main: the patch, what it would break, and the two decisions.
@@ -86,11 +87,11 @@ export function MergeDialog({
             Delete <code>{branch}</code> after merging
           </label>
           <span className="editor-spacer" />
-          <button onClick={onCancel} disabled={busy}>
+          <Button onClick={onCancel} disabled={busy}>
             Cancel
-          </button>
-          <button
-            className={breaks ? "danger" : "primary"}
+          </Button>
+          <Button
+            variant={breaks ? "danger" : "primary"}
             disabled={busy || nothing || diff === null}
             onClick={() => onMerge(breaks > 0, deleteAfter)}
           >
@@ -99,7 +100,7 @@ export function MergeDialog({
               : breaks
                 ? `Merge anyway, breaking ${breaks}`
                 : `Merge into ${main}`}
-          </button>
+          </Button>
         </footer>
       </div>
     </div>
@@ -112,7 +113,9 @@ export function MergeDialog({
  * "No saved query breaks" is worth saying out loud rather than showing nothing: the absence of a
  * warning reads as "not checked", and this check is the whole reason the merge can be trusted.
  */
-export function Breakage({ impact }: { impact: Impact }) {
+/** Not exported any more: the editor renders its own copy of this inside `Problems`, where it is
+ *  one of four kinds of thing wrong with a draft rather than a panel of its own. */
+function Breakage({ impact }: { impact: Impact }) {
   if (!impact.broken.length) {
     return (
       <p className="editor-note ok">No saved query breaks — {impact.checked} checked.</p>

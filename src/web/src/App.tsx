@@ -7,6 +7,7 @@ import { ChatNav } from "./components/ChatNav";
 import { Dashboard } from "./components/Dashboard";
 import { DashboardNav } from "./components/DashboardNav";
 import type { ComposerHandle } from "./components/Composer";
+import { Button } from "./components/Button";
 import { Composer } from "./components/Composer";
 import { Rail } from "./components/Rail";
 import type { Mode } from "./components/Rail";
@@ -448,9 +449,9 @@ export default function App() {
           {/* Scrolling up to re-read something stops the transcript following the stream, and
             without this nothing says so — an answer arriving off-screen looks like no answer. */}
           {!tailing && items.length > 0 && (
-            <button className="jump" onClick={follow}>
+            <Button className="jump" onClick={follow}>
               ↓ {busy ? "Jump to what it is writing" : "Jump to the end"}
-            </button>
+            </Button>
           )}
 
           <Composer

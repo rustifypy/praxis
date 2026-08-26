@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import * as api from "../api";
 import type { McpAccess } from "../types";
+import { Button } from "./Button";
 import { Confirm } from "./Confirm";
 import { Copy } from "./Copy";
 import { Info } from "./Info";
@@ -59,7 +60,7 @@ export function McpPage() {
   }
 
   return (
-    <div className="detail">
+    <div className="detail detail-page">
       <section className="detail-panel">
         <div className="panel-head">
           <h3>Agent access</h3>
@@ -119,10 +120,10 @@ export function McpPage() {
                   <div className="mcp-field-head">
                     <span>Token</span>
                     <div className="mcp-actions">
-                      <button onClick={() => setShown(!shown)}>{shown ? "Hide" : "Show"}</button>
-                      <button disabled={busy} onClick={() => setConfirmRotate(true)}>
+                      <Button onClick={() => setShown(!shown)}>{shown ? "Hide" : "Show"}</Button>
+                      <Button disabled={busy} onClick={() => setConfirmRotate(true)}>
                         Rotate
-                      </button>
+                      </Button>
                       <Copy value={access.token} />
                     </div>
                   </div>

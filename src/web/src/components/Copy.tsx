@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Button } from "./Button";
 
 export function Copy({ value, label = "Copy" }: { value: string; label?: string }) {
   const [done, setDone] = useState(false);
@@ -10,7 +11,8 @@ export function Copy({ value, label = "Copy" }: { value: string; label?: string 
   }, [done]);
 
   return (
-    <button
+    <Button
+      size="sm"
       className={`copy ${done ? "done" : ""}`}
       title={label}
       onClick={(e) => {
@@ -19,6 +21,6 @@ export function Copy({ value, label = "Copy" }: { value: string; label?: string 
       }}
     >
       {done ? "Copied" : label}
-    </button>
+    </Button>
   );
 }

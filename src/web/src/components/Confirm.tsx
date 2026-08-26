@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 
 import { useDismiss } from "../hooks";
+import { Button } from "./Button";
 
 /**
  * Destructive confirmation that costs a moment's attention: type the word.
@@ -50,10 +51,10 @@ export function Confirm({
         </label>
 
         <footer>
-          <button onClick={onCancel}>Cancel</button>
-          <button className="danger solid" disabled={!armed} onClick={onConfirm}>
+          <Button onClick={onCancel}>Cancel</Button>
+          <Button variant="danger" disabled={!armed} onClick={onConfirm}>
             {confirmLabel}
-          </button>
+          </Button>
         </footer>
       </div>
     </div>

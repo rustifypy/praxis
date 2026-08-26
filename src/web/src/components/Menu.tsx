@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { useDismiss } from "../hooks";
+import { Button } from "./Button";
 
 interface MenuItem {
   label: string;
@@ -26,7 +27,7 @@ export function Menu({ items, label = "More actions" }: { items: MenuItem[]; lab
 
   return (
     <div className="menu" ref={ref}>
-      <button
+      <Button
         className="menu-button"
         aria-haspopup="menu"
         aria-expanded={open}
@@ -35,12 +36,12 @@ export function Menu({ items, label = "More actions" }: { items: MenuItem[]; lab
         onClick={() => setOpen(!open)}
       >
         ⋯
-      </button>
+      </Button>
 
       {open && (
         <div className="menu-panel" role="menu">
           {items.map((item) => (
-            <button
+            <Button
               key={item.label}
               role="menuitem"
               className={item.danger ? "danger" : undefined}
@@ -52,7 +53,7 @@ export function Menu({ items, label = "More actions" }: { items: MenuItem[]; lab
             >
               <span>{item.label}</span>
               {item.disabled && <small>{item.disabled}</small>}
-            </button>
+            </Button>
           ))}
         </div>
       )}

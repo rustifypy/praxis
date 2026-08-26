@@ -13,14 +13,82 @@
   --bad: #b3402f;
   --warn: #9a6b12;
   --code-bg: #edebe6;
-  --radius: 10px;
+  /* Exists for the UI kit alone. The kit ships a `$radius: 6px` of its own which lands on
+     `body` and would win over `:root` for the whole page; `main.tsx` points it back here so the
+     kit's components take the app's corner. Nothing in this file should use it — reach for
+     `--radius-lg`, which is what it is. */
+  --app-radius: var(--radius-lg);
   /* One height for every control that shares a row. Buttons inherit the body's 1.6
      line-height and inputs do not, so identical padding produced a 32px button beside a
      27px input beside a 27px icon button — visible wherever two of them sat together. */
-  --control: 30px;
+  --control: var(--control-md);
+  /* The scale. Every value below is the weighted centre of what the file already used —
+     twenty-one font sizes, eighteen corners and roughly forty padding pairs, each arrived at by
+     nudging one component until it looked right next to the one beside it. There was no token to
+     reach for, which is the whole reason they diverged. */
+  --space-05: 2px;
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 48px;
+  --space-9: 64px;
+
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 15px;
+  --text-xl: 20px;
+  --text-2xl: 26px;
+
+  /* Radius is a role, not a size: a mark, a control, a surface, a dialog. It stopped meaning
+     anything when every integer from 2 to 10 was in use — `.stage-panel` at 10 held buttons at
+     6 while `.job` at 8 held buttons at 5, the same relationship drawn two ways. */
+  --radius-xs: 2px;
+  --radius-sm: 5px;
+  --radius-md: 7px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-full: 999px;
+
+  --control-sm: 24px;
+  --control-md: 30px;
+
+  --motion-fast: 120ms;
+  --motion-slow: 260ms;
+
   --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --ease: cubic-bezier(0.22, 0.8, 0.3, 1);
+
+  /* Elevation is a token because it is the one thing that cannot be inverted by swapping
+     colours: black at 12% is a shadow on `#fbfbfa` and nothing at all on `#151519`. Every
+     shadow in this file used to be a literal, so dark mode lost the modal, both popovers and
+     the tooltip to flat rectangles held apart by their 1px border alone. */
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 5%);
+  --shadow-md: 0 6px 20px rgb(0 0 0 / 14%);
+  --shadow-lg: 0 24px 60px rgb(0 0 0 / 26%);
+
+  /* One ring, drawn as an outline rather than a box-shadow so it follows each control's own
+     corner and cannot collide with an elevation the element already carries. */
+  --focus-ring: 2px solid var(--accent);
+  --focus-offset: 1px;
+  /* A soft glow, not a focus ring: "your next action lands here" — the composer while typing,
+     and either drop target under a dragged file. It rides `--accent-soft`, so it inverts with
+     the theme on its own. */
+  --ring-soft: 0 0 0 3px var(--accent-soft);
+
+  --disabled-opacity: 0.45;
+
+  /* Text on any of the semantic fills — accent, ok, bad. White works on the light theme's
+     fills and fails badly on the dark theme's, which are light colours: white on `#8ea6ff`
+     is 2.3:1, under even the 3:1 floor for UI text. Every filled control read as disabled in
+     dark mode because of it. */
+  --on-fill: #fff;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -38,6 +106,13 @@
     --bad: #e08b7c;
     --warn: #d9ad5e;
     --code-bg: #26262d;
+    /* Roughly 3× the alpha: the ground is already dark, so the same shadow has far less to
+       darken. Tuned so a popover reads as floating without a visible black halo. */
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
+    --shadow-md: 0 6px 20px rgb(0 0 0 / 55%);
+    --shadow-lg: 0 24px 60px rgb(0 0 0 / 70%);
+    /* The ground, not the ink: on `#8ea6ff` this is 7.9:1. */
+    --on-fill: #151519;
   }
 }
 
@@ -67,7 +142,7 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--sans);
-  font-size: 15px;
+  font-size: var(--text-lg);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
 }
@@ -79,35 +154,257 @@ textarea {
   font: inherit;
 }
 
-/* Controls that sit on a row together: one height, one line-height, label centred.
-   Applied by selector rather than a utility class because these lists already exist —
-   see `--control`. Inputs get the height but not the flex, which breaks the caret. */
-.detail-primary > button,
-.detail-primary > a,
-.served-head button,
-.picker-bulk button,
-.picker-head > .link,
-.stage-cta button,
-.modal footer button,
-.drawer footer button,
-.mcp-actions button,
-.job-head button {
+/* Keyboard focus, once, for everything that takes it.
+   The ARIA was already right — the branch picker sets `aria-haspopup`/`aria-expanded`, menus
+   set `role="menu"`/`menuitem` — and there was no visible ring on any of the thirty-six
+   buttons to go with it. `:where()` keeps this at zero specificity, so a component that has a
+   reason to draw its own focus (the composer shows it on the wrapper, CodeMirror draws its
+   own caret) still wins by being more specific. `:focus-visible` and not `:focus`: a mouse
+   click on a button should not ring it. */
+:where(button, a, input, select, textarea, summary):focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* One disabled state. This used to be seven opacities and two cursors across sixteen rules,
+   and twenty more buttons had none at all — including `.changes-undo` and `.branch-button`,
+   which are handed `disabled={busy}` and so sat looking live for the length of a request. */
+:where(button, a, input, select, textarea):disabled,
+:where(a)[aria-disabled="true"] {
+  opacity: var(--disabled-opacity);
+  cursor: not-allowed;
+}
+
+/* One empty state — see `Empty.tsx`. Six of these were written independently and five looked
+   different; `.dash-empty`'s shape (a heading, a sentence, room around them) is the one that
+   was right, so it is the one they all take. */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  max-width: 46ch;
+  padding: var(--space-6) var(--space-4);
+  color: var(--muted);
+}
+
+.empty h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.empty p {
+  margin: 0;
+  font-size: var(--text-md);
+  text-wrap: pretty;
+}
+
+/* Where there is no room for that: a tile that has to keep its grid shape, and a list row
+   standing in for a file. */
+.empty-tight {
+  padding: var(--space-2) var(--space-4);
+  color: var(--faint);
+}
+
+.empty-tight p {
+  font-size: var(--text-sm);
+}
+
+/* One text field — see the audit's fifth finding. These were five rules that agreed on
+   nothing but the border: three paddings, two font sizes and two backgrounds, so a field in a
+   dialog read as a different kind of control from a field in a drawer. Anything below keeps
+   only its own layout. `.field` is for new markup; the rest are named because their inputs are
+   bare and their wrapper is what identifies them. */
+.field,
+.nav-filter,
+.chat-row.editing input,
+.modal input,
+.picker-head select,
+.picker-filter,
+.drawer input,
+.drawer select,
+.conn-field input,
+.conn-field select,
+.conn-field textarea,
+.served-filter,
+.deploy-where input,
+.dash-select {
+  min-height: var(--control-md);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-md);
+  line-height: 1.2;
+}
+
+/* ============================ controls ============================
+   `.btn` and `.badge` are the shared vocabulary — see `Button.tsx` and `Badge.tsx`. Nothing
+   here is styled by its container, which is the whole point: a control used to take its size
+   from whichever panel it sat in, so the same secondary action came out at six different
+   heights and a container that gained a button gained a restyle it never asked for. */
+
+.btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: var(--control);
+  gap: var(--space-2);
+  /* Height is set, not left to padding — that is why the old rules diverged. Every one of them
+     had a padding pair and only some had `min-height`, so the pair won and one button came out
+     33px beside a 30px one in the same header. */
+  height: var(--control-md);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  color: var(--ink);
+  font-size: var(--text-sm);
   line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) var(--ease),
+    border-color var(--motion-fast) var(--ease),
+    color var(--motion-fast) var(--ease);
+}
+
+.btn-sm {
+  height: var(--control-sm);
+  padding: 0 var(--space-3);
+  font-size: var(--text-xs);
+}
+
+/* Square: the label is a glyph, so the horizontal padding would only push it off centre. */
+.btn-icon {
+  width: var(--control-md);
+  padding: 0;
+}
+
+.btn-sm.btn-icon {
+  width: var(--control-sm);
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+
+.btn-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-fill);
+}
+
+.btn-primary:hover:not(:disabled) {
+  border-color: var(--accent);
+  filter: brightness(1.08);
+}
+
+.btn-subtle {
+  border-color: transparent;
+  background: none;
+  color: var(--muted);
+}
+
+.btn-subtle:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.btn-subtle.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.btn-danger {
+  color: var(--bad);
+}
+
+.btn-danger:hover:not(:disabled) {
+  border-color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 8%, transparent);
+}
+
+/* Inline text, not a control on a row — so it keeps the surrounding size and takes no height. */
+.btn-link {
+  height: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.btn-link:hover:not(:disabled) {
+  border: none;
+}
+
+/* ---------- badges ---------- */
+
+.badge {
+  flex: none;
   white-space: nowrap;
 }
 
-.served-filter,
-.picker-filter,
-.picker-head select,
-.modal input {
-  min-height: var(--control);
-  line-height: 1.2;
+/* Bare tabular text beside a heading. Nine of these lived under seven feature-owned names —
+   `Changes` and `Problems` both rendered the file tree's `.tree-count` for a number that has
+   nothing to do with files. */
+.badge-count {
+  color: var(--faint);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
 }
+
+.badge-chip {
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  color: var(--muted);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.02em;
+}
+
+.badge-pill {
+  padding: var(--space-05) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-full);
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+.badge-mono {
+  font-family: var(--mono);
+}
+
+.badge-accent {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+}
+
+.badge-ok {
+  color: var(--ok);
+}
+
+.badge-bad {
+  color: var(--bad);
+}
+
+.badge-warn {
+  color: var(--warn);
+}
+
+/* Controls that sit on a row together: one height, one line-height, label centred.
+   Applied by selector rather than a utility class because these lists already exist —
+   see `--control`. Inputs get the height but not the flex, which breaks the caret. */
+
 
 .app {
   display: grid;
@@ -166,7 +463,7 @@ textarea {
 .collapse {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows 0.26s var(--ease);
+  transition: grid-template-rows var(--motion-slow) var(--ease);
 }
 
 .collapse.open {
@@ -181,8 +478,8 @@ textarea {
 .caret {
   display: inline-block;
   color: var(--faint);
-  font-size: 11px;
-  transition: transform 0.2s var(--ease);
+  font-size: var(--text-xs);
+  transition: transform var(--motion-slow) var(--ease);
 }
 
 /* ============================ rail ============================ */
@@ -191,8 +488,8 @@ textarea {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 16px 0 12px;
+  gap: var(--space-1);
+  padding: var(--space-5) 0 var(--space-4);
   background: var(--panel);
   border-right: 1px solid var(--line);
 }
@@ -202,7 +499,7 @@ textarea {
   place-items: center;
   width: 34px;
   height: 34px;
-  margin-bottom: 10px;
+  margin-bottom: var(--space-3);
 }
 
 .dot {
@@ -217,17 +514,17 @@ textarea {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
+  gap: var(--space-1);
   width: 44px;
-  padding: 7px 0 5px;
+  padding: var(--space-3) 0 var(--space-2);
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   background: none;
   color: var(--faint);
   cursor: pointer;
   transition:
-    background 0.15s,
-    color 0.15s var(--ease);
+    background var(--motion-fast),
+    color var(--motion-fast) var(--ease);
 }
 
 .rail-tab svg {
@@ -246,7 +543,7 @@ textarea {
 }
 
 .rail-label {
-  font-size: 9.5px;
+  font-size: var(--text-2xs);
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }
@@ -264,13 +561,13 @@ textarea {
   animation: pulse 1.4s ease-in-out infinite;
 }
 
-/* ======================= contextual sidebar (chat / data) ======================= */
+/* ===================== contextual sidebar (chat / data) ===================== */
 
 .nav {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 16px 12px 12px;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-4) var(--space-4);
   background: var(--panel);
   border-right: 1px solid var(--line);
   min-height: 0;
@@ -280,12 +577,12 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 6px;
+  padding: 0 var(--space-2);
 }
 
 .nav-head h2 {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -293,21 +590,13 @@ textarea {
 }
 
 .nav-add {
-  display: grid;
   place-items: center;
   width: 24px;
-  height: 24px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--raised);
   color: var(--muted);
-  font-size: 15px;
-  line-height: 1;
-  cursor: pointer;
   transition:
-    border-color 0.15s,
-    color 0.15s,
-    transform 0.2s var(--ease);
+    border-color var(--motion-fast),
+    color var(--motion-fast),
+    transform var(--motion-slow) var(--ease);
 }
 
 .nav-add:hover:not(:disabled) {
@@ -316,21 +605,8 @@ textarea {
   transform: rotate(90deg);
 }
 
-.nav-add:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
 .nav-filter {
   width: 100%;
-  padding: 6px 9px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--bg);
-  color: var(--ink);
-  font: inherit;
-  font-size: 12.5px;
-  outline: none;
 }
 
 .nav-filter:focus {
@@ -342,14 +618,14 @@ textarea {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-05);
   min-height: 0;
 }
 
 .chat-group h3 {
-  margin: 12px 0 3px;
-  padding: 0 10px;
-  font-size: 10.5px;
+  margin: var(--space-4) 0 var(--space-1);
+  padding: 0 var(--space-4);
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -357,7 +633,7 @@ textarea {
 }
 
 .chat-group:first-child h3 {
-  margin-top: 2px;
+  margin-top: var(--space-05);
 }
 
 /* Source rows in the data sidebar. Two lines: identity, then where it is up to. */
@@ -365,19 +641,19 @@ textarea {
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
-  gap: 4px 7px;
-  padding: 7px 10px;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-3) var(--space-4);
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: none;
   color: var(--muted);
   font: inherit;
-  font-size: 13.5px;
+  font-size: var(--text-md);
   text-align: left;
   cursor: pointer;
   transition:
-    background 0.15s,
-    color 0.15s;
+    background var(--motion-fast),
+    color var(--motion-fast);
 }
 
 .nav-row:hover {
@@ -399,21 +675,21 @@ textarea {
 
 .nav-row-tag {
   color: var(--accent);
-  font-size: 9.5px;
+  font-size: var(--text-2xs);
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
 .nav-row-count {
   color: var(--faint);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
 }
 
 .nav-row-sub {
   grid-column: 2 / -1;
   color: var(--faint);
-  font-size: 11px;
+  font-size: var(--text-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -422,16 +698,16 @@ textarea {
 .chat-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 7px 10px;
-  border-radius: 8px;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
   cursor: pointer;
   color: var(--muted);
   position: relative;
-  animation: rise 0.22s var(--ease);
+  animation: rise var(--motion-slow) var(--ease);
   transition:
-    background 0.15s,
-    color 0.15s;
+    background var(--motion-fast),
+    color var(--motion-fast);
 }
 
 .chat-row::before {
@@ -441,10 +717,10 @@ textarea {
   top: 20%;
   bottom: 20%;
   width: 2px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: var(--accent);
   transform: scaleY(0);
-  transition: transform 0.22s var(--ease);
+  transition: transform var(--motion-slow) var(--ease);
 }
 
 .chat-row.active::before {
@@ -476,18 +752,18 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: var(--text-md);
   line-height: 1.35;
 }
 
 .chat-when {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--faint);
   opacity: 0;
   max-height: 0;
   transition:
-    opacity 0.18s,
-    max-height 0.18s var(--ease);
+    opacity var(--motion-fast),
+    max-height var(--motion-fast) var(--ease);
 }
 
 .chat-row:hover .chat-when,
@@ -499,22 +775,16 @@ textarea {
 .chat-row.editing input {
   width: 100%;
   border: 1px solid var(--accent);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--ink);
-  padding: 4px 7px;
-  font-size: 14px;
-  outline: none;
 }
 
 .chat-actions {
   display: flex;
-  gap: 2px;
+  gap: var(--space-05);
   opacity: 0;
   transform: translateX(4px);
   transition:
-    opacity 0.15s,
-    transform 0.15s var(--ease);
+    opacity var(--motion-fast),
+    transform var(--motion-fast) var(--ease);
 }
 
 .chat-row:hover .chat-actions,
@@ -523,33 +793,16 @@ textarea {
   transform: none;
 }
 
-.chat-actions button {
-  border: 0;
-  background: none;
-  color: var(--faint);
-  cursor: pointer;
-  font-size: 14px;
-  padding: 0 3px;
-  border-radius: 4px;
-  transition: color 0.12s;
-}
-
 .chat-actions button:hover {
   color: var(--ink);
 }
 
 .chat-actions .danger {
-  color: #fff;
+  color: var(--on-fill);
   background: var(--bad);
-  font-size: 11px;
-  padding: 2px 8px;
-  animation: rise 0.16s var(--ease);
-}
-
-.empty {
-  color: var(--faint);
-  font-size: 12px;
-  padding: 6px 10px;
+  font-size: var(--text-xs);
+  padding: var(--space-05) var(--space-3);
+  animation: rise var(--motion-fast) var(--ease);
 }
 
 /* ============================ transcript ============================ */
@@ -570,25 +823,12 @@ textarea {
   position: absolute;
   z-index: 20;
   left: 50%;
-  /* Above the composer, which is the last thing in the column and sizes itself. */
   bottom: 96px;
   transform: translateX(-50%);
-  min-height: var(--control);
-  line-height: 1.2;
-  padding: 0 14px;
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--raised);
+  border-radius: var(--radius-full);
   color: var(--muted);
-  font-size: 12.5px;
-  cursor: pointer;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
-  animation: rise 0.16s var(--ease);
-  transition:
-    color 0.12s,
-    border-color 0.12s;
+  box-shadow: var(--shadow-md);
+  animation: rise var(--motion-fast) var(--ease);
 }
 
 .jump:hover {
@@ -596,13 +836,13 @@ textarea {
   border-color: var(--accent);
 }
 
-/* ---- the chat header: which source this conversation queries ---- */
+/* ---------- the chat header: which source this conversation queries ---------- */
 
 .chat-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 20px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-6);
   border-bottom: 1px solid var(--line);
 }
 
@@ -613,19 +853,19 @@ textarea {
 .src-chip {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-3);
   max-width: 620px;
-  padding: 5px 10px;
+  padding: var(--space-2) var(--space-4);
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: none;
   color: var(--ink);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--text-md);
   cursor: pointer;
   transition:
-    background 0.15s,
-    border-color 0.15s;
+    background var(--motion-fast),
+    border-color var(--motion-fast);
 }
 
 .src-chip:hover,
@@ -647,7 +887,7 @@ textarea {
 
 .src-chip-caret {
   color: var(--faint);
-  font-size: 10px;
+  font-size: var(--text-2xs);
 }
 
 .src-panel {
@@ -662,17 +902,17 @@ textarea {
   width: min(460px, calc(100vw - 340px));
   max-height: min(60vh, 520px);
   overflow-y: auto;
-  padding: 14px;
+  padding: var(--space-4);
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--raised);
-  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.19);
-  animation: rise 0.16s var(--ease);
+  box-shadow: var(--shadow-lg);
+  animation: rise var(--motion-fast) var(--ease);
 }
 
 .src-panel h4 {
-  margin: 0 0 7px;
-  font-size: 10.5px;
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -682,10 +922,10 @@ textarea {
 .src-switch-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 7px;
-  font-size: 13px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--text-md);
 }
 
 .src-switch-row.on {
@@ -698,7 +938,7 @@ textarea {
 
 .src-switch-meta {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -710,28 +950,28 @@ textarea {
   margin-left: auto;
   flex: none;
   color: var(--faint);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .src-switch-how code {
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
 }
 
 .src-panel .link {
-  margin-top: 6px;
+  margin-top: var(--space-2);
 }
 
 .transcript {
   flex: 1;
   overflow-y: auto;
-  padding: 30px 0 12px;
+  padding: var(--space-7) 0 var(--space-4);
   scroll-behavior: auto;
 }
 
 .row {
   width: min(760px, calc(100% - 48px));
-  margin: 0 auto 13px;
-  animation: rise 0.26s var(--ease);
+  margin: 0 auto var(--space-4);
+  animation: rise var(--motion-slow) var(--ease);
 }
 
 /* The right margin is `.row`'s own gutter rather than a flat 24px, so the bubble ends on the
@@ -742,8 +982,8 @@ textarea {
   margin: 26px max(24px, calc((100% - 760px) / 2)) 16px auto;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 14px 14px 4px 14px;
-  padding: 10px 15px;
+  border-radius: var(--radius-xl) var(--radius-xl) var(--radius-sm) var(--radius-xl);
+  padding: var(--space-4) var(--space-5);
   white-space: pre-wrap;
 }
 
@@ -751,18 +991,18 @@ textarea {
   width: min(760px, calc(100% - 48px));
   margin: 12vh auto 0;
   color: var(--muted);
-  animation: rise 0.4s var(--ease);
+  animation: rise var(--motion-slow) var(--ease);
 }
 
 .welcome h1 {
-  font-size: 23px;
+  font-size: var(--text-xl);
   color: var(--ink);
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-3);
 }
 
 .suggest-label {
-  margin: 26px 0 10px;
-  font-size: 12px;
+  margin: var(--space-6) 0 var(--space-3);
+  font-size: var(--text-sm);
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--faint);
@@ -771,25 +1011,25 @@ textarea {
 .suggestions {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 8px;
+  gap: var(--space-3);
 }
 
 .suggestion {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 11px 13px;
+  gap: var(--space-05);
+  padding: var(--space-4) var(--space-4);
   text-align: left;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   background: var(--panel);
   color: var(--ink);
   cursor: pointer;
   opacity: 0;
-  animation: rise 0.35s var(--ease) forwards;
+  animation: rise var(--motion-slow) var(--ease) forwards;
   transition:
-    border-color 0.15s,
-    transform 0.15s var(--ease);
+    border-color var(--motion-fast),
+    transform var(--motion-fast) var(--ease);
 }
 
 .suggestion:hover {
@@ -800,17 +1040,17 @@ textarea {
 .suggestion-name {
   display: flex;
   align-items: center;
-  gap: 7px;
-  font-size: 14px;
+  gap: var(--space-3);
+  font-size: var(--text-md);
 }
 
 .suggestion-kind {
-  padding: 0 6px;
+  padding: 0 var(--space-2);
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   color: var(--faint);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--text-2xs);
 }
 
 .suggestion-kind.view {
@@ -820,7 +1060,7 @@ textarea {
 }
 
 .suggestion-meta {
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   color: var(--faint);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -843,7 +1083,7 @@ textarea {
   display: inline-block;
   width: 2px;
   height: 1.05em;
-  margin-left: 3px;
+  margin-left: var(--space-1);
   vertical-align: -0.18em;
   background: var(--accent);
   animation: blink 1s steps(2, start) infinite;
@@ -852,8 +1092,8 @@ textarea {
 .answer table {
   border-collapse: collapse;
   width: 100%;
-  font-size: 14px;
-  margin: 12px 0;
+  font-size: var(--text-md);
+  margin: var(--space-4) 0;
   display: block;
   overflow-x: auto;
 }
@@ -861,7 +1101,7 @@ textarea {
 .answer th,
 .answer td {
   border: 1px solid var(--line);
-  padding: 6px 10px;
+  padding: var(--space-2) var(--space-4);
   text-align: left;
 }
 
@@ -872,17 +1112,17 @@ textarea {
 .answer code,
 .answer pre {
   background: var(--code-bg);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .answer code {
-  padding: 1px 5px;
+  padding: var(--space-05) var(--space-2);
 }
 
 .answer pre {
-  padding: 12px;
+  padding: var(--space-4);
   overflow-x: auto;
 }
 
@@ -894,9 +1134,9 @@ textarea {
 /* A fenced block is a unit someone copies, so it gets its own head and its own button — the
    answer's Copy takes all three paragraphs and the SQL in the middle of them. */
 .answer .fence {
-  margin: 12px 0;
+  margin: var(--space-4) 0;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--code-bg);
   overflow: hidden;
 }
@@ -904,8 +1144,8 @@ textarea {
 .answer .fence-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 6px 4px 12px;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-4);
   border-bottom: 1px solid var(--line);
 }
 
@@ -913,7 +1153,7 @@ textarea {
   margin-right: auto;
   color: var(--faint);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   letter-spacing: 0.03em;
 }
 
@@ -928,9 +1168,9 @@ textarea {
 }
 
 .answer-tools {
-  margin-top: 8px;
+  margin-top: var(--space-3);
   opacity: 0;
-  transition: opacity 0.18s;
+  transition: opacity var(--motion-fast);
 }
 
 .row:hover .answer-tools {
@@ -938,16 +1178,11 @@ textarea {
 }
 
 .copy {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
   background: var(--code-bg);
   color: var(--muted);
-  font-size: 11.5px;
-  padding: 2px 9px;
-  cursor: pointer;
   transition:
-    color 0.15s,
-    border-color 0.15s;
+    color var(--motion-fast),
+    border-color var(--motion-fast);
 }
 
 .copy:hover {
@@ -964,8 +1199,8 @@ textarea {
 
 .thinking {
   border-left: 2px solid var(--line);
-  padding-left: 13px;
-  transition: border-color 0.3s;
+  padding-left: var(--space-4);
+  transition: border-color var(--motion-slow);
 }
 
 .thinking.live {
@@ -975,12 +1210,12 @@ textarea {
 .thinking-head {
   display: flex;
   align-items: baseline;
-  gap: 7px;
+  gap: var(--space-3);
   width: 100%;
   border: 0;
   background: none;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--text-md);
   cursor: pointer;
   padding: 0;
   text-align: left;
@@ -1021,31 +1256,31 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .thinking-body {
-  margin-top: 7px;
+  margin-top: var(--space-3);
   max-height: 300px;
   overflow-y: auto;
   color: var(--muted);
-  font-size: 13.5px;
+  font-size: var(--text-md);
   scroll-behavior: smooth;
 }
 
 .think-part + .think-part {
-  margin-top: 12px;
+  margin-top: var(--space-4);
 }
 
 .think-head {
   color: var(--ink);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   letter-spacing: 0.03em;
   text-transform: uppercase;
   opacity: 0.75;
-  margin-bottom: 3px;
-  animation: rise 0.22s var(--ease);
+  margin-bottom: var(--space-1);
+  animation: rise var(--motion-slow) var(--ease);
 }
 
 .thinking-body p {
@@ -1058,7 +1293,7 @@ textarea {
   display: inline-block;
   width: 2px;
   height: 0.95em;
-  margin-left: 3px;
+  margin-left: var(--space-1);
   vertical-align: -0.15em;
   background: var(--accent);
   animation: blink 1s steps(2, start) infinite;
@@ -1070,12 +1305,12 @@ textarea {
   position: relative;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   background: var(--panel);
-  font-size: 13.5px;
+  font-size: var(--text-md);
   transition:
-    border-color 0.3s,
-    background 0.3s;
+    border-color var(--motion-slow),
+    background var(--motion-slow);
 }
 
 .tool.running {
@@ -1099,7 +1334,7 @@ textarea {
 }
 
 .tool.settling {
-  animation: flash 0.7s var(--ease);
+  animation: flash var(--motion-slow) var(--ease);
 }
 
 .tool.failed {
@@ -1109,9 +1344,9 @@ textarea {
 .tool-head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
   width: 100%;
-  padding: 9px 13px;
+  padding: var(--space-3) var(--space-4);
   border: 0;
   background: none;
   color: var(--ink);
@@ -1120,6 +1355,9 @@ textarea {
 }
 
 .tool-head:disabled {
+  /* `disabled` here means "nothing to open", not "you may not" — so no dimming and no refusal
+     cursor. Named explicitly because the global disabled rule would otherwise grey it out. */
+  opacity: 1;
   cursor: default;
 }
 
@@ -1129,7 +1367,7 @@ textarea {
   justify-content: center;
   width: 14px;
   color: var(--ok);
-  animation: rise 0.24s var(--ease);
+  animation: rise var(--motion-slow) var(--ease);
 }
 
 .tool.failed .tool-mark {
@@ -1154,7 +1392,7 @@ textarea {
 
 .tool-summary {
   color: var(--faint);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
 }
@@ -1168,12 +1406,12 @@ textarea {
 .tool-stream {
   border-top: 1px solid var(--line);
   margin: 0;
-  padding: 10px 13px;
+  padding: var(--space-4) var(--space-4);
   max-height: 180px;
   overflow: auto;
   background: var(--code-bg);
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1182,29 +1420,29 @@ textarea {
 
 .tool-body {
   border-top: 1px solid var(--line);
-  padding: 11px 13px;
+  padding: var(--space-4) var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: 11px;
+  gap: var(--space-4);
 }
 
 .panel-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--space-3);
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .panel-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   border: 0;
   background: none;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   cursor: pointer;
   padding: 0;
 }
@@ -1215,12 +1453,12 @@ textarea {
 
 .tool-body pre {
   background: var(--code-bg);
-  border-radius: 6px;
-  padding: 10px;
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
   overflow-x: auto;
   font-family: var(--mono);
-  font-size: 12.5px;
-  margin: 7px 0 0;
+  font-size: var(--text-sm);
+  margin: var(--space-3) 0 0;
   line-height: 1.55;
 }
 
@@ -1239,7 +1477,7 @@ textarea {
 
 .res {
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   background: var(--raised);
   overflow: hidden;
 }
@@ -1252,7 +1490,7 @@ textarea {
 
 .script {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--code-bg);
   overflow: hidden;
 }
@@ -1260,8 +1498,8 @@ textarea {
 .script-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 4px 6px 4px 12px;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-4);
   border-bottom: 1px solid var(--line);
 }
 
@@ -1272,7 +1510,7 @@ textarea {
   white-space: nowrap;
   color: var(--faint);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 /* `.copy` is painted `--code-bg`, which is this head's own background. */
@@ -1282,11 +1520,11 @@ textarea {
 
 .script-body {
   margin: 0;
-  padding: 12px;
+  padding: var(--space-4);
   max-height: 420px;
   overflow: auto;
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1295,24 +1533,19 @@ textarea {
 /* The peek fades into the button rather than stopping on a hard edge, which is what says
    there is more of it without a row of dots pretending to be code. */
 .script-body.peek {
-  padding-bottom: 4px;
+  padding-bottom: var(--space-1);
   mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent);
 }
 
 .script-more {
   width: 100%;
-  min-height: var(--control);
-  line-height: 1.2;
-  padding: 0 12px;
   border: none;
   border-top: 1px solid var(--line);
   background: none;
   color: var(--muted);
   font: inherit;
-  font-size: 12px;
   text-align: left;
-  cursor: pointer;
-  transition: color 0.12s;
+  transition: color var(--motion-fast);
 }
 
 .script-more:hover {
@@ -1322,52 +1555,39 @@ textarea {
 .ask {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-4);
   flex-wrap: wrap;
-  padding: 8px 12px;
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--accent);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--accent-soft);
 }
 
 /* Answered: a line of text, because the buttons are gone and the step above already says
    what happened. */
 .ask-done {
-  padding: 2px 2px 4px;
+  padding: var(--space-05) var(--space-05) var(--space-1);
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .ask-label {
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   color: var(--ink);
 }
 
 .ask-choices {
   display: flex;
-  gap: 8px;
+  gap: var(--space-3);
   margin-left: auto;
 }
 
 .ask-choice {
-  min-height: var(--control);
-  line-height: 1.2;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
   background: var(--bg);
-  color: var(--ink);
-  font-size: 12.5px;
-  cursor: pointer;
 }
 
 .ask-choice:hover:not(:disabled) {
   border-color: var(--accent);
-}
-
-.ask-choice:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 /* Outlined rather than filled: the accent is dark in one theme and light in the other, so a
@@ -1382,17 +1602,17 @@ textarea {
 /* Onto its own line of the wrapped row, so a long message does not squeeze the buttons. */
 .ask-failed {
   flex-basis: 100%;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   color: var(--bad);
 }
 
 .res-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--line);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   color: var(--muted);
 }
 
@@ -1415,21 +1635,12 @@ textarea {
 .res-more,
 .res-csv {
   flex: none;
-  min-height: var(--control);
-  line-height: 1.2;
-  padding: 0 10px;
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid var(--line);
-  border-radius: 6px;
   background: var(--bg);
   color: var(--muted);
-  font-size: 12px;
-  cursor: pointer;
   text-decoration: none;
   transition:
-    color 0.12s,
-    border-color 0.12s;
+    color var(--motion-fast),
+    border-color var(--motion-fast);
 }
 
 .res-more:hover:not(:disabled),
@@ -1438,16 +1649,11 @@ textarea {
   border-color: var(--accent);
 }
 
-.res-more:disabled {
-  cursor: default;
-  opacity: 0.6;
-}
-
 .res-failed {
   margin: 0;
-  padding: 8px 12px;
+  padding: var(--space-3) var(--space-4);
   color: var(--bad);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 /* Its own scroll container. `.row` is capped at 760px, so a wide result has to scroll
@@ -1461,13 +1667,13 @@ textarea {
 .res-table {
   border-collapse: collapse;
   width: 100%;
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .res-table th,
 .res-table td {
   border-bottom: 1px solid var(--line);
-  padding: 6px 12px;
+  padding: var(--space-2) var(--space-4);
   text-align: left;
   white-space: nowrap;
 }
@@ -1486,7 +1692,7 @@ textarea {
 }
 
 .res-table tbody tr {
-  transition: background 0.12s;
+  transition: background var(--motion-fast);
 }
 
 .res-table tbody tr:hover {
@@ -1506,19 +1712,12 @@ textarea {
 
 .res-sort {
   width: 100%;
-  min-height: var(--control);
-  line-height: 1.2;
-  padding: 0 12px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
   border: none;
   background: none;
   color: var(--muted);
   font: inherit;
   font-weight: 500;
-  cursor: pointer;
-  transition: color 0.12s;
+  transition: color var(--motion-fast);
 }
 
 .res-sort:hover {
@@ -1527,15 +1726,15 @@ textarea {
 
 .res-arrow {
   color: var(--accent);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .res-note {
   margin: 0;
-  padding: 7px 12px;
+  padding: var(--space-3) var(--space-4);
   border-top: 1px solid var(--line);
   color: var(--faint);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 /* ---------- what a script wrote, below the answer ----------
@@ -1545,7 +1744,7 @@ textarea {
 
 .wrote {
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   background: var(--raised);
   overflow: hidden;
 }
@@ -1557,10 +1756,10 @@ textarea {
 .wrote-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--line);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   color: var(--muted);
 }
 
@@ -1572,23 +1771,23 @@ textarea {
 
 .wrote-figure {
   display: block;
-  padding: 12px;
+  padding: var(--space-4);
   text-decoration: none;
 }
 
 .wrote-figure img {
   display: block;
   max-width: 100%;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: #fff;
 }
 
 .wrote-caption {
   display: block;
-  margin-top: 6px;
+  margin-top: var(--space-2);
   color: var(--faint);
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
 }
 
 /* One non-image file: a head that is always there and a body that is open by default. Same
@@ -1602,16 +1801,16 @@ textarea {
 .wrote-file-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 12px;
-  font-size: 12.5px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
   color: var(--muted);
 }
 
 .wrote-toggle {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-3);
   min-width: 0;
   padding: 0;
   border: none;
@@ -1619,7 +1818,7 @@ textarea {
   color: var(--muted);
   font: inherit;
   cursor: pointer;
-  transition: color 0.12s;
+  transition: color var(--motion-fast);
 }
 
 .wrote-toggle:hover:not(:disabled) {
@@ -1627,6 +1826,9 @@ textarea {
 }
 
 .wrote-toggle:disabled {
+  /* `disabled` here means "nothing to open", not "you may not" — so no dimming and no refusal
+     cursor. Named explicitly because the global disabled rule would otherwise grey it out. */
+  opacity: 1;
   cursor: default;
 }
 
@@ -1635,7 +1837,7 @@ textarea {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .wrote-meta {
@@ -1649,18 +1851,18 @@ textarea {
   flex: none;
   min-height: var(--control);
   line-height: 1.2;
-  padding: 0 10px;
+  padding: 0 var(--space-4);
   display: inline-flex;
   align-items: center;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--bg);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
   text-decoration: none;
   transition:
-    color 0.12s,
-    border-color 0.12s;
+    color var(--motion-fast),
+    border-color var(--motion-fast);
 }
 
 .wrote-get:hover {
@@ -1674,14 +1876,14 @@ textarea {
 
 .wrote-note {
   margin: 0;
-  padding: 8px 12px;
+  padding: var(--space-3) var(--space-4);
   color: var(--faint);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 /* A preview header has no sort button to carry the padding `.res-table th` gives away. */
 .wrote-table th {
-  padding: 6px 12px;
+  padding: var(--space-2) var(--space-4);
   color: var(--muted);
 }
 
@@ -1693,9 +1895,9 @@ textarea {
   margin: 0;
   max-height: 340px;
   overflow: auto;
-  padding: 10px 12px;
+  padding: var(--space-4) var(--space-4);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1751,25 +1953,25 @@ textarea {
 }
 
 .res-chart {
-  padding: 12px 12px 4px;
+  padding: var(--space-4) var(--space-4) var(--space-1);
   border-bottom: 1px solid var(--line);
 }
 
 .res-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 14px;
-  margin: 0 0 8px;
+  gap: var(--space-1) var(--space-4);
+  margin: 0 0 var(--space-3);
   padding: 0;
   list-style: none;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .res-legend li {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 /* Identity rides a coloured mark beside the text, never the text itself — a light hue is
@@ -1777,7 +1979,7 @@ textarea {
 .res-key {
   width: 10px;
   height: 10px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   flex: none;
 }
 
@@ -1809,7 +2011,7 @@ textarea {
 
 .res-tick {
   fill: var(--faint);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1832,7 +2034,7 @@ textarea {
 }
 
 .res-bar {
-  transition: opacity 0.12s;
+  transition: opacity var(--motion-fast);
 }
 
 .res-hit {
@@ -1845,24 +2047,24 @@ textarea {
   transform: translateX(-50%);
   pointer-events: none;
   min-width: 128px;
-  padding: 7px 9px;
+  padding: var(--space-3) var(--space-3);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--raised);
-  box-shadow: 0 6px 20px rgb(0 0 0 / 12%);
-  font-size: 12px;
+  box-shadow: var(--shadow-md);
+  font-size: var(--text-sm);
   z-index: 2;
 }
 
 .res-tip-x {
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
   color: var(--muted);
 }
 
 .res-tip-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .res-tip-name {
@@ -1889,7 +2091,7 @@ textarea {
 }
 
 .res-bare {
-  padding: 12px;
+  padding: var(--space-4);
 }
 
 .res-bare svg {
@@ -1901,9 +2103,9 @@ textarea {
 .res-bare-ends {
   display: flex;
   justify-content: space-between;
-  padding-top: 4px;
+  padding-top: var(--space-1);
   color: var(--faint);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1911,8 +2113,8 @@ textarea {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px 20px;
-  padding: 12px;
+  gap: var(--space-3) var(--space-6);
+  padding: var(--space-4);
 }
 
 .res-donut svg {
@@ -1924,14 +2126,14 @@ textarea {
 
 .res-donut-total {
   fill: var(--ink);
-  font-size: 20px;
+  font-size: var(--text-xl);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
 
 .res-donut-cap {
   fill: var(--faint);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
@@ -1940,12 +2142,12 @@ textarea {
   display: grid;
   flex: 1;
   min-width: 150px;
-  gap: 5px;
+  gap: var(--space-2);
   margin: 0;
 }
 
 .res-donut-legend li {
-  gap: 8px;
+  gap: var(--space-3);
 }
 
 .res-donut-name {
@@ -1965,7 +2167,7 @@ textarea {
 }
 
 .res-heat {
-  padding: 10px 12px 12px;
+  padding: var(--space-4) var(--space-4) var(--space-4);
 }
 
 .res-heat svg {
@@ -1978,31 +2180,31 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 3px;
-  padding-top: 6px;
+  gap: var(--space-1);
+  padding-top: var(--space-2);
   color: var(--faint);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   font-variant-numeric: tabular-nums;
 }
 
 .res-heat-step {
   width: 22px;
   height: 9px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
 }
 
 .res-heat-scale span:first-child {
-  margin-right: 4px;
+  margin-right: var(--space-1);
 }
 
 .res-heat-scale span:last-child {
-  margin-left: 4px;
+  margin-left: var(--space-1);
 }
 
 .res-gauge {
   display: flex;
   justify-content: center;
-  padding: 12px;
+  padding: var(--space-4);
 }
 
 .res-gauge svg {
@@ -2018,8 +2220,8 @@ textarea {
 .res-stats {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px 26px;
-  padding: 12px;
+  gap: var(--space-5) var(--space-6);
+  padding: var(--space-4);
 }
 
 .res-stat {
@@ -2027,12 +2229,12 @@ textarea {
   min-width: 148px;
   flex: 1;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .res-stat-label {
   color: var(--muted);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -2041,12 +2243,12 @@ textarea {
 .res-stat-figure {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: var(--space-3);
 }
 
 .res-stat-value {
   color: var(--ink);
-  font-size: 28px;
+  font-size: var(--text-2xl);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -2054,9 +2256,9 @@ textarea {
 }
 
 .res-stat-delta {
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: 11px;
+  padding: var(--space-05) var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   white-space: nowrap;
@@ -2082,7 +2284,7 @@ textarea {
   width: 100%;
   max-width: 300px;
   height: 30px;
-  margin-top: 2px;
+  margin-top: var(--space-05);
 }
 
 .res-spark-area {
@@ -2102,27 +2304,27 @@ textarea {
 .res-kpis {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px 32px;
-  padding: 14px 12px;
+  gap: var(--space-3) var(--space-7);
+  padding: var(--space-4) var(--space-4);
   border-bottom: 1px solid var(--line);
 }
 
 .res-kpi {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-05);
 }
 
 .res-kpi-label {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 /* Proportional figures, not tabular: equal-width digits read loose at this size, and
    nothing here has to line up vertically. */
 .res-kpi-value {
   color: var(--ink);
-  font-size: 26px;
+  font-size: var(--text-2xl);
   font-weight: 600;
   line-height: 1.15;
 }
@@ -2132,10 +2334,10 @@ textarea {
 .row.compacted {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-4);
   color: var(--faint);
-  font-size: 12px;
-  margin-top: 18px;
+  font-size: var(--text-sm);
+  margin-top: var(--space-5);
 }
 
 .row.compacted::before,
@@ -2149,14 +2351,14 @@ textarea {
 .row.error {
   color: var(--bad);
   border: 1px solid color-mix(in srgb, var(--bad) 40%, var(--line));
-  border-radius: var(--radius);
-  padding: 10px 14px;
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-4);
 }
 
 .fatal {
   max-width: 520px;
   margin: 18vh auto;
-  padding: 0 24px;
+  padding: 0 var(--space-6);
   color: var(--muted);
 }
 
@@ -2164,21 +2366,21 @@ textarea {
 
 .composer-wrap {
   width: min(760px, calc(100% - 48px));
-  margin: 0 auto 20px;
+  margin: 0 auto var(--space-6);
 }
 
 .status {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-3);
   height: 0;
   opacity: 0;
   overflow: hidden;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   transition:
-    height 0.22s var(--ease),
-    opacity 0.22s;
+    height var(--motion-slow) var(--ease),
+    opacity var(--motion-slow);
 }
 
 .status.on {
@@ -2205,28 +2407,28 @@ textarea {
   /* Wraps so the attachment row takes a line of its own above the textarea rather than
      sitting beside it — see `.attached`. */
   flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--space-3);
   align-items: flex-end;
-  padding: 10px;
+  padding: var(--space-4);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: var(--radius-xl);
   background: var(--panel);
   transition:
-    border-color 0.2s,
-    box-shadow 0.2s;
+    border-color var(--motion-slow),
+    box-shadow var(--motion-slow);
 }
 
 /* A file dragged anywhere over the composer. The same accent as focus, because it is the
    same statement: this is what your next action lands in. */
 .composer.over {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--ring-soft);
 }
 
 .composer-failed {
-  margin: 0 0 6px;
+  margin: 0 0 var(--space-2);
   color: var(--bad);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .composer-picker {
@@ -2235,7 +2437,7 @@ textarea {
 
 .composer:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--ring-soft);
 }
 
 .composer.busy {
@@ -2253,35 +2455,18 @@ textarea {
   max-height: 200px;
 }
 
-.composer button {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  border: 0;
-  border-radius: 9px;
-  padding: 8px 16px;
-  font-size: 14px;
-  cursor: pointer;
-  background: var(--accent);
-  color: #fff;
-  transition:
-    opacity 0.15s,
-    transform 0.12s var(--ease);
-}
-
 .composer button:active {
   transform: scale(0.97);
 }
 
 .composer button:disabled {
-  opacity: 0.35;
-  cursor: default;
+  /* Cancels the lift from `:hover` — the global disabled rule handles the rest. */
   transform: none;
 }
 
 .composer .stop {
   background: var(--bad);
-  animation: rise 0.2s var(--ease);
+  animation: rise var(--motion-slow) var(--ease);
 }
 
 /* ---------- attachments ----------
@@ -2292,24 +2477,24 @@ textarea {
   flex: 1 0 100%;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .attached.sent {
-  margin-top: 8px;
+  margin-top: var(--space-3);
 }
 
 .attach {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-3);
   max-width: 100%;
-  padding: 3px 4px 3px 9px;
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--raised);
   color: var(--ink);
-  font-size: 12px;
+  font-size: var(--text-sm);
   text-decoration: none;
 }
 
@@ -2322,7 +2507,7 @@ textarea {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
 }
 
 .attach-meta {
@@ -2332,19 +2517,13 @@ textarea {
 
 /* Sent chips carry no button, so the padding that makes room for one goes with it. */
 .attached.sent .attach {
-  padding-right: 9px;
+  padding-right: var(--space-3);
 }
 
 .composer .attach-drop,
 .composer .attach-add {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   flex: none;
-  padding: 0;
-  line-height: 1;
   color: var(--faint);
-  cursor: pointer;
 }
 
 .composer .attach-drop {
@@ -2353,7 +2532,7 @@ textarea {
   border-radius: 50%;
   border: 0;
   background: none;
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .composer .attach-drop:hover {
@@ -2365,8 +2544,8 @@ textarea {
 .composer .attach-add {
   width: var(--control);
   height: var(--control);
-  border-radius: 9px;
-  font-size: 18px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-xl);
   background: var(--raised);
   border: 1px solid var(--line);
 }
@@ -2379,7 +2558,7 @@ textarea {
 .square {
   width: 8px;
   height: 8px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: #fff;
 }
 
@@ -2393,14 +2572,14 @@ textarea {
 .job-pill {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--raised);
   color: var(--ink);
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   text-align: left;
   cursor: pointer;
 }
@@ -2464,10 +2643,10 @@ textarea {
   border-radius: 50%;
   background: none;
   color: var(--faint);
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1;
   cursor: help;
-  transition: color 0.12s;
+  transition: color var(--motion-fast);
 }
 
 .info-button:hover,
@@ -2482,18 +2661,18 @@ textarea {
   position: fixed;
   z-index: 60;
   width: min(46ch, calc(100vw - 16px));
-  padding: 11px 13px;
+  padding: var(--space-4) var(--space-4);
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: var(--radius-lg);
   background: var(--raised);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.17);
+  box-shadow: var(--shadow-md);
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   font-weight: 400;
   line-height: 1.55;
   text-transform: none;
   letter-spacing: normal;
-  animation: rise 0.14s var(--ease);
+  animation: rise var(--motion-fast) var(--ease);
 }
 
 /* ---------- overflow menu ---------- */
@@ -2503,20 +2682,13 @@ textarea {
 }
 
 .menu-button {
-  display: grid;
   place-items: center;
   width: var(--control);
-  height: var(--control);
-  border: 1px solid var(--line);
-  border-radius: 6px;
   background: var(--panel);
   color: var(--muted);
-  font-size: 15px;
-  line-height: 1;
-  cursor: pointer;
   transition:
-    border-color 0.15s,
-    color 0.15s;
+    border-color var(--motion-fast),
+    color var(--motion-fast);
 }
 
 .menu-button:hover,
@@ -2531,28 +2703,21 @@ textarea {
   top: calc(100% + 5px);
   right: 0;
   min-width: 196px;
-  padding: 4px;
+  padding: var(--space-1);
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: var(--radius-lg);
   background: var(--raised);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.17);
-  animation: rise 0.14s var(--ease);
+  box-shadow: var(--shadow-md);
+  animation: rise var(--motion-fast) var(--ease);
 }
 
 .menu-panel button {
-  display: flex;
   flex-direction: column;
-  gap: 1px;
   width: 100%;
-  padding: 7px 9px;
   border: 0;
-  border-radius: 6px;
   background: none;
-  color: var(--ink);
   font: inherit;
-  font-size: 13px;
   text-align: left;
-  cursor: pointer;
 }
 
 .menu-panel button:hover:not(:disabled) {
@@ -2561,16 +2726,15 @@ textarea {
 
 .menu-panel button:disabled {
   color: var(--faint);
-  cursor: not-allowed;
 }
 
 /* Ruled off from the routine actions above it, so Remove cannot be hit by momentum on
    the way to Edit. The typed-name confirm is the real guard; this is the warning. */
 .menu-panel button.danger {
-  margin-top: 4px;
-  padding-top: 8px;
+  margin-top: var(--space-1);
+  padding-top: var(--space-3);
   border-top: 1px solid var(--line);
-  border-radius: 0 0 6px 6px;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
   color: var(--bad);
 }
 
@@ -2584,7 +2748,7 @@ textarea {
 
 .menu-panel small {
   color: var(--faint);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 /* ---------- destructive confirmation ---------- */
@@ -2596,7 +2760,7 @@ textarea {
   display: grid;
   place-items: center;
   background: rgba(0, 0, 0, 0.42);
-  animation: fade 0.15s var(--ease);
+  animation: fade var(--motion-fast) var(--ease);
 }
 
 @keyframes fade {
@@ -2607,31 +2771,31 @@ textarea {
 
 .modal {
   width: min(460px, calc(100vw - 40px));
-  padding: 20px;
+  padding: var(--space-6);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: var(--radius-xl);
   background: var(--raised);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
-  animation: rise 0.18s var(--ease);
+  box-shadow: var(--shadow-lg);
+  animation: rise var(--motion-fast) var(--ease);
 }
 
 .modal h2 {
-  margin: 0 0 10px;
-  font-size: 16px;
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-lg);
 }
 
 .modal-body p {
-  margin: 0 0 9px;
+  margin: 0 0 var(--space-3);
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.55;
 }
 
 .modal label {
   display: block;
-  margin-top: 14px;
+  margin-top: var(--space-4);
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 /* The word to type. Italic and in ink, because it is the one thing on the dialog that has to
@@ -2644,15 +2808,7 @@ textarea {
 
 .modal input {
   width: 100%;
-  margin-top: 5px;
-  padding: 7px 10px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--bg);
-  color: var(--ink);
-  font: inherit;
-  font-size: 13px;
-  outline: none;
+  margin-top: var(--space-2);
 }
 
 .modal input:focus {
@@ -2662,8 +2818,8 @@ textarea {
 .modal footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  margin-top: 18px;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
 }
 
 .health-dot {
@@ -2685,14 +2841,14 @@ textarea {
 }
 
 .banner {
-  margin: 0 0 14px;
-  padding: 9px 12px;
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--line);
   border-left: 3px solid var(--muted);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--panel);
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .banner.warn {
@@ -2723,20 +2879,11 @@ textarea {
   overflow: hidden;
   color: var(--faint);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.badge {
-  flex: none;
-  padding: 2px 8px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--muted);
-  font-size: 11px;
-  white-space: nowrap;
-}
 
 .badge.accent {
   border-color: color-mix(in srgb, var(--accent) 35%, transparent);
@@ -2747,7 +2894,7 @@ textarea {
 .detail-primary {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   margin-left: auto;
 }
 
@@ -2757,17 +2904,9 @@ textarea {
 .modal footer button,
 .drawer footer button,
 .mcp-actions button {
-  padding: 5px 11px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel);
-  color: var(--ink);
-  font: inherit;
-  font-size: 12.5px;
-  cursor: pointer;
   transition:
-    background 0.15s var(--ease),
-    border-color 0.15s var(--ease);
+    background var(--motion-fast) var(--ease),
+    border-color var(--motion-fast) var(--ease);
 }
 
 .detail-primary > button:hover:not(:disabled),
@@ -2777,33 +2916,19 @@ textarea {
   border-color: var(--muted);
 }
 
-button.primary {
-  border-color: transparent !important;
-  background: var(--accent) !important;
-  color: #fff !important;
-}
-
-button.primary:disabled,
-.detail-primary > button:disabled,
-.modal footer button:disabled,
-.stage-cta button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
 /* Cube's own UI for this container, between the primary action and the overflow. Styled
    as a control rather than as body-text link so the row keeps one baseline. */
 .cube-link {
-  padding: 5px 11px;
+  padding: var(--space-2) var(--space-4);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--panel);
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   text-decoration: none;
   transition:
-    border-color 0.15s,
-    color 0.15s;
+    border-color var(--motion-fast),
+    color var(--motion-fast);
 }
 
 .cube-link:hover {
@@ -2811,28 +2936,22 @@ button.primary:disabled,
   color: var(--accent);
 }
 
-button.danger.solid {
-  border-color: transparent;
-  background: var(--bad);
-  color: #fff;
-}
-
 .detail-desc {
-  margin: 12px 0 0;
+  margin: var(--space-4) 0 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .job-logs {
-  margin: 12px 16px;
-  padding: 10px 12px;
+  margin: var(--space-4) var(--space-5);
+  padding: var(--space-4) var(--space-4);
   max-height: 260px;
   overflow: auto;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--code-bg);
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   line-height: 1.5;
   white-space: pre-wrap;
 }
@@ -2845,9 +2964,9 @@ button.danger.solid {
 .stepper {
   display: flex;
   align-items: stretch;
-  gap: 4px;
+  gap: var(--space-1);
   margin: 0;
-  padding: 0 0 10px;
+  padding: 0 0 var(--space-4);
   list-style: none;
   overflow-x: auto;
 }
@@ -2858,24 +2977,13 @@ button.danger.solid {
 }
 
 .step button {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   width: 100%;
-  height: 100%;
-  padding: 9px 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--raised);
   color: var(--muted);
-  font: inherit;
-  font-size: 12.5px;
   text-align: left;
-  cursor: pointer;
   transition:
-    border-color 0.15s,
-    color 0.15s,
-    background 0.15s;
+    border-color var(--motion-fast),
+    color var(--motion-fast),
+    background var(--motion-fast);
 }
 
 .step button:hover {
@@ -2898,7 +3006,7 @@ button.danger.solid {
   border: 1px solid var(--line);
   border-radius: 50%;
   background: var(--bg);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   font-variant-numeric: tabular-nums;
   color: var(--faint);
 }
@@ -2906,13 +3014,13 @@ button.danger.solid {
 .step-tick.done {
   border-color: transparent;
   background: var(--ok);
-  color: #fff;
+  color: var(--on-fill);
 }
 
 .step-tick.error {
   border-color: transparent;
   background: var(--bad);
-  color: #fff;
+  color: var(--on-fill);
 }
 
 .step-name {
@@ -2927,7 +3035,7 @@ button.danger.solid {
 .step-note {
   margin-left: auto;
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--muted);
   white-space: nowrap;
 }
@@ -2936,83 +3044,66 @@ button.danger.solid {
    step, which is what ties the panel to it — there is a gap between them, so a square
    "attached" top edge would only look like a mistake. */
 .stage-panel {
-  padding: 14px 16px 16px;
+  padding: var(--space-4) var(--space-5) var(--space-5);
   border: 1px solid var(--line);
   border-left: 2px solid var(--accent);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: var(--raised);
-  animation: rise 0.16s var(--ease);
+  animation: rise var(--motion-fast) var(--ease);
 }
 
 .stage-panel-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.stage-close {
-  margin-left: 4px;
-  padding: 0 4px;
-  border: 0;
-  border-radius: 5px;
-  background: none;
-  color: var(--faint);
-  font-size: 15px;
-  line-height: 1;
-  cursor: pointer;
-  transition: color 0.12s;
-}
-
-.stage-close:hover {
-  color: var(--ink);
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
 }
 
 /* The title takes the slack so the timestamp, the ⓘ and the close cluster on the right
    as one group — two `margin-left: auto` siblings would split the gap between them. */
 .stage-panel-head h4 {
   margin: 0 auto 0 0;
-  font-size: 13.5px;
+  font-size: var(--text-md);
   font-weight: 600;
 }
 
 .stage-when {
   color: var(--faint);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   white-space: nowrap;
 }
 
 .stage-says {
-  margin: 0 0 12px;
+  margin: 0 0 var(--space-4);
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .stage-cta {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-4);
   flex-wrap: wrap;
 }
 
 .stage-cta p {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-3);
   flex: 1 1 100%;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .stage-hint,
 .picker-says .cut {
   color: var(--warn);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .stage-notes {
-  margin: 12px 0 0;
-  padding-left: 18px;
+  margin: var(--space-4) 0 0;
+  padding-left: var(--space-5);
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .stage-notes.bad {
@@ -3020,7 +3111,7 @@ button.danger.solid {
 }
 
 .stage-notes li {
-  margin-bottom: 3px;
+  margin-bottom: var(--space-1);
 }
 
 /* ---------- the table picker ---------- */
@@ -3028,8 +3119,8 @@ button.danger.solid {
 .picker-head {
   display: flex;
   align-items: flex-end;
-  gap: 12px;
-  margin-bottom: 10px;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
   flex-wrap: wrap;
 }
 
@@ -3037,23 +3128,12 @@ button.danger.solid {
 .drawer label {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
-.picker-head select,
-.picker-filter,
-.drawer input,
-.drawer select {
-  padding: 6px 9px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--ink);
-  font: inherit;
-  font-size: 13px;
-}
+
 
 .picker-filter {
   flex: 1;
@@ -3062,23 +3142,23 @@ button.danger.solid {
 
 .picker-bulk {
   display: flex;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .picker-list {
   max-height: 340px;
   overflow-y: auto;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
 }
 
 .picker-row {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 6px 10px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
   border-bottom: 1px solid var(--line);
-  font-size: 13px;
+  font-size: var(--text-md);
   cursor: pointer;
 }
 
@@ -3099,16 +3179,16 @@ button.danger.solid {
 .picker-name {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   min-width: 200px;
 }
 
 .tag {
-  padding: 0 5px;
-  border-radius: 4px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
   background: var(--code-bg);
   color: var(--muted);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }
@@ -3123,7 +3203,7 @@ button.danger.solid {
 .picker-meta {
   margin-left: auto;
   color: var(--faint);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3133,13 +3213,13 @@ button.danger.solid {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 16px;
-  margin-top: 12px;
+  gap: var(--space-5);
+  margin-top: var(--space-4);
 }
 
 .picker-says {
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .picker-says .cut {
@@ -3149,9 +3229,9 @@ button.danger.solid {
 /* ---------- the running job ---------- */
 
 .job {
-  margin: 0 16px 16px;
+  margin: 0 var(--space-5) var(--space-5);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--panel);
 }
 
@@ -3162,13 +3242,13 @@ button.danger.solid {
 .job-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-4);
   border-bottom: 1px solid var(--line);
 }
 
 .job-title {
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 500;
 }
 
@@ -3176,40 +3256,30 @@ button.danger.solid {
   margin-left: auto;
   color: var(--faint);
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
-}
-
-.job-head button {
-  padding: 3px 9px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  background: var(--raised);
-  color: var(--bad);
-  font-size: 12px;
-  cursor: pointer;
 }
 
 .job-steps {
   margin: 0;
-  padding: 10px 14px;
+  padding: var(--space-4) var(--space-4);
   list-style: none;
 }
 
 .job-steps li {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 3px 0;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
   color: var(--faint);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .job-steps .tick {
   width: 16px;
   text-align: center;
   color: var(--faint);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .job-steps li.done {
@@ -3233,13 +3303,13 @@ button.danger.solid {
   margin-left: auto;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
 }
 
 .job-error {
-  margin: 0 14px 12px;
+  margin: 0 var(--space-4) var(--space-4);
   color: var(--bad);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   white-space: pre-wrap;
 }
 
@@ -3250,7 +3320,7 @@ button.danger.solid {
   inset: 0;
   z-index: 20;
   background: rgba(0, 0, 0, 0.28);
-  animation: fade 0.16s var(--ease);
+  animation: fade var(--motion-fast) var(--ease);
 }
 
 @keyframes fade {
@@ -3265,14 +3335,14 @@ button.danger.solid {
   right: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-4);
   width: min(440px, 100%);
   height: 100%;
   overflow-y: auto;
-  padding: 20px 22px 24px;
+  padding: var(--space-6) var(--space-6) var(--space-6);
   border-left: 1px solid var(--line);
   background: var(--bg);
-  animation: slide 0.22s var(--ease);
+  animation: slide var(--motion-slow) var(--ease);
 }
 
 @keyframes slide {
@@ -3290,14 +3360,14 @@ button.danger.solid {
 
 .drawer h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--text-lg);
 }
 
 .drawer .icon {
   border: none;
   background: none;
   color: var(--muted);
-  font-size: 20px;
+  font-size: var(--text-xl);
   line-height: 1;
   cursor: pointer;
 }
@@ -3305,20 +3375,20 @@ button.danger.solid {
 .drawer-blurb {
   margin: 0;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .drawer label.check {
   flex-direction: row;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-3);
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .drawer small {
   color: var(--faint);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
 }
 
 .optional {
@@ -3329,28 +3399,20 @@ button.danger.solid {
 .nudge {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 11px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--line);
   border-left: 3px solid var(--warn);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--panel);
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   flex-wrap: wrap;
 }
 
-.nudge button {
-  padding: 4px 9px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  background: var(--raised);
-  color: var(--ink);
-  font-size: 12px;
-  cursor: pointer;
-}
 
-/* --- connecting a database ------------------------------------------------------------ */
+
+/* ---------- connecting a database ---------- */
 /* Its own rules rather than the drawer's, because this form renders in two places: the
    drawer on the data page and inline in the first-run wizard. Nothing here may assume a
    drawer's width — the wizard's column is wider, and the field grid uses what it is given. */
@@ -3368,7 +3430,7 @@ button.danger.solid {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-4);
   min-width: 0;
 }
 
@@ -3384,26 +3446,26 @@ button.danger.solid {
 .conn-form footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--space-3);
   margin-top: auto;
-  padding-top: 4px;
+  padding-top: var(--space-1);
 }
 
 .conn-pick {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-4);
 }
 
 .conn-group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .conn-group-name {
   color: var(--faint);
-  font-size: 11px;
+  font-size: var(--text-xs);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -3414,16 +3476,16 @@ button.danger.solid {
 .conn-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .conn-card {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
+  gap: var(--space-05);
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--raised);
   color: var(--ink);
   text-align: left;
@@ -3443,13 +3505,13 @@ button.danger.solid {
 }
 
 .conn-card strong {
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 550;
 }
 
 .conn-card small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.35;
 }
 
@@ -3458,13 +3520,13 @@ button.danger.solid {
 .conn-fields {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 10px 12px;
+  gap: var(--space-3) var(--space-4);
 }
 
 .conn-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   position: relative;
   min-width: 0;
 }
@@ -3478,34 +3540,26 @@ button.danger.solid {
 .conn-label {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: var(--space-2);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .conn-label em {
   color: var(--faint);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-style: normal;
 }
 
 .conn-field input,
 .conn-field select,
 .conn-field textarea {
-  min-height: var(--control);
-  padding: 6px 9px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--ink);
-  font: inherit;
-  font-size: 13px;
   min-width: 0;
 }
 
 .conn-field textarea {
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   line-height: 1.5;
   resize: vertical;
 }
@@ -3513,7 +3567,6 @@ button.danger.solid {
 .conn-field input:focus,
 .conn-field select:focus,
 .conn-field textarea:focus {
-  outline: none;
   border-color: var(--accent);
 }
 
@@ -3524,7 +3577,7 @@ button.danger.solid {
 
 .conn-field small {
   color: var(--faint);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   line-height: 1.4;
 }
 
@@ -3541,12 +3594,9 @@ button.danger.solid {
 /* At the end of the label's own row, and only rendered once there is something to reveal. */
 .conn-reveal {
   margin-left: auto;
-  padding: 0;
   border: none;
   background: none;
   color: var(--muted);
-  font-size: 11px;
-  cursor: pointer;
 }
 
 .conn-reveal:hover {
@@ -3557,18 +3607,18 @@ button.danger.solid {
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--line);
-  padding-top: 10px;
+  padding-top: var(--space-4);
 }
 
 .conn-fold-head {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: var(--space-2);
   padding: 0;
   border: none;
   background: none;
   color: var(--ink);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   text-align: left;
   cursor: pointer;
 }
@@ -3577,7 +3627,7 @@ button.danger.solid {
    nothing is hidden behind a word as vague as "more". */
 .conn-fold-head small {
   color: var(--faint);
-  font-size: 11px;
+  font-size: var(--text-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3585,33 +3635,33 @@ button.danger.solid {
 
 .conn-fold .conn-fields,
 .conn-fold .envs {
-  padding-top: 10px;
+  padding-top: var(--space-4);
 }
 
-/* --- the settings the picker has no field for ----------------------------------------- */
+/* ---------- the settings the picker has no field for ---------- */
 
 .envs {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .envs-head {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-05);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .envs-head small {
   color: var(--faint);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
 }
 
 .env-row {
   display: flex;
-  gap: 6px;
+  gap: var(--space-2);
   align-items: center;
 }
 
@@ -3619,12 +3669,12 @@ button.danger.solid {
 .env-value {
   min-height: var(--control);
   line-height: 1.2;
-  padding: 6px 9px;
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--bg);
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--text-md);
   min-width: 0;
 }
 
@@ -3632,7 +3682,7 @@ button.danger.solid {
 .env-name {
   flex: 0 1 42%;
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
 }
 
 .env-value {
@@ -3644,15 +3694,9 @@ button.danger.solid {
   border: 1px solid transparent;
   background: none;
   color: var(--muted);
-  cursor: pointer;
 }
 
-.env-drop {
-  min-height: var(--control);
-  padding: 0 6px;
-  font-size: 15px;
-  line-height: 1.2;
-}
+
 
 .env-drop:hover {
   color: var(--bad);
@@ -3660,8 +3704,8 @@ button.danger.solid {
 
 .env-add {
   align-self: flex-start;
-  padding: 4px 0;
-  font-size: 12px;
+  padding: var(--space-1) 0;
+  font-size: var(--text-sm);
 }
 
 .env-add:hover {
@@ -3671,15 +3715,15 @@ button.danger.solid {
 .drawer-error {
   margin: 0;
   color: var(--bad);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .drawer footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--space-3);
   margin-top: auto;
-  padding-top: 12px;
+  padding-top: var(--space-4);
 }
 
 /* A local single-user tool on a desktop, so this only keeps the three-column shell from
@@ -3705,10 +3749,11 @@ button.danger.solid {
 
 @media (max-width: 720px) {
   .sources {
-    padding: 20px 16px 48px;
+    padding: var(--space-6) var(--space-5) var(--space-8);
   }
-  .detail {
-    padding: 18px 16px 40px;
+  .detail-scroll,
+  .detail-page {
+    padding: var(--space-5) var(--space-5) var(--space-6);
   }
   .step {
     min-width: 96px;
@@ -3720,26 +3765,26 @@ button.danger.solid {
 .src-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-bottom: 18px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
 }
 
 .src-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
   width: 100%;
-  padding: 12px 14px;
+  padding: var(--space-4) var(--space-4);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   background: var(--raised);
   color: var(--ink);
   text-align: left;
   cursor: pointer;
-  animation: rise 0.22s var(--ease);
+  animation: rise var(--motion-slow) var(--ease);
   transition:
-    border-color 0.15s var(--ease),
-    transform 0.12s var(--ease);
+    border-color var(--motion-fast) var(--ease),
+    transform var(--motion-fast) var(--ease);
 }
 
 .src-row:hover {
@@ -3756,14 +3801,14 @@ button.danger.solid {
 
 .src-row-name {
   font-weight: 600;
-  font-size: 14.5px;
+  font-size: var(--text-md);
 }
 
 .src-row-what,
 .src-row-model,
 .src-row-next {
   color: var(--faint);
-  font-size: 12px;
+  font-size: var(--text-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3781,7 +3826,7 @@ button.danger.solid {
 
 .src-row-go {
   color: var(--faint);
-  transition: transform 0.15s var(--ease);
+  transition: transform var(--motion-fast) var(--ease);
 }
 
 .src-row:hover .src-row-go {
@@ -3791,22 +3836,54 @@ button.danger.solid {
 
 /* ---------- the page ---------- */
 
+/* Two zones, not one scroller: the connection above scrolls, the model below fills. The page
+   itself cannot scroll — an IDE that is one long page has no height of its own to hand to
+   CodeMirror, which is what made the old editor a 560px letterbox two thirds of the way down. */
 .detail {
+  display: flex;
+  flex-direction: column;
   flex: 1;
-  overflow-y: auto;
-  padding: 24px 28px 40px;
-  max-width: 1000px;
+  min-height: 0;
+  overflow: hidden;
   width: 100%;
+}
+
+/* The 1000px reading column this page used to be centred in is gone, and deliberately: it is
+   what the header and the editor no longer agree on. Centred prose above a full-bleed IDE puts
+   the connection's name a third of the way across the window while the branch bar under it
+   starts at the margin — two left edges on one screen. The measure mattered when the page was
+   prose; it is now a header over an editor, so both take the same 28px instead. */
+.detail-scroll {
+  flex: none;
+  max-height: 55%;
+  overflow-y: auto;
+  padding: var(--space-6) var(--space-7) var(--space-1);
+  width: 100%;
+}
+
+/* `.detail` is a shell with no padding of its own: SourceDetail puts an IDE inside it that has
+   to fill the height, so that page's inset lives on `.detail-scroll` instead. A `.detail` page
+   with no such child has to say so — otherwise it inherits a shell built for someone else's
+   layout and renders flush against the window edge, which is what happened to the agents page.
+
+   It keeps the centred measure that `.detail-scroll` gives up. The argument there was that a
+   centred header above a full-bleed editor shows two left edges on one screen; this page is
+   prose the whole way down, so the measure still earns its place. */
+.detail-page {
+  overflow-y: auto;
+  width: 100%;
+  max-width: 1000px;
   margin: 0 auto;
+  padding: var(--space-6) var(--space-7) var(--space-8);
 }
 
 .crumbs {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 12px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
   color: var(--faint);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .crumbs button {
@@ -3816,7 +3893,7 @@ button.danger.solid {
   color: var(--muted);
   font: inherit;
   cursor: pointer;
-  transition: color 0.12s;
+  transition: color var(--motion-fast);
 }
 
 .crumbs button:hover {
@@ -3826,47 +3903,49 @@ button.danger.solid {
 .detail-head {
   display: flex;
   align-items: center;
-  column-gap: 10px;
-  row-gap: 6px;
+  column-gap: var(--space-3);
+  row-gap: var(--space-2);
   flex-wrap: wrap;
 }
 
 .detail-head h1 {
   margin: 0;
-  font-size: 20px;
+  font-size: var(--text-xl);
   font-weight: 600;
 }
 
 .detail .banner {
-  margin: 12px 0 0;
+  margin: var(--space-4) 0 0;
 }
 
 .detail-panel {
-  margin-top: 26px;
-  padding-top: 18px;
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
   border-top: 1px solid var(--line);
 }
 
 .panel-head {
   display: flex;
   align-items: center;
-  gap: 7px;
-  margin-bottom: 14px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
 }
 
 .detail-panel h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 600;
 }
+
+/* ============================= the served model ============================= */
 
 /* ---------- what Cube is serving ---------- */
 
 .served-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
   flex-wrap: wrap;
 }
 
@@ -3874,93 +3953,65 @@ button.danger.solid {
   flex: 1;
   min-width: 200px;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .served-filter {
   width: 200px;
-  padding: 5px 9px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--ink);
-  font-size: 12.5px;
-  outline: none;
-  transition: border-color 0.15s;
+  transition: border-color var(--motion-fast);
 }
 
 .served-filter:focus {
   border-color: var(--accent);
 }
 
-.served-head button {
-  padding: 5px 11px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel);
-  color: var(--ink);
-  font-size: 12.5px;
-  cursor: pointer;
-}
 
-.served-head button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.served-empty {
-  color: var(--muted);
-  font-size: 13px;
-}
 
 /* Views and cubes are two sections, not one list with a pill on each row. The pill made
    them read as two flavours of one thing; they are a surface and its implementation. */
-.served-section {
-  margin-bottom: 18px;
+.group {
+  margin-bottom: var(--space-5);
 }
 
 /* Two rows: the label and its count, then what the section is for. A narrow list column
    cannot fit "Views · the tables underneath · ⓘ · 11" on one line. */
-.served-section-head {
+.group-head {
   display: grid;
   grid-template-columns: auto auto 1fr;
   align-items: center;
-  column-gap: 6px;
-  margin-bottom: 8px;
-  padding-bottom: 6px;
+  column-gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
   border-bottom: 1px solid var(--line);
 }
 
-.served-section-head h4 {
+.group-head h4 {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
-.served-section.views .served-section-head h4 {
+.group.views .group-head h4 {
   color: var(--accent);
 }
 
-.served-section.cubes .served-section-head h4 {
+.group.cubes .group-head h4 {
   color: var(--muted);
 }
 
-.served-section-sub {
+.group-sub {
   grid-column: 1 / -1;
   grid-row: 2;
   color: var(--faint);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
 }
 
-.served-section-count {
+.group-count {
   grid-column: 3;
   grid-row: 1;
   justify-self: end;
-  color: var(--faint);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
 }
 
 /* Master–detail. The list column is fixed and never reflows; opening an entity fills the
@@ -3969,7 +4020,7 @@ button.danger.solid {
 .served-split {
   display: grid;
   grid-template-columns: minmax(190px, 260px) 1fr;
-  gap: 16px;
+  gap: var(--space-5);
   align-items: start;
 }
 
@@ -3983,24 +4034,24 @@ button.danger.solid {
   min-width: 0;
   max-height: 70vh;
   overflow-y: auto;
-  padding: 14px 16px 16px;
+  padding: var(--space-4) var(--space-5) var(--space-5);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: var(--raised);
 }
 
 .served-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-3);
   width: 100%;
-  padding: 6px 9px;
+  padding: var(--space-2) var(--space-3);
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: none;
   color: var(--muted);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--text-md);
   text-align: left;
   cursor: pointer;
   transition:
@@ -4035,14 +4086,14 @@ button.danger.solid {
   flex: none;
   color: var(--faint);
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   font-variant-numeric: tabular-nums;
 }
 
 .served-row-flag {
   flex: none;
   color: var(--warn);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }
@@ -4050,13 +4101,13 @@ button.danger.solid {
 .served-detail-head {
   display: flex;
   align-items: center;
-  gap: 9px;
-  margin-bottom: 8px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
 }
 
 .served-detail-head h4 {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 600;
 }
 
@@ -4064,17 +4115,17 @@ button.danger.solid {
   margin-left: auto;
   color: var(--faint);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .served-tag {
   flex: none;
-  padding: 1px 7px;
+  padding: var(--space-05) var(--space-3);
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   color: var(--faint);
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
 }
 
 .served-tag.view {
@@ -4086,9 +4137,9 @@ button.danger.solid {
 /* Which cubes a view projects over, or which views reach a cube — the relationship that
    makes the two sections one model instead of two lists. */
 .served-rel {
-  margin: 0 0 10px;
+  margin: 0 0 var(--space-3);
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .served-rel .warn {
@@ -4098,45 +4149,45 @@ button.danger.solid {
 .served-alias {
   color: var(--faint);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .served-desc {
-  margin: 10px 0 0;
+  margin: var(--space-3) 0 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 /* Marked rather than folded into the description: this is the text steering the agent. */
 .served-ai,
 .served-member-ai {
   display: block;
-  margin: 6px 0 0;
+  margin: var(--space-2) 0 0;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .served-ai-tag {
   display: inline-block;
-  margin-right: 7px;
-  padding: 0 6px;
-  border-radius: 4px;
+  margin-right: var(--space-3);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
   background: var(--accent-soft);
   color: var(--accent);
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
 }
 
 .served-folders {
-  margin: 8px 0 0;
+  margin: var(--space-3) 0 0;
   color: var(--faint);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .served-group h4 {
-  margin: 16px 0 6px;
+  margin: var(--space-5) 0 var(--space-2);
   color: var(--faint);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -4149,7 +4200,7 @@ button.danger.solid {
 }
 
 .served-member {
-  padding: 6px 0;
+  padding: var(--space-2) 0;
   border-top: 1px solid var(--line);
 }
 
@@ -4160,24 +4211,24 @@ button.danger.solid {
 .served-member-head {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: var(--space-3);
   flex-wrap: wrap;
 }
 
 .served-member-name {
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .served-type,
 .served-grains {
   color: var(--faint);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .served-type {
-  padding: 0 6px;
-  border-radius: 4px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
   background: var(--code-bg);
   font-family: var(--mono);
   cursor: help;
@@ -4185,54 +4236,56 @@ button.danger.solid {
 
 .served-member-desc {
   display: block;
-  margin-top: 2px;
+  margin-top: var(--space-05);
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 /* ---------- collapsible sections ---------- */
 
-.served-section-toggle {
+.group-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   grid-column: 1;
   grid-row: 1;
-  padding: 2px 4px 2px 0;
+  padding: var(--space-05) var(--space-1) var(--space-05) 0;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: none;
   cursor: pointer;
   color: inherit;
 }
 
-.served-section-toggle:hover .served-caret {
+.group-toggle:hover .group-caret {
   color: var(--text);
 }
 
-.served-caret {
+.group-caret {
   display: inline-block;
   width: 9px;
   color: var(--faint);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   line-height: 1;
-  transition: transform 120ms ease;
+  transition: transform var(--motion-fast) ease;
 }
 
-.served-section.open .served-caret {
+.group.open .group-caret {
   transform: rotate(90deg);
 }
 
 /* A shut section is a header and nothing else, so its bottom margin would leave it
    floating above a gap the width of the content it is hiding. */
-.served-section:not(.open) {
-  margin-bottom: 6px;
+.group:not(.open) {
+  margin-bottom: var(--space-2);
 }
 
-.served-section:not(.open) .served-section-head {
+.group:not(.open) .group-head {
   margin-bottom: 0;
-  padding-bottom: 4px;
+  padding-bottom: var(--space-1);
 }
+
+/* ================================ dashboards ================================ */
 
 /* ---------- dashboards ----------
    All new names, all prefixed. `.nav*` above is deliberately *reused* by DashboardNav —
@@ -4244,11 +4297,11 @@ button.danger.solid {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding: 18px 22px 40px;
+  padding: var(--space-5) var(--space-6) var(--space-8);
 }
 
 .dash-fail {
-  padding: 28px 22px;
+  padding: var(--space-7) var(--space-6);
   color: var(--bad);
 }
 
@@ -4260,20 +4313,20 @@ button.danger.solid {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 14px;
+  gap: var(--space-5);
+  margin-bottom: var(--space-4);
 }
 
 .dash-title h2 {
-  margin: 0 0 1px;
-  font-size: 20px;
+  margin: 0 0 var(--space-05);
+  font-size: var(--text-xl);
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 
 .dash-meta {
   color: var(--faint);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .dash-actions {
@@ -4281,37 +4334,21 @@ button.danger.solid {
   flex-shrink: 0;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 7px;
+  gap: var(--space-3);
 }
 
 /* `>` so a control rendered by a child component is not restyled by this row. That is the
    `.detail-primary button` trap, which turned an overflow menu into bordered grey boxes. */
-.dash-actions > button {
-  min-height: var(--control);
-  padding: 0 11px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--raised);
-  color: var(--ink);
-  font: inherit;
-  font-size: 13px;
-  line-height: 1.2;
-  cursor: pointer;
-}
+
 
 .dash-actions > button.primary {
   border-color: transparent;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-fill);
 }
 
 .dash-actions > button.danger {
   color: var(--bad);
-}
-
-.dash-actions > button:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 /* Outranks `.dash-actions > button` above, which would otherwise paint this as one more
@@ -4323,28 +4360,16 @@ button.danger.solid {
 }
 
 .dash-select {
-  min-height: var(--control);
-  padding: 0 6px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--raised);
   color: var(--muted);
-  font-size: 12.5px;
-  line-height: 1.2;
   cursor: pointer;
 }
 
-.dash-select:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
 .dash-banner {
-  margin-bottom: 10px;
-  padding: 9px 12px;
+  margin-bottom: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  font-size: 12.5px;
+  border-radius: var(--radius-lg);
+  font-size: var(--text-sm);
   line-height: 1.5;
 }
 
@@ -4371,8 +4396,8 @@ button.danger.solid {
 .dash-progress {
   overflow: hidden;
   height: 2px;
-  margin-bottom: 14px;
-  border-radius: 2px;
+  margin-bottom: var(--space-4);
+  border-radius: var(--radius-xs);
   background: var(--line);
 }
 
@@ -4396,7 +4421,7 @@ button.danger.solid {
 
 .dash-grid {
   display: grid;
-  gap: 14px;
+  gap: var(--space-4);
 }
 
 /* The column count is an inline style off the saved layout, so the narrow-screen collapse
@@ -4424,7 +4449,7 @@ button.danger.solid {
    sit outside the gap. */
 .dash-cell.over > .dash-tile {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--ring-soft);
 }
 
 .dash-tile {
@@ -4433,13 +4458,13 @@ button.danger.solid {
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
-  animation: dash-rise 0.26s var(--ease) both;
+  border-radius: var(--radius-lg);
+  animation: dash-rise var(--motion-slow) var(--ease) both;
   background: var(--raised);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 4%);
+  box-shadow: var(--shadow-sm);
   transition:
-    border-color 0.16s var(--ease),
-    box-shadow 0.16s var(--ease);
+    border-color var(--motion-fast) var(--ease),
+    box-shadow var(--motion-fast) var(--ease);
 }
 
 /* On the tile, not the cell: `.dash-cell.lifted` owns the cell's opacity while a tile is
@@ -4457,14 +4482,14 @@ button.danger.solid {
 
 .dash-tile:hover {
   border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
-  box-shadow: 0 4px 14px rgb(0 0 0 / 8%);
+  box-shadow: var(--shadow-md);
 }
 
 .dash-tile-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 9px 12px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
 }
 
@@ -4473,7 +4498,7 @@ button.danger.solid {
   flex: 1;
   min-width: 0;
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4490,8 +4515,8 @@ button.danger.solid {
   color: var(--faint);
   opacity: 0.45;
   transition:
-    opacity 0.15s,
-    color 0.15s;
+    opacity var(--motion-fast),
+    color var(--motion-fast);
 }
 
 .dash-grip {
@@ -4499,18 +4524,18 @@ button.danger.solid {
   width: 14px;
   height: 18px;
   place-items: center;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1;
   cursor: grab;
 }
 
 .dash-span {
   min-height: 17px;
-  padding: 0 5px;
+  padding: 0 var(--space-2);
   border: 1px solid var(--line);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   line-height: 1.4;
   cursor: pointer;
 }
@@ -4527,37 +4552,26 @@ button.danger.solid {
    only thing that says whether this tile's numbers moved with the refresh. */
 .dash-tile-window {
   flex-shrink: 0;
-  padding: 1px 6px;
-  border-radius: 5px;
+  padding: var(--space-05) var(--space-2);
+  border-radius: var(--radius-sm);
   background: var(--code-bg);
   color: var(--faint);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--text-2xs);
 }
 
 .dash-tile-chart {
-  padding: 8px 8px 10px;
-}
-
-.dash-tile-empty {
-  margin: 0;
-  padding: 18px 12px 22px;
-  color: var(--faint);
-  font-size: 12.5px;
+  padding: var(--space-3) var(--space-3) var(--space-4);
 }
 
 /* A tile that has never been refreshed keeps the shape it will have, so the grid does not
    reflow under the first Refresh and the sentence is not the whole tile. */
-.dash-waiting .dash-tile-empty {
-  padding: 4px 12px 16px;
-}
-
 .dash-skeleton {
   display: flex;
   align-items: flex-end;
   height: 116px;
-  gap: 9px;
-  padding: 16px 14px 0;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-4) 0;
 }
 
 .dash-skeleton span {
@@ -4565,7 +4579,7 @@ button.danger.solid {
   animation: dash-shimmer 1.5s linear infinite;
   background: linear-gradient(90deg, var(--panel), var(--line), var(--panel));
   background-size: 220% 100%;
-  border-radius: 4px 4px 0 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
 }
 
 .dash-skeleton span:nth-child(1) {
@@ -4598,18 +4612,18 @@ button.danger.solid {
 }
 
 .dash-tile-broken {
-  padding: 10px 12px 14px;
+  padding: var(--space-4) var(--space-4) var(--space-4);
   color: var(--bad);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.5;
 }
 
 .dash-tile-note {
   margin: 0;
-  padding: 6px 12px 9px;
+  padding: var(--space-2) var(--space-4) var(--space-3);
   border-top: 1px solid var(--line);
   color: var(--faint);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
 }
 
 /* Wide content scrolls inside its own box. The page body must never scroll sideways, and a
@@ -4621,14 +4635,14 @@ button.danger.solid {
 .dash-tile-table table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 /* `text-align` explicitly: a bare `th` centres, so every non-numeric column had a centred
    header over a left-aligned body. `.right` below still wins for the numeric ones. */
 .dash-tile-table th,
 .dash-tile-table td {
-  padding: 5px 12px;
+  padding: var(--space-2) var(--space-4);
   border-bottom: 1px solid var(--line);
   text-align: left;
   white-space: nowrap;
@@ -4636,7 +4650,7 @@ button.danger.solid {
 
 .dash-tile-table th {
   color: var(--muted);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -4650,9 +4664,9 @@ button.danger.solid {
 
 .dash-tile-more {
   margin: 0;
-  padding: 6px 12px;
+  padding: var(--space-2) var(--space-4);
   color: var(--faint);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .dash-kpi-row {
@@ -4660,20 +4674,20 @@ button.danger.solid {
   flex: 1;
   flex-wrap: wrap;
   align-content: center;
-  gap: 18px 30px;
-  padding: 16px 14px 18px;
+  gap: var(--space-5) var(--space-7);
+  padding: var(--space-5) var(--space-4) var(--space-5);
 }
 
 .dash-kpi {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 3px;
+  gap: var(--space-1);
 }
 
 .dash-kpi-value {
   color: var(--ink);
-  font-size: 30px;
+  font-size: var(--text-2xl);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -4684,7 +4698,7 @@ button.danger.solid {
    number is the thing read first. */
 .dash-kpi-label {
   color: var(--muted);
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -4695,11 +4709,11 @@ button.danger.solid {
 .dash-delta {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  margin-top: 3px;
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: 11px;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+  padding: var(--space-05) var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
@@ -4719,38 +4733,24 @@ button.danger.solid {
   color: var(--faint);
 }
 
-.dash-empty {
-  max-width: 46ch;
-  padding: 32px 0;
-  color: var(--faint);
-}
+/* ============ the ide — the model, its branches and what changed ============
+   Not contiguous: agent access and the deployment hand-over sit in the middle of it,
+   and the editor's own layout picks up again at `.editor`. Ordering here is accretion,
+   not intent — but source order decides ties at equal specificity, so it stays put. */
 
-.dash-empty h3 {
-  margin: 0 0 6px;
-  color: var(--ink);
-  font-size: 15px;
-}
-
-.dash-empty p {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-/* --- the model editor -------------------------------------------------------------- */
+/* ---------- the model editor ---------- */
 /* `.editor*` was free: nothing in the markup or the stylesheet had claimed it. */
 
 .editor-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-3);
   flex-wrap: wrap;
-  margin-bottom: 10px;
+  margin-bottom: var(--space-3);
 }
 
 /* Inputs do not inherit body line-height and buttons do, so every control sharing this
    row is sized the same way rather than by padding alone. */
-.editor-bar select,
 .editor-bar button,
 .editor-bar input,
 .editor-actions button {
@@ -4760,7 +4760,7 @@ button.danger.solid {
 
 .editor-name {
   display: flex;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .editor-spacer {
@@ -4769,41 +4769,78 @@ button.danger.solid {
 
 .editor-dirty {
   color: var(--bad);
-  font-size: 12px;
-}
-
-/* Saved locally and waiting to be committed, which is a state to be reassured about rather than
-   warned about — it has already been through Cube. */
-.editor-dirty.ok {
-  color: var(--ok);
+  font-size: var(--text-sm);
 }
 
 .editor-notice {
-  margin: 0 0 10px;
-  padding: 8px 10px;
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
+}
+
+/* One segmented control, two uses. These were `.pipeline` and `.editor-view` — two rules that
+   tokenising revealed to be identical containers differing only in what "on" means. The inner
+   corner is one step down from the container's, which is what makes the track read as a track. */
+.segmented {
+  display: flex;
+  align-items: center;
+  gap: var(--space-05);
+  padding: var(--space-05);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+.segmented button {
+  padding: var(--space-1) var(--space-4);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.segmented button.on {
+  background: var(--raised);
+  color: var(--ink);
+}
+
+/* A path, not a choice: the live step is filled because it is the one to press, and the others
+   are ahead of it rather than merely unselected. */
+.pipeline button {
+  color: var(--faint);
+  cursor: default;
+}
+
+.pipeline button.on {
+  background: var(--accent);
+  color: var(--on-fill);
+  font-weight: 500;
+  cursor: pointer;
 }
 
 .editor-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
 }
 
 .editor-note {
-  margin-top: 10px;
-  padding: 8px 10px;
-  border-radius: 6px;
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
   border: 1px solid var(--line);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .editor-note p {
-  margin: 0 0 4px;
+  margin: 0 0 var(--space-1);
 }
 
 .editor-note p:last-child {
@@ -4822,57 +4859,50 @@ button.danger.solid {
 /* No flex-basis: it lives in a column now, where that would set its height. */
 .editor-diff {
   margin: 0;
-  padding: 8px;
+  padding: var(--space-3);
   max-height: 300px;
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--panel);
-  font-size: 12px;
+  font-size: var(--text-sm);
   white-space: pre;
 }
 
 .editor-broken {
-  margin: 4px 0 0;
-  padding-left: 18px;
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-5);
 }
 
 .editor-broken li {
-  margin-bottom: 3px;
+  margin-bottom: var(--space-1);
 }
 
-/* --- the editor chat ---------------------------------------------------------------- */
+/* ---------- the editor chat ---------- */
 
-/* A pane in the editor's grid now rather than a panel under a list, so it is a column with the
-   ask pinned to the bottom and the log taking what is left. */
+/* A resizable side panel now rather than a grid cell, so it takes the panel's full height itself
+   — the column it sits in no longer stretches it. Still a column with the ask pinned to the
+   bottom and the log taking what is left. */
 .edchat {
   display: flex;
   flex-direction: column;
+  height: 100%;
   min-height: 0;
-  padding: 10px;
-}
-
-.edchat-empty {
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.edchat-empty p {
-  margin: 0 0 8px;
+  padding: var(--space-4);
 }
 
 .edchat-examples {
   display: flex;
-  gap: 6px;
+  gap: var(--space-2);
   flex-wrap: wrap;
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
 }
 
 .edchat-examples button {
   min-height: var(--control);
   line-height: 1.2;
-  font-size: 12px;
-  border-radius: 999px;
+  font-size: var(--text-sm);
+  border-radius: var(--radius-full);
 }
 
 /* The log scrolls, not the whole pane — the composer below it must stay put. `min-height: 0` is
@@ -4881,7 +4911,7 @@ button.danger.solid {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding-right: 4px;
+  padding-right: var(--space-1);
 }
 
 /* The chat page's rows are laid out for a 760px column and centre themselves in it. In a
@@ -4896,13 +4926,13 @@ button.danger.solid {
 .edchat-log .row.user {
   width: fit-content;
   max-width: 100%;
-  margin: 14px 0 10px auto;
+  margin: var(--space-4) 0 var(--space-3) auto;
 }
 
 .edchat-ask {
   display: flex;
-  gap: 6px;
-  margin-top: 8px;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
 }
 
 .edchat-ask input {
@@ -4923,11 +4953,9 @@ button.danger.solid {
    and a bar there would be the third row of controls in this panel. */
 /* No `margin-left: auto` — `.served-detail-id` already carries one, so this just sits after
    it at the right-hand end. */
-.served-detail-edit {
-  min-height: var(--control);
-  line-height: 1.2;
-  font-size: 12px;
-}
+
+
+/* =============================== agents (mcp) =============================== */
 
 /* ---------- agent access (MCP) ---------- */
 /* The page reuses `.detail` and `.detail-panel`, so padding, width and section rules are the
@@ -4948,7 +4976,7 @@ button.danger.solid {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-4);
   flex-wrap: wrap;
 }
 
@@ -4959,21 +4987,21 @@ button.danger.solid {
 .mcp-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
-  padding: 5px 12px 5px 7px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4) var(--space-2) var(--space-3);
   min-height: var(--control);
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--raised);
   color: var(--muted);
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   line-height: 1.2;
   cursor: pointer;
   transition:
-    border-color 0.15s var(--ease),
-    background 0.15s var(--ease),
-    color 0.15s var(--ease);
+    border-color var(--motion-fast) var(--ease),
+    background var(--motion-fast) var(--ease),
+    color var(--motion-fast) var(--ease);
 }
 
 .mcp-toggle:hover:not(:disabled) {
@@ -4987,18 +5015,13 @@ button.danger.solid {
   color: var(--ink);
 }
 
-.mcp-toggle:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
 .mcp-track {
   position: relative;
   width: 30px;
   height: 17px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--line);
-  transition: background 0.15s var(--ease);
+  transition: background var(--motion-fast) var(--ease);
 }
 
 .mcp-toggle.on .mcp-track {
@@ -5013,7 +5036,7 @@ button.danger.solid {
   height: 13px;
   border-radius: 50%;
   background: var(--bg);
-  transition: transform 0.15s var(--ease);
+  transition: transform var(--motion-fast) var(--ease);
 }
 
 .mcp-toggle.on .mcp-knob {
@@ -5023,20 +5046,20 @@ button.danger.solid {
 .mcp-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   margin-left: auto;
 }
 
 .mcp-field {
-  margin-top: 16px;
+  margin-top: var(--space-5);
 }
 
 .mcp-field-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 6px;
-  font-size: 12.5px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
   color: var(--muted);
 }
 
@@ -5046,10 +5069,10 @@ button.danger.solid {
 .mcp-field code {
   display: block;
   background: var(--code-bg);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-family: var(--mono);
-  font-size: 12.5px;
-  padding: 10px 12px;
+  font-size: var(--text-sm);
+  padding: var(--space-4) var(--space-4);
   margin: 0;
   overflow-x: auto;
 }
@@ -5059,49 +5082,51 @@ button.danger.solid {
   overflow-wrap: anywhere;
 }
 
-/* --- the deployment hand-over ------------------------------------------------
+/* ============= onboarding — connecting, handing over, first run ============= */
+
+/* ---------- the deployment hand-over ----------
    New class names throughout: `.panel-head` and `.stage-hint` are shared with the pipeline
    panel deliberately, so the two read as the same kind of section, and nothing else here
    reuses a name markup has already claimed. */
 .deploy-lead {
-  margin: 10px 0 0;
+  margin: var(--space-3) 0 0;
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .deploy-steps {
-  margin: 14px 0 0;
-  padding-left: 22px;
+  margin: var(--space-4) 0 0;
+  padding-left: var(--space-6);
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  font-size: 13px;
+  gap: var(--space-5);
+  font-size: var(--text-md);
 }
 
 .deploy-steps p {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-3);
 }
 
 .deploy-steps .stage-hint {
   display: block;
-  margin-top: 6px;
+  margin-top: var(--space-2);
 }
 
 /* One service's file. The contents are never rendered — it holds the warehouse password and all
    four secrets, and the only thing to do with it is run it somewhere. */
 .deploy-get {
   border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  padding: var(--space-4) var(--space-4);
   background: var(--panel);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-3);
   align-items: flex-start;
 }
 
 .deploy-get strong {
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 /* An anchor and not a button, because `Content-Disposition` is what saves the file — so the
@@ -5110,11 +5135,11 @@ button.danger.solid {
   min-height: var(--control);
   display: inline-flex;
   align-items: center;
-  padding: 0 14px;
-  border-radius: 6px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-md);
   background: var(--accent);
-  color: #fff;
-  font-size: 13px;
+  color: var(--on-fill);
+  font-size: var(--text-md);
   line-height: 1.2;
   text-decoration: none;
 }
@@ -5125,32 +5150,32 @@ button.danger.solid {
 
 .deploy-cmd {
   margin: 0;
-  padding: 10px 12px;
+  padding: var(--space-4) var(--space-4);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--code-bg);
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
 }
 
 .deploy-where {
-  margin-top: 22px;
-  padding-top: 18px;
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
   border-top: 1px solid var(--line);
 }
 
 .deploy-where h4 {
-  margin: 0 0 4px;
-  font-size: 13px;
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-md);
 }
 
 .deploy-where label {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 10px;
-  font-size: 13px;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  font-size: var(--text-md);
 }
 
 .deploy-where label > span {
@@ -5161,22 +5186,14 @@ button.danger.solid {
 .deploy-where input {
   flex: 1 1 auto;
   min-width: 0;
-  min-height: var(--control);
-  line-height: 1.2;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--raised);
-  color: var(--ink);
   font-family: var(--mono);
-  font-size: 12.5px;
 }
 
 .deploy-where button.primary {
-  margin-top: 14px;
+  margin-top: var(--space-4);
 }
 
-/* --- first-run setup ------------------------------------------------------- */
+/* ---------- first-run setup ---------- */
 /* The whole screen, rail included: until it finishes there is no model, so chat cannot answer
    and a board cannot refresh. See Setup.tsx. */
 .setup {
@@ -5192,14 +5209,14 @@ button.danger.solid {
 }
 
 .setup-head h1 {
-  margin: 0 0 8px;
-  font-size: 22px;
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-xl);
 }
 
 .setup-head p {
-  margin: 0 0 32px;
+  margin: 0 0 var(--space-7);
   color: var(--muted);
-  font-size: 13.5px;
+  font-size: var(--text-md);
   line-height: 1.65;
 }
 
@@ -5208,13 +5225,13 @@ button.danger.solid {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-3);
 }
 
 .setup-step {
   display: flex;
-  gap: 14px;
-  padding: 18px 0 22px;
+  gap: var(--space-4);
+  padding: var(--space-5) 0 var(--space-6);
   border-top: 1px solid var(--line);
 }
 
@@ -5233,14 +5250,14 @@ button.danger.solid {
   border: 1px solid var(--line);
   border-radius: 50%;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
 }
 
 .setup-step.live > .setup-n {
   border-color: transparent;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-fill);
 }
 
 .setup-step.done > .setup-n {
@@ -5254,32 +5271,32 @@ button.danger.solid {
 }
 
 .setup-body h2 {
-  margin: 3px 0 10px;
-  font-size: 14px;
+  margin: var(--space-1) 0 var(--space-3);
+  font-size: var(--text-md);
 }
 
 .setup-body p {
-  margin: 0 0 10px;
+  margin: 0 0 var(--space-3);
 }
 
 .setup-done {
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .setup-get {
-  margin: 4px 0 16px;
+  margin: var(--space-1) 0 var(--space-5);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-3);
   align-items: flex-start;
 }
 
 .setup-url {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin: 14px 0 12px;
-  font-size: 13px;
+  gap: var(--space-1);
+  margin: var(--space-4) 0 var(--space-4);
+  font-size: var(--text-md);
 }
 
 .setup-url input {
@@ -5290,10 +5307,10 @@ button.danger.solid {
 /* `>` because this container holds the connection form, which renders its own footer button —
    without it that button would be restyled by a rule meant for the step's own action. */
 .setup-body > button.primary {
-  margin-top: 2px;
+  margin-top: var(--space-05);
 }
 
-/* ── The model editor ─────────────────────────────────────────────────────────────────────────
+/* ---------- The model editor ----------
    Three panes under one bar. The layout is a grid rather than flex because the middle pane holds
    CodeMirror, which grows to whatever height it is given: `1fr` on the row and `min-height: 0`
    on the panes are what keeps a 400-line cube file from pushing the branch bar off the screen.
@@ -5302,112 +5319,263 @@ button.danger.solid {
    checked against the whole stylesheet first — `.dot` and `.panel` are both names this codebase
    has had claimed by markup rather than by CSS, so grepping the stylesheet alone is not enough. */
 
-.editor-branch {
+/* ---------- the branch picker ---------- */
+
+.branch {
+  position: relative;
+}
+
+.branch-button {
+  max-width: 260px;
+  padding: 0 var(--space-2) 0 var(--space-3);
+}
+
+.branch-button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.branch-glyph,
+.branch-caret {
   color: var(--faint);
-  font-size: 14px;
+  font-size: var(--text-xs);
 }
 
-/* Said next to the buttons, because the alternative is someone losing accepted work to a
-   reload and finding out afterwards. */
-.editor-warn {
-  margin: 0 0 8px;
-  color: var(--warn);
-  font-size: 12px;
+.branch-name {
+  font-family: var(--mono);
+  font-size: var(--text-sm);
 }
 
-.editor-tabs {
-  display: flex;
-  gap: 2px;
-  margin: 10px 0 0;
-  border-bottom: 1px solid var(--line);
+/* What the `<select>` could not say: that this branch refuses edits, or that it is carrying
+   work. Never both — on main the count is zero by construction. */
+.branch-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 40;
+  min-width: 240px;
+  padding: var(--space-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+  box-shadow: var(--shadow-md);
 }
 
-.editor-tabs button {
-  padding: 6px 12px;
+.branch-panel button {
+  width: 100%;
   border: none;
-  border-bottom: 2px solid transparent;
   background: none;
-  color: var(--muted);
-  font-size: 13px;
-  cursor: pointer;
+  text-align: left;
 }
 
-.editor-tabs button.on {
-  border-bottom-color: var(--accent);
+.branch-panel button:hover {
+  background: var(--panel);
+}
+
+.branch-panel button.on {
+  background: var(--accent-soft);
+}
+
+.branch-panel small {
+  color: var(--faint);
+  font-size: var(--text-2xs);
+}
+
+.branch-sep {
+  margin: var(--space-1) var(--space-05);
+  border-top: 1px solid var(--line);
+}
+
+/* ---------- the publish path ---------- */
+
+/* Three steps rather than one button that renames itself. The step you are up to is filled; the
+   ones ahead are dimmed rather than absent, so the shape of the thing is legible before you have
+   done any of it. */
+.pipeline > span {
+  color: var(--faint);
+  font-size: var(--text-xs);
+}
+
+/* A segmented control in the bar, not underlined tabs above the editor. It was the latter, in
+   the slot the open files now use, and reading as a file tab bar is exactly what made it
+   confusing: it never switched documents, it switched what the whole screen was showing. */
+.editor-view button:hover {
   color: var(--ink);
 }
 
-.editor-panes {
-  display: grid;
-  grid-template-columns: 190px minmax(0, 1fr) 300px;
-  gap: 1px;
-  height: 560px;
-  margin-top: 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--line);
-  overflow: hidden;
-}
+/* ---------- the open files ---------- */
 
-/* One column short when the chat is absent — on main there is nothing it could propose that
-   could be saved, so it is not rendered at all rather than disabled. */
-/* Two panes on main, where the chat is not rendered at all — there is nothing it could propose
-   that could be saved there. `:has` rather than a class, so the layout follows what is actually
-   in the DOM instead of a second flag that could disagree with it. */
-.editor-panes:has(> :nth-child(2):last-child) {
-  grid-template-columns: 190px minmax(0, 1fr);
-}
-
-.editor-panes > * {
+/* The strip only. Its panels are empty by construction — one CodeMirror is reconfigured per
+   file rather than one mounted per tab — so it must not try to take the height a panel would. */
+.editor-filetabs {
+  flex: none;
   min-height: 0;
-  background: var(--bg);
-  overflow: auto;
+  border-bottom: 1px solid var(--line);
 }
 
+.filetab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+}
+
+/* ============================ the ide, continued ============================ */
+
+/* The editor fills what the connection above it left. `min-height: 0` is the load-bearing half:
+   without it a flex child refuses to shrink below its content, CodeMirror grows without bound,
+   and the branch bar leaves the top of the screen. */
+.editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding-top: var(--space-4);
+}
+
+/* The bar and everything it reports keep the page's margin; the panes below go to the window
+   edge, because horizontal room is the thing a three-pane editor is always short of. Margin
+   rather than padding on `.editor`, so the notes' own borders still wrap their text — and after
+   every rule above, since two of these set `margin` in full and would otherwise reset it. */
+.editor > .editor-bar,
+.editor > .editor-note,
+.editor > .editor-notice {
+  margin-left: var(--space-7);
+  margin-right: var(--space-7);
+}
+
+/* No `grid-template-columns` and no height. Both are the panel's business now: `Layout` places
+   each side pane and insets the middle by whatever it has been dragged to, and the height comes
+   from `.editor` filling the page. The old `:has(> :nth-child(2):last-child)` rule that dropped
+   to two columns on main went with them — a pane that is not rendered now takes no space by
+   construction rather than by a selector that had to be kept in step with the markup. */
+.editor-panes {
+  flex: 1;
+  min-height: 0;
+  margin-top: var(--space-3);
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.editor-served {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-7) var(--space-6);
+}
+
+/* A flex child of the layout's inner column now rather than a grid cell, so it has to claim its
+   own height — the cell used to give it one. */
 .editor-file {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   min-width: 0;
   overflow: hidden;
 }
 
 .editor-blank {
-  padding: 24px;
-  font-size: 13px;
+  padding: var(--space-6);
+  font-size: var(--text-md);
 }
 
-/* ── The file tree ───────────────────────────────────────────────────────────────────────── */
+/* ---------- the file tree ---------- */
+
+/* Changes is fixed at the top and the tree takes the rest, so a long model does not push the
+   list of what you have changed off the bottom of the pane. */
+.pane-left {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border-right: 1px solid var(--line);
+}
 
 .tree {
-  padding: 10px 8px;
-  font-size: 12.5px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-3);
+  font-size: var(--text-sm);
+}
+
+/* ---------- what has changed ---------- */
+
+.changes {
+  flex: none;
+  max-height: 45%;
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-3) var(--space-3);
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  font-size: var(--text-sm);
+}
+
+.changes h4 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--text-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.changes-warn {
+  margin: var(--space-1) 0 var(--space-2);
+  color: var(--warn);
+  font-size: var(--text-xs);
+}
+
+.changes ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.changes li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* The file name takes the room and the undo stays put, so a column of them lines up rather than
+   landing wherever each name happens to end. */
+.changes li > .tree-file {
+  flex: 1;
+  min-width: 0;
+}
+
+.undo {
+  color: var(--muted);
+}
+
+.undo:hover:not(:disabled) {
+  border-color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 8%, transparent);
+  color: var(--bad);
 }
 
 .tree-group {
-  margin-bottom: 14px;
+  margin-bottom: var(--space-4);
 }
 
 .tree-group h4 {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   margin: 0;
   color: var(--ink);
-  font-size: 12px;
+  font-size: var(--text-sm);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
-.tree-count {
-  color: var(--faint);
-  font-weight: 400;
-  letter-spacing: 0;
-}
-
 .tree-blurb {
-  margin: 2px 0 6px;
+  margin: var(--space-05) 0 var(--space-2);
   color: var(--faint);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .tree-group ul {
@@ -5421,15 +5589,15 @@ button.danger.solid {
 .tree-file {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   width: 100%;
-  padding: 3px 6px;
+  padding: var(--space-1) var(--space-2);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: none;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   text-align: left;
   cursor: pointer;
   overflow: hidden;
@@ -5464,31 +5632,65 @@ button.danger.solid {
   border: 1px solid var(--ok);
 }
 
-.tree-empty {
-  padding: 2px 6px;
-  color: var(--faint);
-  font-size: 11px;
-}
-
 .tree-new {
   display: flex;
-  gap: 6px;
-  padding-top: 6px;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
   border-top: 1px solid var(--line);
 }
 
 .tree-new button {
   flex: 1;
-  padding: 4px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--raised);
   color: var(--muted);
-  font-size: 11.5px;
-  cursor: pointer;
 }
 
-/* ── CodeMirror ──────────────────────────────────────────────────────────────────────────────
+/* ---------- Problems ----------
+   Under the editor, in its column. `flex: none` with the body's own scroll, so a model with
+   thirty member errors takes a fixed slice of the screen instead of squeezing CodeMirror out. */
+
+.problems {
+  flex: none;
+  border-top: 2px solid var(--line);
+  background: var(--panel);
+  font-size: var(--text-sm);
+}
+
+.problems.bad {
+  border-top-color: var(--bad);
+}
+
+.problems.warn {
+  border-top-color: var(--warn);
+}
+
+.problems-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+}
+
+.problems-what {
+  color: var(--faint);
+  font-size: var(--text-xs);
+}
+
+.problems-body {
+  max-height: 190px;
+  overflow-y: auto;
+  padding: 0 var(--space-4) var(--space-3);
+  color: var(--muted);
+}
+
+.problems-body p {
+  margin: 0 0 var(--space-1);
+}
+
+.problems.bad .problems-body p {
+  color: var(--bad);
+}
+
+/* ---------- CodeMirror ----------
    The host fills what the pane gives it; everything inside is themed from `CodeEditor.tsx` so the
    editor's colours come from the same tokens as the rest of the page. */
 
@@ -5506,18 +5708,18 @@ button.danger.solid {
   outline: none;
 }
 
-/* ── A proposal card in the transcript ───────────────────────────────────────────────────── */
+/* ---------- a proposal card in the transcript ---------- */
 
 .proposal {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 9px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3);
   border: 1px solid var(--line);
   border-left: 3px solid var(--accent);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--raised);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .proposal.done {
@@ -5527,7 +5729,7 @@ button.danger.solid {
 
 .proposal-what code {
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
 }
 
 .proposal-count .added {
@@ -5538,17 +5740,9 @@ button.danger.solid {
   color: var(--bad);
 }
 
-.proposal button {
-  padding: 2px 9px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--raised);
-  color: var(--ink);
-  font-size: 11.5px;
-  cursor: pointer;
-}
 
-/* ── The merge dialog ────────────────────────────────────────────────────────────────────────
+
+/* ---------- The merge dialog ----------
    `.modal` gives it the scrim, the box and the footer row; only the width and the scrolling body
    are its own, because a patch is taller than a confirmation. */
 
@@ -5562,22 +5756,22 @@ button.danger.solid {
 }
 
 .merge-files {
-  margin: 0 0 10px;
+  margin: 0 0 var(--space-3);
   padding: 0;
   list-style: none;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .merge-files li {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 2px 0;
+  gap: var(--space-3);
+  padding: var(--space-05) 0;
 }
 
 .merge-files code {
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
 }
 
 .merge-status {
@@ -5585,7 +5779,7 @@ button.danger.solid {
   width: 16px;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   text-align: center;
 }
 
@@ -5602,10 +5796,10 @@ button.danger.solid {
 .merge-drop {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .merge-drop code {
@@ -5613,12 +5807,12 @@ button.danger.solid {
   color: var(--ink);
 }
 
-/* ── Building the model ──────────────────────────────────────────────────────────────────── */
+/* ---------- building the model ---------- */
 
 .build {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-3);
 }
 
 /* Inside the picker's footer, beside the count. A decision that belongs with the button that
@@ -5626,18 +5820,18 @@ button.danger.solid {
 .build-enrich {
   display: flex;
   align-items: flex-start;
-  gap: 7px;
+  gap: var(--space-3);
   max-width: 320px;
   color: var(--ink);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .build-enrich input {
-  margin-top: 2px;
+  margin-top: var(--space-05);
 }
 
 .build-enrich small {
   display: block;
   color: var(--faint);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }

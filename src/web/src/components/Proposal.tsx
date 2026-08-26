@@ -13,6 +13,8 @@
  * A null `text` is a proposed deletion, which is a different sentence rather than a diff of one
  * file against nothing.
  */
+
+import { Button } from "./Button";
 export function Proposal({
   path,
   text,
@@ -45,9 +47,9 @@ export function Proposal({
         </span>
       )}
       <span className="editor-spacer" />
-      <button className={reviewed ? "" : "primary"} onClick={onReview}>
+      <Button variant={reviewed ? "default" : "primary"} onClick={onReview}>
         {reviewed ? "Open again" : "Review"}
-      </button>
+      </Button>
     </div>
   );
 }

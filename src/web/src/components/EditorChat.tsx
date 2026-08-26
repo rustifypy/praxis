@@ -5,6 +5,8 @@ import { applyEvent } from "../events";
 import * as sourcesApi from "../sources";
 import type { Item } from "../types";
 
+import { Button } from "./Button";
+import { Empty } from "./Empty";
 import { Transcript } from "./Transcript";
 
 const EXAMPLES = [
@@ -95,19 +97,20 @@ export function EditorChat({
   return (
     <div className="edchat">
       {items.length === 0 ? (
-        <div className="edchat-empty">
-          <p>
-            It reads before it proposes, and it saves nothing — every change comes back as a diff
-            for you to accept. It cannot commit or merge.
-          </p>
-          <div className="edchat-examples">
+        <Empty
+          action={
+            <div className="edchat-examples">
             {EXAMPLES.map((e) => (
-              <button key={e} onClick={() => setQuestion(e)} disabled={busy}>
+              <Button key={e} onClick={() => setQuestion(e)} disabled={busy}>
                 {e}
-              </button>
-            ))}
-          </div>
-        </div>
+              </Button>
+              ))}
+            </div>
+          }
+        >
+          It reads before it proposes, and it saves nothing — every change comes back as a diff
+          for you to accept. It cannot commit or merge.
+        </Empty>
       ) : (
         <div className="edchat-log">
           <Transcript
@@ -135,13 +138,13 @@ export function EditorChat({
           disabled={busy}
         />
         {busy ? (
-          <button type="button" onClick={() => void stop()}>
+          <Button type="button" onClick={() => void stop()}>
             Stop
-          </button>
+          </Button>
         ) : (
-          <button type="submit" className="primary" disabled={!question.trim()}>
+          <Button type="submit" variant="primary" disabled={!question.trim()}>
             Send
-          </button>
+          </Button>
         )}
       </form>
     </div>

@@ -13,6 +13,10 @@
  * is a question about the tree and the bar can only count. A solid dot is text typed and not yet
  * saved to the draft; a hollow one is saved to the draft and not yet published.
  */
+
+import { Badge } from "./Badge";
+import { Button } from "./Button";
+import { Empty } from "./Empty";
 export function FileTree({
   files,
   open,
@@ -45,7 +49,7 @@ export function FileTree({
         return (
           <section className="tree-group" key={prefix}>
             <h4>
-              {head} <span className="tree-count">{inGroup.length}</span>
+              {head} <Badge>{inGroup.length}</Badge>
             </h4>
             <p className="tree-blurb">{blurb}</p>
             <ul>
@@ -66,7 +70,7 @@ export function FileTree({
                   </button>
                 </li>
               ))}
-              {inGroup.length === 0 && <li className="tree-empty">none</li>}
+              {inGroup.length === 0 && <li><Empty tight>none</Empty></li>}
             </ul>
           </section>
         );
@@ -76,7 +80,7 @@ export function FileTree({
           the bar is about the branch as a whole. */}
       {editable && (
         <div className="tree-new">
-          <button onClick={onNew}>+ View</button>
+          <Button onClick={onNew}>+ View</Button>
         </div>
       )}
     </div>
