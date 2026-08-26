@@ -561,7 +561,7 @@ textarea {
   animation: pulse 1.4s ease-in-out infinite;
 }
 
-/* ======================= contextual sidebar (chat / data) ======================= */
+/* ===================== contextual sidebar (chat / data) ===================== */
 
 .nav {
   display: flex;
@@ -836,7 +836,7 @@ textarea {
   border-color: var(--accent);
 }
 
-/* ---- the chat header: which source this conversation queries ---- */
+/* ---------- the chat header: which source this conversation queries ---------- */
 
 .chat-head {
   display: flex;
@@ -3412,7 +3412,7 @@ textarea {
 
 
 
-/* --- connecting a database ------------------------------------------------------------ */
+/* ---------- connecting a database ---------- */
 /* Its own rules rather than the drawer's, because this form renders in two places: the
    drawer on the data page and inline in the first-run wizard. Nothing here may assume a
    drawer's width — the wizard's column is wider, and the field grid uses what it is given. */
@@ -3638,7 +3638,7 @@ textarea {
   padding-top: var(--space-4);
 }
 
-/* --- the settings the picker has no field for ----------------------------------------- */
+/* ---------- the settings the picker has no field for ---------- */
 
 .envs {
   display: flex;
@@ -3937,6 +3937,8 @@ textarea {
   font-weight: 600;
 }
 
+/* ============================= the served model ============================= */
+
 /* ---------- what Cube is serving ---------- */
 
 .served-head {
@@ -3967,13 +3969,13 @@ textarea {
 
 /* Views and cubes are two sections, not one list with a pill on each row. The pill made
    them read as two flavours of one thing; they are a surface and its implementation. */
-.served-section {
+.group {
   margin-bottom: var(--space-5);
 }
 
 /* Two rows: the label and its count, then what the section is for. A narrow list column
    cannot fit "Views · the tables underneath · ⓘ · 11" on one line. */
-.served-section-head {
+.group-head {
   display: grid;
   grid-template-columns: auto auto 1fr;
   align-items: center;
@@ -3983,7 +3985,7 @@ textarea {
   border-bottom: 1px solid var(--line);
 }
 
-.served-section-head h4 {
+.group-head h4 {
   margin: 0;
   font-size: var(--text-sm);
   font-weight: 600;
@@ -3991,28 +3993,25 @@ textarea {
   text-transform: uppercase;
 }
 
-.served-section.views .served-section-head h4 {
+.group.views .group-head h4 {
   color: var(--accent);
 }
 
-.served-section.cubes .served-section-head h4 {
+.group.cubes .group-head h4 {
   color: var(--muted);
 }
 
-.served-section-sub {
+.group-sub {
   grid-column: 1 / -1;
   grid-row: 2;
   color: var(--faint);
   font-size: var(--text-xs);
 }
 
-.served-section-count {
+.group-count {
   grid-column: 3;
   grid-row: 1;
   justify-self: end;
-  color: var(--faint);
-  font-size: var(--text-sm);
-  font-variant-numeric: tabular-nums;
 }
 
 /* Master–detail. The list column is fixed and never reflows; opening an entity fills the
@@ -4244,7 +4243,7 @@ textarea {
 
 /* ---------- collapsible sections ---------- */
 
-.served-section-toggle {
+.group-toggle {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
@@ -4258,11 +4257,11 @@ textarea {
   color: inherit;
 }
 
-.served-section-toggle:hover .served-caret {
+.group-toggle:hover .group-caret {
   color: var(--text);
 }
 
-.served-caret {
+.group-caret {
   display: inline-block;
   width: 9px;
   color: var(--faint);
@@ -4271,20 +4270,22 @@ textarea {
   transition: transform var(--motion-fast) ease;
 }
 
-.served-section.open .served-caret {
+.group.open .group-caret {
   transform: rotate(90deg);
 }
 
 /* A shut section is a header and nothing else, so its bottom margin would leave it
    floating above a gap the width of the content it is hiding. */
-.served-section:not(.open) {
+.group:not(.open) {
   margin-bottom: var(--space-2);
 }
 
-.served-section:not(.open) .served-section-head {
+.group:not(.open) .group-head {
   margin-bottom: 0;
   padding-bottom: var(--space-1);
 }
+
+/* ================================ dashboards ================================ */
 
 /* ---------- dashboards ----------
    All new names, all prefixed. `.nav*` above is deliberately *reused* by DashboardNav —
@@ -4732,7 +4733,12 @@ textarea {
   color: var(--faint);
 }
 
-/* --- the model editor -------------------------------------------------------------- */
+/* ============ the ide — the model, its branches and what changed ============
+   Not contiguous: agent access and the deployment hand-over sit in the middle of it,
+   and the editor's own layout picks up again at `.editor`. Ordering here is accretion,
+   not intent — but source order decides ties at equal specificity, so it stays put. */
+
+/* ---------- the model editor ---------- */
 /* `.editor*` was free: nothing in the markup or the stylesheet had claimed it. */
 
 .editor-bar {
@@ -4872,7 +4878,7 @@ textarea {
   margin-bottom: var(--space-1);
 }
 
-/* --- the editor chat ---------------------------------------------------------------- */
+/* ---------- the editor chat ---------- */
 
 /* A resizable side panel now rather than a grid cell, so it takes the panel's full height itself
    — the column it sits in no longer stretches it. Still a column with the ask pinned to the
@@ -4948,6 +4954,8 @@ textarea {
 /* No `margin-left: auto` — `.served-detail-id` already carries one, so this just sits after
    it at the right-hand end. */
 
+
+/* =============================== agents (mcp) =============================== */
 
 /* ---------- agent access (MCP) ---------- */
 /* The page reuses `.detail` and `.detail-panel`, so padding, width and section rules are the
@@ -5074,7 +5082,9 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-/* --- the deployment hand-over ------------------------------------------------
+/* ============= onboarding — connecting, handing over, first run ============= */
+
+/* ---------- the deployment hand-over ----------
    New class names throughout: `.panel-head` and `.stage-hint` are shared with the pipeline
    panel deliberately, so the two read as the same kind of section, and nothing else here
    reuses a name markup has already claimed. */
@@ -5183,7 +5193,7 @@ textarea {
   margin-top: var(--space-4);
 }
 
-/* --- first-run setup ------------------------------------------------------- */
+/* ---------- first-run setup ---------- */
 /* The whole screen, rail included: until it finishes there is no model, so chat cannot answer
    and a board cannot refresh. See Setup.tsx. */
 .setup {
@@ -5300,7 +5310,7 @@ textarea {
   margin-top: var(--space-05);
 }
 
-/* ── The model editor ─────────────────────────────────────────────────────────────────────────
+/* ---------- The model editor ----------
    Three panes under one bar. The layout is a grid rather than flex because the middle pane holds
    CodeMirror, which grows to whatever height it is given: `1fr` on the row and `min-height: 0`
    on the panes are what keeps a 400-line cube file from pushing the branch bar off the screen.
@@ -5309,7 +5319,7 @@ textarea {
    checked against the whole stylesheet first — `.dot` and `.panel` are both names this codebase
    has had claimed by markup rather than by CSS, so grepping the stylesheet alone is not enough. */
 
-/* ── The branch picker ───────────────────────────────────────────────────────────────────── */
+/* ---------- the branch picker ---------- */
 
 .branch {
   position: relative;
@@ -5375,7 +5385,7 @@ textarea {
   border-top: 1px solid var(--line);
 }
 
-/* ── The publish path ────────────────────────────────────────────────────────────────────── */
+/* ---------- the publish path ---------- */
 
 /* Three steps rather than one button that renames itself. The step you are up to is filled; the
    ones ahead are dimmed rather than absent, so the shape of the thing is legible before you have
@@ -5392,7 +5402,7 @@ textarea {
   color: var(--ink);
 }
 
-/* ── The open files ──────────────────────────────────────────────────────────────────────── */
+/* ---------- the open files ---------- */
 
 /* The strip only. Its panels are empty by construction — one CodeMirror is reconfigured per
    file rather than one mounted per tab — so it must not try to take the height a panel would. */
@@ -5409,6 +5419,8 @@ textarea {
   font-family: var(--mono);
   font-size: var(--text-sm);
 }
+
+/* ============================ the ide, continued ============================ */
 
 /* The editor fills what the connection above it left. `min-height: 0` is the load-bearing half:
    without it a flex child refuses to shrink below its content, CodeMirror grows without bound,
@@ -5468,7 +5480,7 @@ textarea {
   font-size: var(--text-md);
 }
 
-/* ── The file tree ───────────────────────────────────────────────────────────────────────── */
+/* ---------- the file tree ---------- */
 
 /* Changes is fixed at the top and the tree takes the rest, so a long model does not push the
    list of what you have changed off the bottom of the pane. */
@@ -5487,7 +5499,7 @@ textarea {
   font-size: var(--text-sm);
 }
 
-/* ── What has changed ────────────────────────────────────────────────────────────────────── */
+/* ---------- what has changed ---------- */
 
 .changes {
   flex: none;
@@ -5632,7 +5644,7 @@ textarea {
   color: var(--muted);
 }
 
-/* ── Problems ────────────────────────────────────────────────────────────────────────────────
+/* ---------- Problems ----------
    Under the editor, in its column. `flex: none` with the body's own scroll, so a model with
    thirty member errors takes a fixed slice of the screen instead of squeezing CodeMirror out. */
 
@@ -5678,7 +5690,7 @@ textarea {
   color: var(--bad);
 }
 
-/* ── CodeMirror ──────────────────────────────────────────────────────────────────────────────
+/* ---------- CodeMirror ----------
    The host fills what the pane gives it; everything inside is themed from `CodeEditor.tsx` so the
    editor's colours come from the same tokens as the rest of the page. */
 
@@ -5696,7 +5708,7 @@ textarea {
   outline: none;
 }
 
-/* ── A proposal card in the transcript ───────────────────────────────────────────────────── */
+/* ---------- a proposal card in the transcript ---------- */
 
 .proposal {
   display: flex;
@@ -5730,7 +5742,7 @@ textarea {
 
 
 
-/* ── The merge dialog ────────────────────────────────────────────────────────────────────────
+/* ---------- The merge dialog ----------
    `.modal` gives it the scrim, the box and the footer row; only the width and the scrolling body
    are its own, because a patch is taller than a confirmation. */
 
@@ -5795,7 +5807,7 @@ textarea {
   color: var(--ink);
 }
 
-/* ── Building the model ──────────────────────────────────────────────────────────────────── */
+/* ---------- building the model ---------- */
 
 .build {
   display: flex;
