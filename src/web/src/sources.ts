@@ -403,8 +403,10 @@ export interface RefDiff {
 
 export const refs = () => json<Refs>("/api/ide/refs");
 
-export const createRef = (name: string) =>
-  post("/api/ide/refs", { name }) as Promise<Refs>;
+/** Branch off `fromRef` — main unless something else is picked. Whatever it starts from, it can
+ *  only ever merge back into main, so a branch off a branch lands that branch's commits too. */
+export const createRef = (name: string, fromRef: string) =>
+  post("/api/ide/refs", { name, from_ref: fromRef }) as Promise<Refs>;
 
 export const deleteRef = (ref: string) =>
   json<Refs>(`/api/ide/refs/${encodeURIComponent(ref)}`, { method: "DELETE" });

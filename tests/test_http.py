@@ -603,6 +603,60 @@ async def test_saving_on_main_is_a_409_at_the_edge(api):
     assert saved.status_code == 409
 
 
+@pytest.fixture
+def branching(monkeypatch):
+    """`POST /refs` with the store's two calls stubbed, recording what it was asked to branch from.
+
+    Patched on the controller module the route reaches through, since that is the one door every
+    ide route opens a store with.
+    """
+    from contextlib import asynccontextmanager
+
+    from analyst_agent.api.ide import controller
+
+    made: list[tuple[str, str]] = []
+
+    class Stub:
+        async def refs(self):
+            return [Ref(name, "sha", 1, False) for name in ("main", "edit")]
+
+        async def create_ref(self, name: str, from_ref: str):
+            made.append((name, from_ref))
+            return "sha"
+
+        async def diff(self, ref: str):
+            return {"changed": []}
+
+    @asynccontextmanager
+    async def opened():
+        yield Stub()
+
+    monkeypatch.setattr(controller, "store", opened)
+    return made
+
+
+async def test_a_branch_is_created_from_the_ref_asked_for(api, branching):
+    """The source was hardcoded to main, so every branch came off main whatever was asked for."""
+    made = await api.post("/api/ide/refs", json={"name": "off-edit", "from_ref": "edit"})
+    assert made.status_code == 200
+    assert branching == [("off-edit", "edit")]
+
+
+async def test_a_branch_with_no_source_still_comes_off_main(api, branching):
+    """Back-compat: `from_ref` is optional, and omitting it is what every caller did before."""
+    assert (await api.post("/api/ide/refs", json={"name": "plain"})).status_code == 200
+    assert branching == [("plain", "main")]
+
+
+async def test_branching_from_a_ref_that_does_not_exist_is_a_400(api, branching):
+    """A name picked out of a stale dropdown is a bad request, not the store failing — which is
+    what it would read as if the store were left to refuse it."""
+    answered = await api.post("/api/ide/refs", json={"name": "ok", "from_ref": "ghost"})
+    assert answered.status_code == 400
+    assert "ghost" in answered.json()["detail"]
+    assert branching == []
+
+
 async def test_a_path_that_is_not_a_model_file_is_a_400(api):
     """Refused where the bytes arrive, so a path Cube would ignore never reaches a draft."""
     await api.post("/api/onboarding/connection", json=CHINOOK)
