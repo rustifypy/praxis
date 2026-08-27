@@ -11,6 +11,9 @@ from ...core.deployment import MAIN
 
 class NewRef(BaseModel):
     name: str
+    # Which ref the new one starts from. Defaults to main, which is what every branch started
+    # from when this was not a choice — so an older client that omits it gets what it always got.
+    from_ref: str = MAIN
 
 
 class Message(BaseModel):

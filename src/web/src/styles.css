@@ -4760,7 +4760,35 @@ textarea {
 
 .editor-name {
   display: flex;
+  align-items: center;
   gap: var(--space-2);
+}
+
+/* "from <branch>" reads as one phrase, so the label and its select sit together rather than as
+   two controls with the form's gap between them. */
+.editor-from {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.editor-from select {
+  height: var(--control-md);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+}
+
+.editor-from-note {
+  color: var(--warn);
+  font-size: var(--text-2xs);
 }
 
 .editor-spacer {
@@ -5365,6 +5393,42 @@ textarea {
   border: none;
   background: none;
   text-align: left;
+  /* `.btn` is a centred flex row, so `text-align` here was never doing anything — every item
+     with one child sat centred while `main`, which has two, only looked aligned because they
+     filled the row. A menu reads down its left edge. */
+  justify-content: flex-start;
+}
+
+/* Two controls per branch — switch to it, drop it — so the row lays them out and the name takes
+   whatever is left. The delete is opted out of the full-width rule above rather than the rule
+   being narrowed: every other button in this panel does want the whole row. */
+.branch-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-05);
+}
+
+.branch-row > button:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Faint until pointed at: a column of red bins reads as a list of problems, and these are
+   just branches. */
+.branch-panel .branch-delete {
+  flex: 0 0 auto;
+  width: var(--control-sm);
+  color: var(--faint);
+}
+
+.branch-panel .branch-delete:hover:not(:disabled) {
+  color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+}
+
+.branch-delete svg {
+  width: 15px;
+  height: 15px;
 }
 
 .branch-panel button:hover {

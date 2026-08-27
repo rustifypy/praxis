@@ -6,6 +6,7 @@ import type { CheckResult, ModelFiles, RefDiff, Refs, ServedModel } from "../sou
 import { Button } from "./Button";
 import { BranchPicker } from "./BranchPicker";
 import { Changes } from "./Changes";
+import { Confirm } from "./Confirm";
 import { EditorChat } from "./EditorChat";
 import { FileTree } from "./FileTree";
 import { Info } from "./Info";
@@ -93,8 +94,14 @@ export function ModelEditor({
   const [busy, setBusy] = useState("");
   const [naming, setNaming] = useState(false);
   const [newName, setNewName] = useState("");
+  // Which ref a new branch starts from. Its own state and not just `on`, because the picker can
+  // be reopened and the base changed without leaving the branch being shown.
+  const [newFrom, setNewFrom] = useState("main");
   const [merging, setMerging] = useState(false);
   const [diff, setDiff] = useState<RefDiff | null>(null);
+  // Which branch a delete is being confirmed for, or "" for none. The name and not a boolean,
+  // because the row that asked is not necessarily the branch being shown.
+  const [deleting, setDeleting] = useState("");
   // Held here rather than left to the panel, so the bar can offer the toggle — a pane you can
   // only close by dragging it to nothing is one nobody closes.
   const [chatOpen, setChatOpen] = useState(true);
@@ -130,22 +137,35 @@ export function ModelEditor({
 
   const loadRefs = useCallback(async () => setRefs(await api.refs()), []);
 
-  const loadBranch = useCallback(async (ref: string) => {
-    setLoading(true);
-    try {
-      setListing(await api.modelFiles(ref));
-    } catch {
-      setListing(null);
-    }
-    // The compiled model for *this* branch, not for main: it is how you check that the view you
-    // just saved exposes the members you meant, without merging first.
-    try {
-      setModel(await api.model(ref));
-    } catch (err) {
-      setModel({ serving: false, error: String(err), entities: [], unloaded: [] });
-    }
-    setLoading(false);
-  }, []);
+  /**
+   * Read a branch's files and its compiled model.
+   *
+   * A failure here is reported and the branch list re-read, because the likeliest cause is a
+   * branch that is no longer there — deleted from another tab, or by whoever else is on this
+   * install. Swallowing it left the picker offering a name the store had never heard of and the
+   * editor blank with nothing saying why, which reads as "only main can be opened".
+   */
+  const loadBranch = useCallback(
+    async (ref: string) => {
+      setLoading(true);
+      try {
+        setListing(await api.modelFiles(ref));
+      } catch (e) {
+        setListing(null);
+        setNote({ tone: "bad", lines: [(e as Error).message] });
+        await loadRefs().catch(() => {});
+      }
+      // The compiled model for *this* branch, not for main: it is how you check that the view you
+      // just saved exposes the members you meant, without merging first.
+      try {
+        setModel(await api.model(ref));
+      } catch (err) {
+        setModel({ serving: false, error: String(err), entities: [], unloaded: [] });
+      }
+      setLoading(false);
+    },
+    [loadRefs],
+  );
 
   useEffect(() => {
     void loadRefs().catch((e: Error) => setNote({ tone: "bad", lines: [e.message] }));
@@ -327,10 +347,8 @@ export function ModelEditor({
       onChanged();
     });
 
-  const switchTo = (ref: string) => {
-    // Only what is typed is at risk — the draft is on the server and will still be there — but
-    // losing it because someone changed a dropdown is still worth one question.
-    if (unsaved.size && !window.confirm(`Discard ${unsaved.size} unsaved edit(s)?`)) return;
+  /** Show a different branch, dropping everything the browser held for the last one. */
+  const moveTo = (ref: string) => {
     setOn(ref);
     setBuffer({});
     setOrder([]);
@@ -340,6 +358,29 @@ export function ModelEditor({
     setCheck(null);
     setNote(null);
   };
+
+  const switchTo = (ref: string) => {
+    // Only what is typed is at risk — the draft is on the server and will still be there — but
+    // losing it because someone changed a dropdown is still worth one question. Separate from
+    // `moveTo` because leaving a branch that no longer exists has nothing to ask about.
+    if (unsaved.size && !window.confirm(`Discard ${unsaved.size} unsaved edit(s)?`)) return;
+    moveTo(ref);
+  };
+
+  /**
+   * Drop a branch: the ref at the store and the working copy of it, in one call.
+   *
+   * Anything committed to it and never merged goes with it, which is why this is behind a typed
+   * confirmation rather than a click. Moving to main is unconditional when the branch being
+   * deleted is the one on screen — `switchTo` would ask about unsaved edits belonging to a
+   * branch that no longer exists.
+   */
+  const remove = (ref: string) =>
+    void guard("delete-branch", async () => {
+      setRefs(await api.deleteRef(ref));
+      if (ref === on) moveTo(main);
+      setNote({ tone: "ok", lines: [`Branch ${ref} deleted.`] });
+    });
 
   const current = openPath ? buffer[openPath] : undefined;
 
@@ -355,7 +396,13 @@ export function ModelEditor({
           main={main}
           busy={Boolean(busy)}
           onSwitch={switchTo}
-          onCreate={() => setNaming(true)}
+          onCreate={() => {
+            // Offer the branch being shown as the base, because "new branch" from somewhere is
+            // usually meant to build on it — but main stays the default from main.
+            setNewFrom(on);
+            setNaming(true);
+          }}
+          onDelete={setDeleting}
         />
 
         {naming && (
@@ -365,7 +412,7 @@ export function ModelEditor({
               e.preventDefault();
               void guard("branch", async () => {
                 const name = newName.trim();
-                setRefs(await api.createRef(name));
+                setRefs(await api.createRef(name, newFrom));
                 setNaming(false);
                 setNewName("");
                 switchTo(name);
@@ -378,12 +425,31 @@ export function ModelEditor({
               placeholder="add-margin"
               onChange={(e) => setNewName(e.target.value)}
             />
+            {/* What it branches from. A `<select>` and not a second picker: it is one field of a
+                form being filled in, and it is only ever on screen while that form is. */}
+            <label className="editor-from">
+              from
+              <select value={newFrom} onChange={(e) => setNewFrom(e.target.value)}>
+                {(refs?.refs ?? [{ name: main, changed: 0 }]).map((r) => (
+                  <option key={r.name} value={r.name}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <Button type="submit" variant="primary" disabled={!newName.trim()}>
               Create
             </Button>
             <Button type="button" variant="subtle" onClick={() => setNaming(false)}>
               Cancel
             </Button>
+            {/* Only when it matters: a branch can only ever merge into main, so one started from
+                another branch brings that branch's commits with it when it lands. */}
+            {newFrom !== main && (
+              <small className="editor-from-note">
+                carries {newFrom}'s commits into {main} when it merges
+              </small>
+            )}
           </form>
         )}
 
@@ -718,6 +784,30 @@ export function ModelEditor({
             })
           }
         />
+      )}
+
+      {deleting && (
+        <Confirm
+          word={deleting}
+          title={`Delete branch ${deleting}?`}
+          confirmLabel="Delete branch"
+          onCancel={() => setDeleting("")}
+          onConfirm={() => {
+            const ref = deleting;
+            setDeleting("");
+            remove(ref);
+          }}
+        >
+          <p>
+            The branch and this machine's working copy of it both go. Anything committed to{" "}
+            <code>{deleting}</code> and never merged into <code>{main}</code> is gone with it, and
+            Cube stops serving it.
+          </p>
+          <p>
+            {main} is untouched — a branch is only ever a copy of it until you merge. Nothing else
+            reads a branch, so no dashboard or chat is affected.
+          </p>
+        </Confirm>
       )}
     </div>
   );

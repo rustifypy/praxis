@@ -148,12 +148,25 @@ async def list_refs() -> dict:
 
 @router.post("/refs")
 async def create_ref(body: NewRef, request: Request) -> dict:
+    """Branch off an existing ref — main by default, and any other ref on request.
+
+    The source is checked here rather than left to the store, which answers a ref it has never
+    heard of with the same 502 as being unreachable: a name picked from a stale dropdown is a bad
+    request, not the store failing.
+
+    Whatever it starts from, it can only ever land back on main — the store fast-forwards into
+    main and refuses every other target — so branching off a branch carries that branch's commits
+    into main with it when it merges. That is the caller's business to know, not this route's to
+    prevent.
+    """
     state.idle(request.app)
     async with controller.store() as store:
         taken = [ref.name for ref in await store.refs()]
         if error := workspace.validate_ref(body.name, taken):
             raise HTTPException(400, error)
-        await store.create_ref(body.name, MAIN)
+        if body.from_ref not in taken:
+            raise HTTPException(400, f"no ref named {body.from_ref!r} to branch from")
+        await store.create_ref(body.name, body.from_ref)
     return await list_refs()
 
 
