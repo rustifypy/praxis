@@ -52,7 +52,7 @@ def build_editor_agent(context: EditContext, ref: str, checkpointer=None):
         tools=build_editor_tools(context),
         system_prompt=build_editor_prompt(ref),
         middleware=[
-            AuditLog(user="local"),
+            AuditLog(),
             ModelCallLimitMiddleware(run_limit=20, exit_behavior="end"),
             CompactionNotice(model=model.with_config(tags=[COMPACTION_TAG])),
         ],
