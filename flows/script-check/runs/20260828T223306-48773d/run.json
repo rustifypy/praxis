@@ -1,0 +1,22 @@
+{
+  "id": "20260828T223306-48773d",
+  "flow": "script-check",
+  "status": "done",
+  "current": "",
+  "waiting": "",
+  "started_at": 1787936586.752982,
+  "ended_at": 1787936586.835968,
+  "error": "",
+  "phases": [
+    {
+      "dir_name": "01_fetch",
+      "status": "done",
+      "started_at": 1787936586.754432,
+      "ended_at": 1787936586.835486,
+      "error": "",
+      "outputs": [
+        "orders.csv"
+      ]
+    }
+  ]
+}

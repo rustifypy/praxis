@@ -37,3 +37,5 @@ src/analyst_agent/api/static/
 skills-lock.json
 .claude/
 .agents/
+
+docs/

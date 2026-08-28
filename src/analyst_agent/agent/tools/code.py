@@ -34,9 +34,10 @@ TURN_OUTPUT = 20_000
 
 
 def build_code_tools(session: Session) -> list:
-    # A Session with no chat has no workspace of its own — only tests build one, and they get a
-    # shared directory rather than the `workspaces` root itself.
-    chat_id = session.chat_id or "scratch"
+    # Which sandbox workspace these files live in: the chat's, or a Run's when a Phase set one.
+    # `Session.workspace_key` is the one place that decides, so a Phase cannot end up writing
+    # into a chat's directory by having asked the question a different way.
+    workspace = session.workspace_key
     # Per turn: a fresh agent, and so a fresh closure, is built for each one.
     spent_seconds = 0.0
     spent_chars = 0
@@ -58,34 +59,38 @@ def build_code_tools(session: Session) -> list:
                 return "No query has run yet, so there is nothing to export. Call run_query first."
 
             record = session.executed[-1]
-            stored = None
-            if record.result_id:
-                stored = await transcript.result(record.result_id)
-            if stored is None:
+            stored = await transcript.result(record.result_id) if record.result_id else None
+            # The stored copy first, because it outlives the turn: "export what you fetched
+            # earlier" has to keep working on turn three, and only a `results` row can answer
+            # that. A Phase has no such row — a Run keeps nothing in the database — so it falls
+            # back to the rows still in hand from its own query.
+            raw_columns = stored["columns"] if stored else record.columns
+            raw_rows = stored["rows"] if stored else session.rows
+            if not raw_columns or (stored is None and not session.rows):
                 end("export_result", False)
                 return (
                     "That result was not kept, so it cannot be exported. Run the query again and "
                     "export immediately."
                 )
 
-            columns = [Column(**raw) for raw in stored["columns"]]
+            columns = [Column(**raw) for raw in raw_columns]
             buffer = io.StringIO()
             writer = csv.writer(buffer)
             # Member ids as the header and not labels: a script refers to `sales.invoice_total`.
             # The download route writes labels instead, because a person reads a spreadsheet.
             writer.writerow([column.id for column in columns])
-            for row in stored["rows"]:
+            for row in raw_rows:
                 writer.writerow([export_value(row.get(column.id), column) for column in columns])
 
             # Handed over rather than written directly: the workspace is the sandbox's, and the
             # path it lands on is its decision.
             async with await open_sandbox() as sandbox:
-                landed = await sandbox.upload(chat_id, filename, buffer.getvalue().encode())
+                landed = await sandbox.upload(workspace, filename, buffer.getvalue().encode())
                 path = landed["path"]
 
             listed = ", ".join(column.id for column in columns)
-            end("export_result", True, note=f"{path}, {stored['row_count']} rows")
-            return f"Wrote {path}: {stored['row_count']} rows. Columns: {listed}"
+            end("export_result", True, note=f"{path}, {len(raw_rows)} rows")
+            return f"Wrote {path}: {len(raw_rows)} rows. Columns: {listed}"
         except SandboxError as exc:
             end("export_result", False, errors=[str(exc)])
             return f"The sandbox is not available, so nothing was exported: {exc}"
@@ -161,7 +166,7 @@ def build_code_tools(session: Session) -> list:
 
             started = time.monotonic()
             async with await open_sandbox(timeout=None) as sandbox:
-                runner = asyncio.create_task(sandbox.run(chat_id, script, on_output=on_output))
+                runner = asyncio.create_task(sandbox.run(workspace, script, on_output=on_output))
                 stop = asyncio.create_task((session.cancel or asyncio.Event()).wait())
                 done, _ = await asyncio.wait({runner, stop}, return_when=asyncio.FIRST_COMPLETED)
                 stop.cancel()
@@ -170,7 +175,7 @@ def build_code_tools(session: Session) -> list:
                 if stopped:
                     # Asked of the service rather than done to the request: cancelling the stream
                     # would leave the script running with nobody reading it.
-                    await sandbox.kill(chat_id)
+                    await sandbox.kill(workspace)
                 result = await runner
 
             spent_seconds += time.monotonic() - started

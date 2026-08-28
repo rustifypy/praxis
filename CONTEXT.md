@@ -110,3 +110,67 @@ A model file the editor agent wants written, waiting for a person to accept it. 
 **Ref** — the agent commits nothing.
 _Avoid_: edit, change — both imply it has happened
 
+### Flows
+
+A sequential pipeline someone repeats, defined by a folder rather than by code. The words here
+are deliberately not the words the model side already uses: almost every obvious one is taken,
+and reusing it would name two different things.
+
+**Flow**:
+The folder defining one pipeline: its numbered **Phases**, the prose instructing each, and the
+reference material they share. The folder *is* the definition — nothing else describes a Flow,
+and editing the files is how a Flow is changed.
+_Avoid_: pipeline — that is the model build (`/api/onboarding/pipeline`); workspace — that is a
+**Draft**'s tree; workflow, which is only a longer way of saying the same thing
+
+`flows/` names two sizes of thing, and both are correct — the same way **Store** does. `flows/`
+in the launch directory is the *content*: the Flow folders someone authors, edits and commits.
+`analyst_agent.flows` is the *engine* that reads them. Neither name is wrong; expecting one word
+to mean one size of thing is.
+
+**Phase**:
+One step of a **Flow**, and one numbered folder in it. Either an agent turn with a scoped prompt
+and toolset, or a single Python file run in the sandbox with no model call at all.
+_Avoid_: stage — `modelgen` has four and `workspace.stage` is a function; step — those are
+`modelgen`'s step rows; node, task
+
+**Run**:
+One execution of a **Flow**, and one folder under it holding everything that execution produced.
+A Run outlives the request that started it: it pauses at a **Gate** and is resumed later.
+_Avoid_: job — `core.jobs` is a different mechanism holding a machine-wide lock, and a Run must
+never take it; execution, invocation
+
+**Gate**:
+The pause after a **Phase** where a person reads what landed and edits it before the next Phase
+reads it. Required unless that Phase says otherwise. This is what a **Flow** is for.
+_Avoid_: approval — that is the separate yes/no a script asks before it runs, and the two pause a
+**Run** in structurally different places; checkpoint, breakpoint
+
+**Brief**:
+The free text a **Run** is started from, written into the Run's folder as its first **Working**
+input. What varies between two Runs of one **Flow**; everything else about them is identical.
+_Avoid_: prompt, question — a **Phase**'s prose is neither; parameters, which implies a form
+
+**Reference**:
+A **Phase** input belonging to the **Flow** and stable across every **Run** — voice, conventions,
+domain rules. Resolves against the Flow's folder, and reaches the model inlined verbatim, because
+it is meant to be read as a constraint.
+_Avoid_: config, static, context
+
+**Working**:
+A **Phase** input this **Run** produced — an earlier Phase's output, or the **Brief**. Resolves
+against the Run's folder, and reaches the model as text or as a shape, because it is meant to be
+read as material.
+_Avoid_: artifact on its own — both kinds are files; intermediate, temp
+
+**Bundle**:
+A named set of tools a **Phase** may ask for. The menu is closed, so a tool can be renamed
+without breaking a file somebody wrote.
+_Avoid_: toolset, scope, permissions
+
+**Stale**:
+A **Phase** whose output on disk came from an input that has since changed — an earlier Phase was
+re-run, or a person edited what it read. The output is still there and still readable; what is
+gone is the claim that it follows from what is above it.
+_Avoid_: dirty, invalid, outdated — the first two say it is wrong, and it is not
+

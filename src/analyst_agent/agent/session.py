@@ -31,6 +31,21 @@ class Session:
     cancel: asyncio.Event | None = None
     # Where a click on "run this" arrives. None means nothing is asked and every script runs.
     approvals: asyncio.Queue | None = None
+    # The sandbox workspace these files live in, when it is not the chat's. A Phase sets it to
+    # its Run's, which is how a Run's files stay out of every chat's workspace — and why it is
+    # separate from `chat_id`: a Phase wants the workspace *without* the `results` rows, since a
+    # Run keeps nothing in the database.
+    workspace: str = ""
+    # This turn's most recent successful result. Held because a Phase has no `results` row to
+    # address by id, so this is the only copy of the rows `export_result` would write.
+    rows: list[dict] = field(default_factory=list)
+
+    @property
+    def workspace_key(self) -> str:
+        """Which sandbox workspace to read and write. `scratch` is the shared one tests get: a
+        Session with neither is not a chat and not a Run, and must not be handed the workspaces
+        root itself."""
+        return self.workspace or self.chat_id or "scratch"
 
 
 def replay(events: list[dict]) -> tuple[list[QueryRecord], list[dict]]:

@@ -1,0 +1,32 @@
+{
+  "id": "20260828T224739-cdef90",
+  "flow": "weekly-revenue",
+  "status": "done",
+  "current": "",
+  "waiting": "",
+  "started_at": 1787937459.3582048,
+  "ended_at": 1787937485.094583,
+  "error": "",
+  "phases": [
+    {
+      "dir_name": "01_pull",
+      "status": "done",
+      "started_at": 1787937459.359905,
+      "ended_at": 1787937477.3960562,
+      "error": "",
+      "outputs": [
+        "revenue.csv"
+      ]
+    },
+    {
+      "dir_name": "02_write",
+      "status": "done",
+      "started_at": 1787937477.4029398,
+      "ended_at": 1787937485.093448,
+      "error": "",
+      "outputs": [
+        "summary.md"
+      ]
+    }
+  ]
+}

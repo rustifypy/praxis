@@ -1,0 +1,2 @@
+{"id": "77b890e93cdd464e8771903b3c571afe", "seq": 1, "turn_id": "01_fetch", "type": "tool_start", "data": {"tool": "run_script", "label": "fetch.py"}, "parent_id": null, "depth": 0, "at": 1787936586.7730591}
+{"id": "7d88bd6210ea4ae2a4ac74c8a0a659fe", "seq": 2, "turn_id": "01_fetch", "type": "tool_end", "data": {"tool": "run_script", "ok": true, "exit_code": 0, "output": "wrote 3 rows", "wrote": ["notes.txt", "orders.csv"]}, "parent_id": null, "depth": 0, "at": 1787936586.8135722}

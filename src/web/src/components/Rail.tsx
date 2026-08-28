@@ -8,9 +8,13 @@
  * entirely to whichever one you are in.
  *
  * Dashboards sit between them: made in chat, read against the model, so the rail is in the
- * order the work happens. Agents is last and separate from data, because it is not about what
+ * order the work happens. Flows follows, because a flow is the same work as a chat with the
+ * steps written down. Agents is last and separate from data, because it is not about what
  * this install is connected to — it is about handing these tools to something that is not
  * this app.
+ *
+ * **Agents is the MCP page, not Flows.** The two are easy to confuse and are opposites: Agents
+ * hands this portal's tools *out*, and Flows is this portal's own work with its steps on disk.
  */
 
 const CHAT = (
@@ -38,7 +42,16 @@ const BOARD = (
 
 /** The modes, defined beside the switch that owns them so App reads one list rather than
  *  repeating the union at every callback. */
-export type Mode = "chat" | "dashboards" | "data" | "agents";
+export type Mode = "chat" | "dashboards" | "data" | "flows" | "agents";
+
+/** Numbered steps, in order: what a flow is. */
+const FLOWS = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3.4" y="3.6" width="17.2" height="4.6" rx="1.5" />
+    <rect x="3.4" y="12.2" width="17.2" height="4.6" rx="1.5" />
+    <path d="M7.5 8.2v4M7.5 16.8v3.6" />
+  </svg>
+);
 
 /** A plug: this is the socket other agents connect into. */
 const AGENTS = (
@@ -97,6 +110,17 @@ export function Rail({
         {DATA}
         {jobRunning && <span className="rail-badge" aria-label="a job is running" />}
         <span className="rail-label">Data</span>
+      </button>
+
+      <button
+        className={`rail-tab ${view === "flows" ? "active" : ""}`}
+        onClick={() => onSelect("flows")}
+        title="Flows"
+        aria-label="Flows"
+        aria-current={view === "flows"}
+      >
+        {FLOWS}
+        <span className="rail-label">Flows</span>
       </button>
 
       <button

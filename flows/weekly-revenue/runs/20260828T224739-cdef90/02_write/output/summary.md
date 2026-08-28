@@ -1,0 +1,1 @@
+Rock is the top‑earning genre, with revenue of 826.65. This is more than double the revenue for Latin, which stands at 382.14, and over three times that of Metal at 261.36. The maximum revenue value in the data is 826.65, so Rock clearly leads all genres by a wide margin. Other genres contribute smaller amounts and do not come close to Rock’s performance.

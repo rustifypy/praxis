@@ -1,0 +1,4 @@
+kind: agent
+tools: [query, python]
+outputs:
+  - revenue.csv

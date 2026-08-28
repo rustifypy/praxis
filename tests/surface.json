@@ -34,7 +34,7 @@
       "method": "POST",
       "path": "/api/chats/{chat_id}/approve",
       "name": "approve_script",
-      "answers": "Decided"
+      "answers": "analyst_agent__api__chat__dto__Decided"
     },
     {
       "method": "GET",
@@ -76,7 +76,7 @@
       "method": "POST",
       "path": "/api/chats/{chat_id}/stop",
       "name": "stop_turn",
-      "answers": "Stopped"
+      "answers": "analyst_agent__api__chat__dto__Stopped"
     },
     {
       "method": "GET",
@@ -119,6 +119,138 @@
       "path": "/api/dashboard/{dashboard_id}/refresh",
       "name": "refresh_dashboard",
       "answers": "object"
+    },
+    {
+      "method": "GET",
+      "path": "/api/flows",
+      "name": "list_flows",
+      "answers": "array"
+    },
+    {
+      "method": "POST",
+      "path": "/api/flows",
+      "name": "create_flow",
+      "answers": "object"
+    },
+    {
+      "method": "POST",
+      "path": "/api/flows/chats",
+      "name": "open_chat",
+      "answers": "object"
+    },
+    {
+      "method": "GET",
+      "path": "/api/flows/chats/{chat_id}/events",
+      "name": "read_chat_events",
+      "answers": "array"
+    },
+    {
+      "method": "POST",
+      "path": "/api/flows/chats/{chat_id}/messages",
+      "name": "send_message",
+      "answers": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/flows/chats/{chat_id}/stop",
+      "name": "stop_chat_turn",
+      "answers": "analyst_agent__api__flows__dto__Stopped"
+    },
+    {
+      "method": "GET",
+      "path": "/api/flows/{flow}",
+      "name": "read_flow",
+      "answers": "object"
+    },
+    {
+      "method": "GET",
+      "path": "/api/flows/{flow}/files",
+      "name": "list_files",
+      "answers": "array"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/flows/{flow}/files/{path:path}",
+      "name": "delete_file",
+      "answers": "Written"
+    },
+    {
+      "method": "GET",
+      "path": "/api/flows/{flow}/files/{path:path}",
+      "name": "read_file",
+      "answers": ""
+    },
+    {
+      "method": "PUT",
+      "path": "/api/flows/{flow}/files/{path:path}",
+      "name": "write_file",
+      "answers": "Written"
+    },
+    {
+      "method": "GET",
+      "path": "/api/flows/{flow}/runs",
+      "name": "list_runs",
+      "answers": "array"
+    },
+    {
+      "method": "POST",
+      "path": "/api/flows/{flow}/runs",
+      "name": "begin_run",
+      "answers": "Started"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/flows/{flow}/runs/{run_id}",
+      "name": "delete_run",
+      "answers": "Removed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/flows/{flow}/runs/{run_id}",
+      "name": "read_run",
+      "answers": "object"
+    },
+    {
+      "method": "POST",
+      "path": "/api/flows/{flow}/runs/{run_id}/advance",
+      "name": "advance_run",
+      "answers": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/flows/{flow}/runs/{run_id}/approve",
+      "name": "approve_script",
+      "answers": "analyst_agent__api__flows__dto__Decided"
+    },
+    {
+      "method": "GET",
+      "path": "/api/flows/{flow}/runs/{run_id}/artifacts/{path:path}",
+      "name": "read_artifact",
+      "answers": ""
+    },
+    {
+      "method": "PUT",
+      "path": "/api/flows/{flow}/runs/{run_id}/artifacts/{path:path}",
+      "name": "write_artifact",
+      "answers": "Written"
+    },
+    {
+      "method": "GET",
+      "path": "/api/flows/{flow}/runs/{run_id}/events",
+      "name": "read_run_events",
+      "answers": "array"
+    },
+    {
+      "method": "POST",
+      "path": "/api/flows/{flow}/runs/{run_id}/phases/{dir_name}/rerun",
+      "name": "rerun_phase",
+      "answers": "Started"
+    },
+    {
+      "method": "POST",
+      "path": "/api/flows/{flow}/runs/{run_id}/stop",
+      "name": "stop_run",
+      "answers": "analyst_agent__api__flows__dto__Stopped"
     },
     {
       "method": "GET",

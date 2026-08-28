@@ -989,3 +989,111 @@ async def test_agent_access_reports_the_token_and_a_config_for_the_address_it_wa
     rotated = (await api.post("/api/mcp/rotate")).json()
     assert rotated["token"] != "tok-abc"
     assert rotated["token"] in rotated["desktop"], "a new token beside a stale config block"
+
+
+# --- flows -------------------------------------------------------------------
+
+
+async def test_a_new_flow_is_scaffolded_and_cannot_run_until_it_has_a_phase(api):
+    """The honest starting state. A Flow created with an invented `01_something` would be a guess
+    at the work, so a fresh one is refused a Run and says why."""
+    made = await api.post(
+        "/api/flows", json={"name": "weekly", "title": "Weekly revenue", "description": "Mondays."}
+    )
+    assert made.status_code == 200
+    assert made.json()["title"] == "Weekly revenue"
+    assert made.json()["ok"] is False, "no phases yet, so it does not run"
+
+    listed = await api.get("/api/flows")
+    assert [row["name"] for row in listed.json()] == ["weekly"]
+
+    refused = await api.post("/api/flows/weekly/runs", json={"brief": "go"})
+    assert refused.status_code == 422
+    assert "nothing to run" in refused.json()["detail"]
+
+
+async def test_a_flow_name_that_would_shadow_the_chat_surface_is_refused(api):
+    """`/api/flows/chats` is a route, so `chats` cannot also be a folder name. The routers are
+    registered narrowest-first, and this is the other half of keeping that true."""
+    assert (await api.post("/api/flows", json={"name": "chats", "title": "x"})).status_code == 400
+    assert (await api.post("/api/flows", json={"name": "Weekly", "title": "x"})).status_code == 400
+    await api.post("/api/flows", json={"name": "weekly", "title": "x"})
+    again = await api.post("/api/flows", json={"name": "weekly", "title": "x"})
+    assert again.status_code == 409
+
+
+async def test_writing_a_phase_reports_whether_the_flow_still_runs(api):
+    """Every write is checked, and the answer is the same one the authoring agent is given — the
+    route does not spell its own version of "is this a flow"."""
+    await api.post("/api/flows", json={"name": "weekly", "title": "Weekly"})
+
+    half = await api.put(
+        "/api/flows/weekly/files/phases/01_pull/phase.yml",
+        json={"text": "kind: agent\noutputs: [revenue.csv]\n"},
+    )
+    assert half.status_code == 200
+    assert half.json()["ok"] is False, "an agent phase with no CONTEXT.md cannot run"
+    assert any("CONTEXT.md" in line for line in half.json()["errors"])
+
+    whole = await api.put(
+        "/api/flows/weekly/files/phases/01_pull/CONTEXT.md", json={"text": "Pull revenue."}
+    )
+    assert whole.json()["ok"] is True, whole.json()["errors"]
+
+    detail = await api.get("/api/flows/weekly")
+    assert detail.json()["phases"] == ["01_pull"]
+    assert detail.json()["phases_detail"][0]["kind"] == "agent"
+    assert detail.json()["phases_detail"][0]["review"] == "required", "the Gate is the default"
+
+
+async def test_a_run_folder_is_not_writable_as_a_flow_file(api):
+    """The definition and the record of what ran share a folder and are not the same thing."""
+    await api.post("/api/flows", json={"name": "weekly", "title": "Weekly"})
+    refused = await api.put(
+        "/api/flows/weekly/files/runs/r1/01_pull/output/a.md", json={"text": "hi"}
+    )
+    assert refused.status_code == 400
+    assert "record of what ran" in refused.json()["detail"]
+
+
+async def test_a_run_starts_at_phase_one_and_keeps_its_brief(api):
+    await api.post("/api/flows", json={"name": "weekly", "title": "Weekly"})
+    await api.put(
+        "/api/flows/weekly/files/phases/01_pull/phase.yml",
+        json={"text": "kind: agent\noutputs: [revenue.csv]\n"},
+    )
+    await api.put(
+        "/api/flows/weekly/files/phases/01_pull/CONTEXT.md", json={"text": "Pull revenue."}
+    )
+
+    started = await api.post("/api/flows/weekly/runs", json={"brief": "Focus on the EU region."})
+    assert started.status_code == 200
+    run_id = started.json()["run_id"]
+    assert started.json()["current"] == "01_pull"
+
+    detail = await api.get(f"/api/flows/weekly/runs/{run_id}")
+    assert detail.json()["brief"] == "Focus on the EU region."
+    assert detail.json()["status"] == "running"
+    assert detail.json()["editable"] == "", "nothing is editable before a phase has produced"
+    assert [p["dir_name"] for p in detail.json()["phases"]] == ["01_pull"]
+    assert detail.json()["phases"][0]["output"] == []
+
+    listed = await api.get("/api/flows/weekly/runs")
+    assert [row["id"] for row in listed.json()] == [run_id]
+
+
+async def test_a_flow_chat_is_made_once_and_bound_to_its_flow(api):
+    """One chat per Flow for the life of the Flow, bound in the folder rather than on a column."""
+    await api.post("/api/flows", json={"name": "weekly", "title": "Weekly"})
+    first = await api.post("/api/flows/chats", json={"flow": "weekly"})
+    assert first.status_code == 200
+    again = await api.post("/api/flows/chats", json={"flow": "weekly"})
+    assert again.json()["chat_id"] == first.json()["chat_id"]
+    assert (await api.get("/api/flows/weekly")).json()["chat_id"] == first.json()["chat_id"]
+
+
+async def test_a_missing_flow_or_run_is_a_404_not_a_traceback(api):
+    assert (await api.get("/api/flows/nope")).status_code == 404
+    assert (await api.get("/api/flows/nope/runs")).status_code == 404
+    await api.post("/api/flows", json={"name": "weekly", "title": "Weekly"})
+    assert (await api.get("/api/flows/weekly/runs/nope")).status_code == 404

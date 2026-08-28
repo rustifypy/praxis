@@ -5899,3 +5899,310 @@ textarea {
   color: var(--faint);
   font-size: var(--text-xs);
 }
+
+/* ================================== flows =================================== */
+
+/* ---------- flows ----------
+   `.nav*` above is reused by FlowNav, exactly as DashboardNav reuses it — that vocabulary is the
+   shared sidebar chrome. Everything below is prefixed `.flow-`, because none of it has a
+   counterpart elsewhere and borrowing `.editor-*` would tie a flow's layout to the model
+   editor's, which is a different three-pane shape that happens to look similar today. */
+
+.flow-new {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.flow-page {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.flow-head {
+  padding: var(--space-5) var(--space-6) var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.flow-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.flow-title h2 {
+  margin: 0;
+  font-size: var(--text-xl);
+}
+
+.flow-desc {
+  margin: var(--space-2) 0 0;
+  color: var(--muted);
+  font-size: var(--text-md);
+}
+
+.flow-ok {
+  color: var(--ok);
+  font-size: var(--text-xs);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.flow-warn {
+  color: var(--warn);
+  font-size: var(--text-xs);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.flow-tabs {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.flow-tabs .btn.on {
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.flow-problems {
+  margin: 0;
+  padding: var(--space-3) var(--space-6);
+  list-style: none;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.flow-problems .bad {
+  color: var(--bad);
+}
+
+/* Three panes: the files, the one open, and the agent that writes them. Same shape as the model
+   editor for the same reason — you read a file, change it, and ask about it without moving. */
+.flow-edit {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 340px;
+}
+
+.flow-edit > .tree {
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+}
+
+.flow-edit > .edchat {
+  border-left: 1px solid var(--line);
+}
+
+.flow-editor {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.flow-file-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--text-sm);
+}
+
+/* Two panes on the Runs tab: the runs, and the one open. Narrower list than the Edit tab's tree
+   because a run id is one line and a file list is a shape. */
+.flow-runs {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+}
+
+.flow-runs-side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+}
+
+.flow-start {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.flow-start label {
+  color: var(--faint);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.flow-start textarea {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  font-size: var(--text-md);
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  color: var(--ink);
+}
+
+.flow-runs-main {
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--space-5) var(--space-6) var(--space-8);
+}
+
+.flow-run-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.flow-run-head h3 {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The gate is the point of the feature, so it is the one thing here that gets the accent. */
+.flow-gate {
+  color: var(--accent);
+  font-size: var(--text-xs);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.flow-brief {
+  margin: var(--space-3) 0 0;
+  color: var(--muted);
+  font-size: var(--text-md);
+}
+
+.flow-phases {
+  margin: var(--space-5) 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.flow-phase {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+}
+
+.flow-phase.running {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.flow-phase.failed {
+  box-shadow: inset 2px 0 0 var(--bad);
+}
+
+/* Stale says the output no longer follows from what is above it — the file is still there and
+   still readable, so this is dimmed rather than marked wrong. */
+.flow-phase.stale {
+  box-shadow: inset 2px 0 0 var(--warn);
+  color: var(--muted);
+}
+
+.flow-phase-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.flow-phase-head strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.flow-phase-head .btn {
+  margin-left: auto;
+}
+
+.flow-phase-error {
+  margin-top: var(--space-2);
+  color: var(--bad);
+  font-size: var(--text-sm);
+}
+
+.flow-artifacts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.flow-artifact {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.flow-artifact.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.flow-scratch {
+  color: var(--faint);
+  font-size: var(--text-xs);
+}
+
+.flow-file {
+  margin-top: var(--space-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.flow-file-body {
+  width: 100%;
+  min-height: 260px;
+  resize: vertical;
+  border: 0;
+  padding: var(--space-4);
+  background: var(--raised);
+  color: var(--ink);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: var(--text-md);
+  line-height: 1.55;
+}
+
+.flow-file-body[readonly] {
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.flow-log {
+  margin-top: var(--space-6);
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-4);
+}

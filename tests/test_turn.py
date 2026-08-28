@@ -9,7 +9,7 @@ import asyncio
 
 import pytest
 
-from analyst_agent.agent.turn import run_turn
+from analyst_agent.agent.turn import run_turn, sink
 from analyst_agent.core import db
 from analyst_agent.core import transcript as _transcript
 
@@ -49,7 +49,10 @@ async def test_an_attached_file_is_recorded_on_the_user_event(store):
     that came from nowhere."""
     chat = await store.create()
     events = [
-        e async for e in run_turn(no_agent, chat.id, "what is this?", None, ["uploads/orders.csv"])
+        e
+        async for e in run_turn(
+            no_agent, sink(chat.id), chat.id, "what is this?", None, ["uploads/orders.csv"]
+        )
     ]
 
     assert events[0].type == "user"
@@ -61,13 +64,13 @@ async def test_an_attached_file_is_recorded_on_the_user_event(store):
 
 async def test_a_turn_with_no_files_says_so_rather_than_omitting_the_key(store):
     chat = await store.create()
-    events = [e async for e in run_turn(no_agent, chat.id, "hello", None)]
+    events = [e async for e in run_turn(no_agent, sink(chat.id), chat.id, "hello", None)]
     assert events[0].data == {"text": "hello", "files": []}
 
 
 async def test_a_failed_build_is_a_transcript_entry_rather_than_an_exception(store):
     chat = await store.create()
-    events = [e async for e in run_turn(no_agent, chat.id, "hello", None)]
+    events = [e async for e in run_turn(no_agent, sink(chat.id), chat.id, "hello", None)]
     assert [e.type for e in events] == ["user", "error", "done"]
     assert "no model here" in events[1].data["message"]
 
@@ -82,7 +85,7 @@ async def test_a_streamed_output_event_reaches_the_browser_but_not_the_transcrip
         ("custom", {"type": "tool_end", "data": {"tool": "run_python", "ok": True}}),
     )
 
-    events = [e async for e in run_turn(build, chat.id, "go")]
+    events = [e async for e in run_turn(build, sink(chat.id), chat.id, "go")]
     assert [e.type for e in events] == ["user", "tool_start", "output", "tool_end", "done"]
 
     stored = [e["type"] for e in await store.events(chat.id)]
@@ -101,8 +104,28 @@ async def test_a_tool_end_that_lands_as_the_turn_is_stopped_is_still_recorded(st
         ("custom", {"type": "tool_start", "data": {"tool": "run_query"}}),
     )
 
-    events = [e async for e in run_turn(build, chat.id, "go", cancel)]
+    events = [e async for e in run_turn(build, sink(chat.id), chat.id, "go", cancel)]
     assert [e.type for e in events] == ["user", "tool_start", "tool_end", "done"]
 
     stored = await store.events(chat.id)
     assert [e["type"] for e in stored] == ["user", "tool_start", "tool_end"]
+
+
+async def test_the_sink_is_the_only_thing_that_decides_where_events_are_kept(store):
+    """What lets a Run keep its events in `runs/<id>/events.jsonl` while a chat keeps them in
+    sqlite, with one copy of the loop above. A sink that is not the transcript must leave the
+    transcript empty — otherwise a Run would be recorded twice, in two formats, and the copies
+    would drift."""
+    chat = await store.create()
+    kept: list[tuple[str, str]] = []
+
+    async def elsewhere(turn_id: str, event) -> None:
+        kept.append((turn_id, event.type))
+
+    build = scripted(("custom", {"type": "tool_start", "data": {"tool": "run_query"}}))
+    events = [e async for e in run_turn(build, elsewhere, "phase:01_pull", "go")]
+
+    assert [e.type for e in events] == ["user", "tool_start", "done"]
+    assert [kind for _, kind in kept] == ["user", "tool_start"]
+    assert len({turn for turn, _ in kept}) == 1, "one turn id across the turn's events"
+    assert await store.events(chat.id) == []

@@ -24,10 +24,26 @@ from .tools.editor import EditContext
 # — which reads a catalog over HTTP — fails into the transcript like any other error.
 Build = Callable[[str], Awaitable[Any]]
 
+# Where this turn's events are kept: `(turn_id, event)`. A parameter rather than a call to
+# `transcript.append`, because a Flow keeps its events in `runs/<id>/events.jsonl` and not in the
+# database — see `docs/adr/0006`. One seam with two sinks; the alternative was a second copy of
+# the loop below, which this codebase has been burned by before.
+Sink = Callable[[str, Event], Awaitable[None]]
+
+
+def sink(chat_id: str) -> Sink:
+    """The transcript as a sink — what both chats pass, and the default everywhere but a Flow."""
+
+    async def append(turn_id: str, event: Event) -> None:
+        await transcript.append(chat_id, turn_id, event)
+
+    return append
+
 
 async def run_turn(
     build: Build,
-    chat_id: str,
+    append: Sink,
+    thread: str,
     question: str,
     cancel: asyncio.Event | None = None,
     files: list[str] | None = None,
@@ -42,17 +58,17 @@ async def run_turn(
             if buffer[kind]:
                 block = Event(type=kind, data={"text": buffer[kind]})
                 buffer[kind] = ""
-                await transcript.append(chat_id, turn_id, block)
+                await append(turn_id, block)
 
     try:
         user_event = Event(type="user", data={"text": question, "files": files or []})
-        await transcript.append(chat_id, turn_id, user_event)
+        await append(turn_id, user_event)
         yield user_event
 
         agent = await build(turn_id)
         async for mode, payload in agent.astream(
             {"messages": [{"role": "user", "content": question}]},
-            config={"configurable": {"thread_id": chat_id}},
+            config={"configurable": {"thread_id": thread}},
             stream_mode=["custom", "messages"],
         ):
             if mode == "custom":
@@ -63,7 +79,7 @@ async def run_turn(
                 # trimmed, and the workspace holds the script an approval asks about, so
                 # neither is state that would exist nowhere else.
                 if event.type not in ("output", "approval"):
-                    await transcript.append(chat_id, turn_id, event)
+                    await append(turn_id, event)
                 yield event
             else:
                 chunk, meta = payload
@@ -87,7 +103,7 @@ async def run_turn(
     except Exception as exc:  # noqa: BLE001 — a failed turn is a transcript entry, not a 500
         await flush()
         event = Event(type="error", data={"message": str(exc)})
-        await transcript.append(chat_id, turn_id, event)
+        await append(turn_id, event)
         yield event
 
     yield Event(type="done", data={"turn_id": turn_id})
@@ -126,7 +142,7 @@ async def stream_turn(
             dashboards=DashboardContext(catalog=session.catalog),
         )
 
-    async for event in run_turn(build, chat_id, question, cancel, files):
+    async for event in run_turn(build, sink(chat_id), chat_id, question, cancel, files):
         yield event
 
 
@@ -159,5 +175,5 @@ async def stream_edit_turn(
                 checkpointer=saver,
             )
 
-        async for event in run_turn(build, chat_id, question, cancel):
+        async for event in run_turn(build, sink(chat_id), chat_id, question, cancel):
             yield event

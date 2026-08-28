@@ -1,0 +1,4 @@
+kind: script
+script: fetch.py
+outputs:
+  - orders.csv
