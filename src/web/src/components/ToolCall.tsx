@@ -37,8 +37,12 @@ export function ToolCall({
   startedAt,
   ms,
   live,
+  approve,
 }: {
   chatId: string;
+  /** Where an approval's answer goes, when it is not this chat's own route — a Flow's Run
+   *  supplies its own. */
+  approve?: (choice: "yes" | "always" | "no") => Promise<unknown>;
   tool: string;
   label: string;
   query?: unknown;
@@ -148,7 +152,7 @@ export function ToolCall({
           {hasScript && (
             <Script chatId={chatId} path={label} given={script} wanted={open} asking={asking} />
           )}
-          {asking && <Approval chatId={chatId} />}
+          {asking && <Approval chatId={chatId} decide={approve} />}
 
           {query ? <Detail title="Cube query" body={JSON.stringify(query, null, 2)} /> : null}
           {end?.sql ? <Detail title="SQL" body={end.sql} mono="sql" /> : null}

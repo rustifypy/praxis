@@ -5,6 +5,8 @@ import { AddSource } from "./components/AddSource";
 import { ChatHeader } from "./components/ChatHeader";
 import { ChatNav } from "./components/ChatNav";
 import { Dashboard } from "./components/Dashboard";
+import { FlowNav } from "./components/FlowNav";
+import { FlowPage } from "./components/FlowPage";
 import { DashboardNav } from "./components/DashboardNav";
 import type { ComposerHandle } from "./components/Composer";
 import { Button } from "./components/Button";
@@ -20,7 +22,7 @@ import { applyEvent, buildTranscript } from "./events";
 import { useHash } from "./hooks";
 import * as sourcesApi from "./sources";
 import type { JobState, SourceRow } from "./sources";
-import type { Chat, DashboardRow, Item } from "./types";
+import type { Chat, DashboardRow, FlowSummary, Item } from "./types";
 
 /** What the agent is doing right now, read off the tail of the transcript. */
 function statusOf(items: Item[], busy: boolean): string {
@@ -54,14 +56,22 @@ export default function App() {
     ? "data"
     : hash.startsWith("#agents")
       ? "agents"
-      : hash.startsWith("#boards")
-        ? "dashboards"
-        : "chat";
+      : hash.startsWith("#flows")
+        ? "flows"
+        : hash.startsWith("#boards")
+          ? "dashboards"
+          : "chat";
   // Which dashboard is open, read off the hash for the same reason the mode is: a mirrored
   // React copy disagreed with the address bar after a back button.
   const openBoard = hash.startsWith("#boards/")
     ? decodeURIComponent(hash.slice("#boards/".length))
     : null;
+  // Which flow is open, read off the hash for the reason the board is: a mirrored React copy
+  // disagreed with the address bar after a back button.
+  const openFlow = hash.startsWith("#flows/")
+    ? decodeURIComponent(hash.slice("#flows/".length))
+    : null;
+  const [flows, setFlows] = useState<FlowSummary[]>([]);
   const [dashboards, setDashboards] = useState<DashboardRow[]>([]);
   const [source, setSource] = useState<SourceRow | null>(null);
   const [job, setJob] = useState<JobState | null>(null);
@@ -114,6 +124,22 @@ export default function App() {
     [refreshDashboards],
   );
 
+  const refreshFlows = useCallback(async () => {
+    try {
+      setFlows(await api.listFlows());
+    } catch {
+      /* The page says why; an empty list is the honest fallback. */
+    }
+  }, []);
+
+  const showFlows = useCallback(
+    (name?: string) => {
+      window.location.hash = name ? `#flows/${encodeURIComponent(name)}` : "#flows";
+      void refreshFlows();
+    },
+    [refreshFlows],
+  );
+
   const refreshSource = useCallback(async () => {
     // Both concurrently: the connection body costs a health probe, and awaiting the job after
     // it serialised the slowest call for no reason.
@@ -143,6 +169,7 @@ export default function App() {
         setChats(loaded);
         if (loaded.length) await open(loaded[0].id);
         await refreshDashboards();
+        await refreshFlows();
       } catch (err) {
         setFatal(String(err));
       }
@@ -170,7 +197,7 @@ export default function App() {
         setBooted(true);
       }
     })();
-  }, [open, refreshSource, refreshDashboards]);
+  }, [open, refreshSource, refreshDashboards, refreshFlows]);
 
   // Follow a running job, and re-attach to one already in flight after a refresh — the
   // server replays its buffer before going live, so both are the same code path.
@@ -326,6 +353,7 @@ export default function App() {
         onSelect={(next) => {
           if (next === "chat") window.location.hash = "";
           else if (next === "dashboards") showBoards();
+          else if (next === "flows") showFlows();
           else if (next === "agents") window.location.hash = "#agents";
           else showData();
         }}
@@ -344,6 +372,17 @@ export default function App() {
             } catch (err) {
               window.alert(String(err));
             }
+          }}
+        />
+      ) : view === "flows" ? (
+        <FlowNav
+          flows={flows}
+          selected={openFlow}
+          onOpen={(name) => showFlows(name)}
+          onCreate={async (name, title) => {
+            await api.createFlow(name, title);
+            await refreshFlows();
+            showFlows(name);
           }}
         />
       ) : view === "chat" ? (
@@ -393,6 +432,18 @@ export default function App() {
               {dashboards.length
                 ? "Pick a dashboard on the left."
                 : "No dashboards yet. Create one, then ask in chat to add tiles to it."}
+            </div>
+          )}
+        </main>
+      ) : view === "flows" ? (
+        <main className="main">
+          {openFlow ? (
+            <FlowPage key={openFlow} flow={openFlow} />
+          ) : (
+            <div className="dash-fail muted">
+              {flows.length
+                ? "Pick a flow on the left."
+                : "No flows yet. A flow is a folder of numbered steps you run again and again, reviewing each one."}
             </div>
           )}
         </main>

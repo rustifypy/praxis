@@ -1,6 +1,7 @@
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import BinaryIO
 
 import httpx
 
@@ -133,9 +134,10 @@ class SandboxClient:
         except httpx.RequestError as exc:
             raise SandboxError(f"{self._root} did not answer: {exc}") from exc
 
-    async def upload(self, chat_id: str, filename: str, data: bytes) -> dict:
+    async def upload(self, chat_id: str, filename: str, data: bytes | BinaryIO) -> dict:
         # The whole body, so a caller wanting the profile does not reach past this for it —
-        # which is also what keeps UPLOAD_TIMEOUT_S in one place.
+        # which is also what keeps UPLOAD_TIMEOUT_S in one place. An open file is streamed by
+        # httpx rather than read whole, which is what lets a Phase hand over a large extract.
         return await self._send(
             "POST",
             f"/uploads/{chat_id}",

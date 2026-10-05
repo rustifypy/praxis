@@ -3,9 +3,13 @@ import type {
   Chat,
   DashboardDetail,
   DashboardRow,
+  FlowDetail,
+  FlowSummary,
   McpAccess,
   RefreshOutcome,
   ResultColumn,
+  RunDetail,
+  RunSummary,
 } from "./types";
 
 /**
@@ -125,6 +129,8 @@ export interface FilePreview {
   text: string;
   bytes: number;
   truncated: boolean;
+  /** Every data row in the file. Only a Run's output preview counts them. */
+  rows_total?: number | null;
 }
 
 export const filePreview = (chatId: string, path: string) =>
@@ -231,3 +237,125 @@ export const setMcpEnabled = (enabled: boolean) =>
  *  beside a block still quoting the old one. */
 export const rotateMcpToken = () =>
   json<Pick<McpAccess, "token" | "url" | "desktop" | "cli">>("/api/mcp/rotate", { method: "POST" });
+
+// --- flows --------------------------------------------------------------------
+
+/**
+ * A route that answers `text/plain`. `json` would throw on the first line of a markdown file.
+ *
+ * The error path is `json`'s, because a refusal *is* JSON even from a plain-text route — FastAPI
+ * puts `detail` on it either way, and those messages are written to be read by a person.
+ */
+export async function text(path: string, init?: RequestInit): Promise<string> {
+  const response = await fetch(path, init);
+  const body = await response.text();
+  if (!response.ok) {
+    let message = `${init?.method ?? "GET"} ${path} → ${response.status}`;
+    try {
+      message = JSON.parse(body).detail ?? message;
+    } catch {
+      /* not JSON — keep the method, path and status */
+    }
+    throw new Error(message);
+  }
+  return body;
+}
+
+export const listFlows = () => json<FlowSummary[]>("/api/flows");
+
+export const createFlow = (name: string, title: string, description = "") =>
+  json<FlowSummary>("/api/flows", {
+    method: "POST",
+    body: JSON.stringify({ name, title, description }),
+  });
+
+export const flowDetail = (flow: string) => json<FlowDetail>(`/api/flows/${flow}`);
+
+export const flowFile = (flow: string, path: string) =>
+  text(`/api/flows/${flow}/files/${encodePath(path)}`);
+
+/** Returns whether the *flow* still runs, not whether the write landed — it did either way, and a
+ *  flow that will not run yet is the normal state of one being built. */
+export const writeFlowFile = (flow: string, path: string, body: string) =>
+  json<{ path: string; ok: boolean; errors: string[]; warnings: string[] }>(
+    `/api/flows/${flow}/files/${encodePath(path)}`,
+    { method: "PUT", body: JSON.stringify({ text: body }) },
+  );
+
+export const deleteFlowFile = (flow: string, path: string) =>
+  json<{ ok: boolean; errors: string[] }>(`/api/flows/${flow}/files/${encodePath(path)}`, {
+    method: "DELETE",
+  });
+
+export const listRuns = (flow: string) => json<RunSummary[]>(`/api/flows/${flow}/runs`);
+
+export const beginRun = (flow: string, brief: string) =>
+  json<{ run_id: string; current: string }>(`/api/flows/${flow}/runs`, {
+    method: "POST",
+    body: JSON.stringify({ brief }),
+  });
+
+export const runDetail = (flow: string, run: string) =>
+  json<RunDetail>(`/api/flows/${flow}/runs/${run}`);
+
+export const runEvents = (flow: string, run: string) =>
+  json<AgentEvent[]>(`/api/flows/${flow}/runs/${run}/events`);
+
+/**
+ * Run phases until the next Gate, streaming as they go.
+ *
+ * The same `streamTurn` a chat turn uses, because it is the same event stream — and calling this
+ * again is how a Run continues past a Gate. A closed tab loses the stream, never the Run:
+ * `run.json` is the Run throughout.
+ */
+export const advanceRun = (flow: string, run: string, signal: AbortSignal) =>
+  streamTurn(`/api/flows/${flow}/runs/${run}/advance`, {}, signal);
+
+export const stopRun = (flow: string, run: string) =>
+  json<{ stopped: boolean }>(`/api/flows/${flow}/runs/${run}/stop`, { method: "POST" });
+
+export const approveRunScript = (flow: string, run: string, choice: "yes" | "always" | "no") =>
+  json(`/api/flows/${flow}/runs/${run}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ choice }),
+  });
+
+export const runArtifact = (flow: string, run: string, path: string) =>
+  text(`/api/flows/${flow}/runs/${run}/artifacts/${encodePath(path)}`);
+
+/** Edit a Phase's output at its Gate. Refused with a 409 anywhere else — the surface exists for
+ *  the moment before the next Phase reads it, and not afterwards. */
+/** One Phase output's head, with every row counted. What the Run page shows under each Phase. */
+export const runPreview = (flow: string, run: string, path: string) =>
+  json<FilePreview>(`/api/flows/${flow}/runs/${run}/preview/${encodePath(path)}`);
+
+export const writeRunArtifact = (flow: string, run: string, path: string, body: string) =>
+  json<{ path: string; ok: boolean }>(
+    `/api/flows/${flow}/runs/${run}/artifacts/${encodePath(path)}`,
+    { method: "PUT", body: JSON.stringify({ text: body }) },
+  );
+
+/** Point the Run back at one Phase. It does not run it — `advanceRun` does that next. */
+export const rerunPhase = (flow: string, run: string, phase: string) =>
+  json<{ run_id: string; current: string }>(
+    `/api/flows/${flow}/runs/${run}/phases/${phase}/rerun`,
+    { method: "POST" },
+  );
+
+export const deleteRun = (flow: string, run: string) =>
+  json(`/api/flows/${flow}/runs/${run}`, { method: "DELETE" });
+
+export const openFlowChat = (flow: string) =>
+  json<{ chat_id: string; flow: string; title: string }>("/api/flows/chats", {
+    method: "POST",
+    body: JSON.stringify({ flow }),
+  });
+
+export const flowChatEvents = (id: string) =>
+  json<AgentEvent[]>(`/api/flows/chats/${id}/events`);
+
+export const sendFlowMessage = (id: string, question: string, signal: AbortSignal) =>
+  streamTurn(`/api/flows/chats/${id}/messages`, { question }, signal);
+
+export const stopFlowChat = (id: string) =>
+  json(`/api/flows/chats/${id}/stop`, { method: "POST" });

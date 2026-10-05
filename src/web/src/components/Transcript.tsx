@@ -32,10 +32,13 @@ interface Proposals {
 export function Transcript({
   items,
   chatId,
+  approve,
   proposals,
 }: {
   items: Item[];
   chatId: string;
+  /** Threaded to the approval buttons. A Run answers on its own route; a chat omits it. */
+  approve?: (choice: "yes" | "always" | "no") => Promise<unknown>;
   proposals?: Proposals;
 }) {
   return (
@@ -79,6 +82,7 @@ export function Transcript({
               <div key={i} className="row">
                 <ToolCall
                   chatId={chatId}
+                  approve={approve}
                   tool={item.tool}
                   label={item.label}
                   query={item.query}

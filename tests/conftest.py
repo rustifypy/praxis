@@ -14,8 +14,15 @@ from analyst_agent.modelstore.schema import CubeQuery
 def scratch_data_dir(monkeypatch, tmp_path_factory):
     """Nothing may reach the developer's own ~/.analyst. The deployment row lives in
     analyst.db and `open_client` reads it, so an unpinned data dir would point a test at a
-    real Cube."""
+    real Cube.
+
+    `flows_dir` is pinned for a sharper version of the same reason: it is *relative* by design, so
+    it resolves against whatever directory the tests were started from — which is this repository,
+    where `flows/` holds real flows somebody wrote. An unpinned one would have tests creating and
+    deleting them.
+    """
     monkeypatch.setattr(settings, "data_dir", str(tmp_path_factory.mktemp("data")))
+    monkeypatch.setattr(settings, "flows_dir", str(tmp_path_factory.mktemp("flows")))
 
 
 @pytest.fixture

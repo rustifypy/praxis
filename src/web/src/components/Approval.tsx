@@ -13,6 +13,11 @@ import { Button } from "./Button";
  *
  * The decision is local state: the event is never stored, and `tool_end` arriving is what takes
  * this away for good.
+ *
+ * `decide` is how a Flow's Run uses this too. The moment is identical — a script is readable and
+ * a person says yes — but the route is the Run's, so the caller supplies it rather than this
+ * component learning which kind of thing it is inside. A second copy of the buttons would be a
+ * second place for the wording to drift.
  */
 
 const CHOICES = [
@@ -27,7 +32,14 @@ const DECIDED = {
   no: "Declined",
 };
 
-export function Approval({ chatId }: { chatId: string }) {
+export function Approval({
+  chatId,
+  decide: sendTo,
+}: {
+  chatId: string;
+  /** Where the answer goes. Defaults to this chat's approve route. */
+  decide?: (choice: "yes" | "always" | "no") => Promise<unknown>;
+}) {
   const [decided, setDecided] = useState<keyof typeof DECIDED | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState("");
@@ -36,7 +48,7 @@ export function Approval({ chatId }: { chatId: string }) {
     setBusy(true);
     setFailed("");
     try {
-      await api.approveScript(chatId, decision);
+      await (sendTo ? sendTo(decision) : api.approveScript(chatId, decision));
       setDecided(decision);
     } catch (error) {
       setFailed(error instanceof Error ? error.message : "could not send that");

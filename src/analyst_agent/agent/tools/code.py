@@ -34,13 +34,18 @@ TURN_OUTPUT = 20_000
 
 
 def build_code_tools(session: Session) -> list:
-    # A Session with no chat has no workspace of its own — only tests build one, and they get a
-    # shared directory rather than the `workspaces` root itself.
-    chat_id = session.chat_id or "scratch"
+    # Which sandbox workspace these files live in: the chat's, or a Run's when a Phase set one.
+    # `Session.workspace_key` is the one place that decides, so a Phase cannot end up writing
+    # into a chat's directory by having asked the question a different way.
+    workspace = session.workspace_key
     # Per turn: a fresh agent, and so a fresh closure, is built for each one.
     spent_seconds = 0.0
     spent_chars = 0
     approving = session.approvals is not None
+    # One script at a time. A model can ask for two in one step, and both would then wait on the
+    # one approval queue: a click answers one of them and the other waits for ever. Seen on a
+    # Flow's Phase. Taken in turn, each asks and is answered on its own.
+    one_at_a_time = asyncio.Lock()
 
     @tool
     async def export_result(filename: str = "result.csv") -> str:
@@ -58,34 +63,36 @@ def build_code_tools(session: Session) -> list:
                 return "No query has run yet, so there is nothing to export. Call run_query first."
 
             record = session.executed[-1]
-            stored = None
-            if record.result_id:
-                stored = await transcript.result(record.result_id)
-            if stored is None:
+            # The stored copy, because it outlives the turn: "export what you fetched earlier"
+            # has to keep working on turn three, and only a `results` row can answer that. A
+            # Phase never reaches here — its rows go to a file through `extract` instead.
+            stored = await transcript.result(record.result_id) if record.result_id else None
+            if stored is None or not stored["columns"]:
                 end("export_result", False)
                 return (
                     "That result was not kept, so it cannot be exported. Run the query again and "
                     "export immediately."
                 )
 
+            raw_rows = stored["rows"]
             columns = [Column(**raw) for raw in stored["columns"]]
             buffer = io.StringIO()
             writer = csv.writer(buffer)
             # Member ids as the header and not labels: a script refers to `sales.invoice_total`.
             # The download route writes labels instead, because a person reads a spreadsheet.
             writer.writerow([column.id for column in columns])
-            for row in stored["rows"]:
+            for row in raw_rows:
                 writer.writerow([export_value(row.get(column.id), column) for column in columns])
 
             # Handed over rather than written directly: the workspace is the sandbox's, and the
             # path it lands on is its decision.
             async with await open_sandbox() as sandbox:
-                landed = await sandbox.upload(chat_id, filename, buffer.getvalue().encode())
+                landed = await sandbox.upload(workspace, filename, buffer.getvalue().encode())
                 path = landed["path"]
 
             listed = ", ".join(column.id for column in columns)
-            end("export_result", True, note=f"{path}, {stored['row_count']} rows")
-            return f"Wrote {path}: {stored['row_count']} rows. Columns: {listed}"
+            end("export_result", True, note=f"{path}, {len(raw_rows)} rows")
+            return f"Wrote {path}: {len(raw_rows)} rows. Columns: {listed}"
         except SandboxError as exc:
             end("export_result", False, errors=[str(exc)])
             return f"The sandbox is not available, so nothing was exported: {exc}"
@@ -105,102 +112,119 @@ def build_code_tools(session: Session) -> list:
         is.
         """
         nonlocal spent_seconds, spent_chars, approving
-        try:
-            if session.cancel is not None and session.cancel.is_set():
-                return "The user stopped this turn. Run nothing else."
-            if spent_seconds >= TURN_SECONDS or spent_chars >= TURN_OUTPUT:
-                spent = f"{spent_seconds:.0f}s and {spent_chars} characters"
-                start("run_python", "over budget")
-                end("run_python", False, errors=[f"this turn has spent {spent} in the sandbox"])
-                return (
-                    f"This turn's sandbox budget is spent ({spent}). Answer from what you have "
-                    "already computed."
-                )
-
-            start("run_python", "a script")
-
-            # Shown before it is saved: the sandbox saves it as it runs, so the text shown here is
-            # the text sent, and `tool_end` names the file it landed in.
-            if approving:
-                emit(
-                    Event(
-                        type="approval",
-                        data={"tool": "run_python", "label": "run this script", "script": script},
-                    )
-                )
-                waiting = asyncio.create_task(session.approvals.get())
-                stop = asyncio.create_task((session.cancel or asyncio.Event()).wait())
-                done, _ = await asyncio.wait({waiting, stop}, return_when=asyncio.FIRST_COMPLETED)
-                stop.cancel()
-                # Stopping the turn is the third answer to the question, and it means no.
-                choice = waiting.result() if waiting in done else "no"
-                waiting.cancel()
-                if choice == "always":
-                    approving = False
-                if choice == "no":
-                    end("run_python", False, note="declined by the user")
+        async with one_at_a_time:
+            try:
+                if session.cancel is not None and session.cancel.is_set():
+                    return "The user stopped this turn. Run nothing else."
+                if spent_seconds >= TURN_SECONDS or spent_chars >= TURN_OUTPUT:
+                    spent = f"{spent_seconds:.0f}s and {spent_chars} characters"
+                    start("run_python", "over budget")
+                    end("run_python", False, errors=[f"this turn has spent {spent} in the sandbox"])
                     return (
-                        "The user declined to run this script. Ask what they would like "
-                        "changed, or answer without it."
+                        f"This turn's sandbox budget is spent ({spent}). Answer from what you have "
+                        "already computed."
                     )
 
-            pending = ""
-            streamed = 0
-            pushed = 0.0
+                # A Flow's prepared script is named and not asked about: it was reviewed when it
+                # was saved into the Flow. Matched on the whole text, so any edit asks again.
+                prepared_as = session.prepared.get(script, "")
+                start("run_python", prepared_as or "a script")
 
-            def on_output(chunk: str) -> None:
-                nonlocal pending, streamed, pushed
-                if streamed >= STREAM_LIMIT:
-                    return
-                pending += chunk
-                if (now := time.monotonic()) - pushed < STREAM_INTERVAL_S:
-                    return
-                pushed, streamed = now, streamed + len(pending)
-                emit(Event(type="output", data={"tool": "run_python", "delta": pending}))
+                # Shown before it is saved: the sandbox saves it as it runs, so the text shown
+                # here is the text sent, and `tool_end` names the file it landed in.
+                if approving and not prepared_as:
+                    emit(
+                        Event(
+                            type="approval",
+                            data={
+                                "tool": "run_python",
+                                "label": "run this script",
+                                "script": script,
+                            },
+                        )
+                    )
+                    waiting = asyncio.create_task(session.approvals.get())
+                    stop = asyncio.create_task((session.cancel or asyncio.Event()).wait())
+                    done, _ = await asyncio.wait(
+                        {waiting, stop}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    stop.cancel()
+                    # Stopping the turn is the third answer to the question, and it means no.
+                    choice = waiting.result() if waiting in done else "no"
+                    waiting.cancel()
+                    if choice == "always":
+                        approving = False
+                    if choice == "no":
+                        end("run_python", False, note="declined by the user")
+                        return (
+                            "The user declined to run this script. Ask what they would like "
+                            "changed, or answer without it."
+                        )
+
                 pending = ""
+                streamed = 0
+                pushed = 0.0
 
-            started = time.monotonic()
-            async with await open_sandbox(timeout=None) as sandbox:
-                runner = asyncio.create_task(sandbox.run(chat_id, script, on_output=on_output))
-                stop = asyncio.create_task((session.cancel or asyncio.Event()).wait())
-                done, _ = await asyncio.wait({runner, stop}, return_when=asyncio.FIRST_COMPLETED)
-                stop.cancel()
+                def on_output(chunk: str) -> None:
+                    nonlocal pending, streamed, pushed
+                    if streamed >= STREAM_LIMIT:
+                        return
+                    pending += chunk
+                    if (now := time.monotonic()) - pushed < STREAM_INTERVAL_S:
+                        return
+                    pushed, streamed = now, streamed + len(pending)
+                    emit(Event(type="output", data={"tool": "run_python", "delta": pending}))
+                    pending = ""
 
-                stopped = runner not in done
+                started = time.monotonic()
+                async with await open_sandbox(timeout=None) as sandbox:
+                    runner = asyncio.create_task(
+                        sandbox.run(workspace, script, on_output=on_output)
+                    )
+                    stop = asyncio.create_task((session.cancel or asyncio.Event()).wait())
+                    done, _ = await asyncio.wait(
+                        {runner, stop}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    stop.cancel()
+
+                    stopped = runner not in done
+                    if stopped:
+                        # Asked of the service rather than done to the request: cancelling the
+                        # stream would leave the script running with nobody reading it.
+                        await sandbox.kill(workspace)
+                    result = await runner
+
+                spent_seconds += time.monotonic() - started
+                session.wrote.update(result.wrote)
+                shown = "\n".join(
+                    part for part in (result.out.rstrip(), result.err.rstrip()) if part
+                )
+                spent_chars += len(shown)
+                end(
+                    "run_python",
+                    result.ok,
+                    exit_code=result.code,
+                    output=shown,
+                    script=result.script,
+                    wrote=result.wrote[:WROTE_LIMIT],
+                    note="stopped by the user" if stopped else "",
+                )
+
+                head = f"{result.script} exited {result.code}"
+                if result.wrote:
+                    named = ", ".join(result.wrote[:WROTE_LIMIT])
+                    more = len(result.wrote) - WROTE_LIMIT
+                    head += f"; wrote {named}" + (f" and {more} more" if more > 0 else "")
                 if stopped:
-                    # Asked of the service rather than done to the request: cancelling the stream
-                    # would leave the script running with nobody reading it.
-                    await sandbox.kill(chat_id)
-                result = await runner
-
-            spent_seconds += time.monotonic() - started
-            shown = "\n".join(part for part in (result.out.rstrip(), result.err.rstrip()) if part)
-            spent_chars += len(shown)
-            end(
-                "run_python",
-                result.ok,
-                exit_code=result.code,
-                output=shown,
-                script=result.script,
-                wrote=result.wrote[:WROTE_LIMIT],
-                note="stopped by the user" if stopped else "",
-            )
-
-            head = f"{result.script} exited {result.code}"
-            if result.wrote:
-                named = ", ".join(result.wrote[:WROTE_LIMIT])
-                more = len(result.wrote) - WROTE_LIMIT
-                head += f"; wrote {named}" + (f" and {more} more" if more > 0 else "")
-            if stopped:
-                head += " — stopped by the user"
-            elif result.expired:
-                head += " — killed at the sandbox's time limit"
-            for log in (result.out_log, result.err_log):
-                if log:
-                    head += f"; the whole output is at {log}"
-            return f"{head}\n\n{shown}" if shown else f"{head}\n(no output)"
-        except SandboxError as exc:
-            end("run_python", False, errors=[str(exc)])
-            return f"The script could not be run: {exc}"
+                    head += " — stopped by the user"
+                elif result.expired:
+                    head += " — killed at the sandbox's time limit"
+                for log in (result.out_log, result.err_log):
+                    if log:
+                        head += f"; the whole output is at {log}"
+                return f"{head}\n\n{shown}" if shown else f"{head}\n(no output)"
+            except SandboxError as exc:
+                end("run_python", False, errors=[str(exc)])
+                return f"The script could not be run: {exc}"
 
     return [export_result, run_python]

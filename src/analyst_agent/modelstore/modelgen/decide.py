@@ -358,6 +358,11 @@ def validate_views(
         if not view.name.replace("_", "").isalnum():
             rejected.append(f"view {view.name!r}: not a usable name")
             continue
+        # Cubes and views share one namespace, and Cube's refusal of the clash does not name it —
+        # it fails the whole model with "Cannot read properties of undefined".
+        if view.name in enriched:
+            rejected.append(f"view {view.name}: a cube already has that name")
+            continue
         view.cubes, refused = validate_paths(view, available)
         rejected += refused
         if not view.cubes:

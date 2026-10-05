@@ -280,3 +280,88 @@ export interface RefreshOutcome {
     degraded: string;
   }[];
 }
+
+// --- flows -------------------------------------------------------------------
+
+/** One row of the flows list. `ok` is whether the folder is a Flow that could run — shipped by
+ *  the server rather than derived here, because "is this runnable" has one answer. */
+export interface FlowSummary {
+  name: string;
+  title: string;
+  description: string;
+  phases: string[];
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  chat_id: string;
+}
+
+/** A Phase's contract, as `phase.yml` declares it. */
+export interface PhaseSpec {
+  dir_name: string;
+  number: number;
+  kind: "agent" | "script";
+  review: "required" | "none";
+  tools: string[];
+  inputs: { kind: "reference" | "working"; path: string }[];
+  outputs: string[];
+  script: string;
+}
+
+export interface FlowDetail extends FlowSummary {
+  phases_detail: PhaseSpec[];
+  files: string[];
+}
+
+/** A Phase within one Run. `outputs` is what it declared and produced; `output` and `scratch` are
+ *  what is on disk, which is how a Phase can have failed after its model call succeeded. */
+/** What a Phase is meant to do, from its folder as it is now. `title` and `purpose` are the first
+ *  heading and paragraph of its CONTEXT.md, as its author wrote them. */
+export interface PhasePlan {
+  kind: "agent" | "script";
+  review: "required" | "none";
+  tools: string[];
+  inputs: { kind: "reference" | "working"; path: string }[];
+  outputs: string[];
+  may_be_empty: string[];
+  /** Work prepared with the Flow: query files in queries/, scripts beside phase.yml. */
+  queries: string[];
+  scripts: string[];
+  title: string;
+  purpose: string;
+}
+
+export interface RunPhase {
+  dir_name: string;
+  status: "pending" | "running" | "done" | "failed" | "stale";
+  started_at: number;
+  ended_at: number;
+  error: string;
+  outputs: string[];
+  output: string[];
+  scratch: string[];
+  /** Null when the Phase was renamed or removed since this run began. */
+  plan: PhasePlan | null;
+}
+
+export interface RunSummary {
+  id: string;
+  flow: string;
+  status: "running" | "paused" | "done" | "failed";
+  current: string;
+  /** A Gate is the only pause `run.json` can hold. A waiting approval lives on the live event
+   *  stream — see the note in `flows/state.py`. */
+  waiting: "" | "gate";
+  started_at: number;
+  ended_at: number;
+  error: string;
+  phase_count: number;
+}
+
+export interface RunDetail extends Omit<RunSummary, "phase_count"> {
+  phases: RunPhase[];
+  brief: string;
+  /** The one Phase whose output may be edited right now, or "". The server decides — editing is
+   *  only legal at that Phase's Gate. */
+  editable: string;
+}

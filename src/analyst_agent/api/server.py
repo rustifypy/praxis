@@ -16,7 +16,7 @@ from ..core import access
 from ..core.config import settings
 from ..core.transcript import checkpointer
 from ..sandbox import SandboxError
-from . import chat, chat_management, dashboard, ide, mcp, onboarding
+from . import chat, chat_management, dashboard, flows, ide, mcp, onboarding
 from .support import state
 
 STATIC = Path(__file__).parent / "static"
@@ -58,6 +58,10 @@ app.include_router(chat_management.router)
 app.include_router(chat.router)
 app.include_router(chat.results)
 app.include_router(dashboard.router)
+# `chats` before `router`: `/{flow}` is broad enough to answer for `/chats`, so the narrower
+# surface is registered first. Reordering these two breaks the flow chat — see `api/flows/`.
+app.include_router(flows.chats)
+app.include_router(flows.router)
 # What they run on: the connection, the deployment serving it, the pipeline that builds the
 # model, and the model itself.
 app.include_router(onboarding.router)

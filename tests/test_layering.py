@@ -28,9 +28,12 @@ TIERS: dict[str, int] = {
     "sandbox": 1,
     # 2 — everything the LLM touches: prompts, the toolsets, one turn.
     "agent": 2,
-    # 3 — HTTP. May reach anything; nothing may reach it.
-    "api": 3,
-    "__main__": 4,
+    # 3 — a Flow, and one Run of it. Above `agent` because running an agent Phase *is*
+    # `run_turn`, which is why no tool can start a Run — see `docs/adr/0007`.
+    "flows": 3,
+    # 4 — HTTP. May reach anything; nothing may reach it.
+    "api": 4,
+    "__main__": 5,
 }
 
 # Rows the model store must never read. `impact` is handed the saved queries it checks against

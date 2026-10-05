@@ -4,8 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `CONTEXT.md` is the glossary — what the domain words mean and which synonyms are wrong. Read it
 before naming anything. `docs/adr/` holds decisions a reader would otherwise try to "undo" —
-`0004` is why the semantic layer is not in this repo and `0005` is why a branch is replayed rather
-than merged. This file is how the code fits together.
+`0006` is why a **Flow** keeps its state in its folder and `0007` is why the analytics agent
+cannot start a **Run**. This file is how the code fits together.
 
 ## Commands
 
@@ -69,7 +69,8 @@ runner, the deployment row and the hand-over it renders — is tier 0.
 | 1 | `modelstore/` | the model store, Cube behind it, the model it serves, and everything that generates or edits that model |
 | 1 | `sandbox/` | where the agent runs Python |
 | 2 | `agent/` | everything the LLM touches: prompts, the toolsets, one turn |
-| 3 | `api/` | HTTP, grouped by what someone is trying to do: `mcp`, `chat`, `chat_management`, `onboarding`, `ide`, `dashboard`. May reach anything; nothing may reach it |
+| 3 | `flows/` | the **Flow** folder, the **Phase** contract, and one **Run**. It sits above `agent/` because executing an agent Phase *is* `run_turn`, which is why there is no `run_flow` tool — see `docs/adr/0007` |
+| 4 | `api/` | HTTP, grouped by what someone is trying to do: `mcp`, `chat`, `chat_management`, `onboarding`, `ide`, `dashboard`, `flows`. May reach anything; nothing may reach it |
 
 `core.llm.build_model` and `core.events.emit` are what make the rule matter: nearly every package
 needs them, so putting either in a feature package would make that feature a dependency of its
@@ -113,7 +114,7 @@ file would be generated from within the model store's package.
 rather than borrowing either client, because it is asked about an address that is *not on the row
 yet* and a service that may not exist. `connection.py` is its only caller and renders both answers
 into one panel, so the two halves must classify a timeout, a refusal and a wrong service
-*identically* — which is the pressure a split would work against. See `docs/adr/0001`.
+*identically* — which is the pressure a split would work against.
 
 `modelstore/editing/drafts.py` is not a client at all — it imports only `core`, and a module's home
 is what it imports. It deliberately knows nothing about what a model file *may* be: that `cubes/*.yml` and
@@ -184,8 +185,7 @@ is being edited — plus `origin.json` carrying the store revision they came fro
 makes "what have I changed" and "put it back" answerable without asking the store, and what makes
 staleness a `rev` comparison rather than a guess. **There is still no git here**: no repository, no
 subprocess, no history, no remote. Branching, committing and merging are things the portal *asks
-the store to do* over HTTP, and a draft is a working copy, never a second source of truth — see
-`docs/adr/0003`, which this supersedes.
+the store to do* over HTTP, and a draft is a working copy, never a second source of truth.
 
 `workspace.py` is the one door for the HTTP routes and the editor tools, with three
 non-interchangeable entry points: `stage` (tiers 1-2, writes nothing), `verify` (tiers 1-3 plus
@@ -197,7 +197,7 @@ self-healing.
 
 Landing a branch is `workspace.land`: fast-forward, else rebase, else **replay** the ref onto a
 fresh branch off main. The store fast-forwards only and main is generated, so a rebase conflicts
-on files nobody touched — see `docs/adr/0005`. It refuses a branch whose draft is unpublished.
+on files nobody touched. It refuses a branch whose draft is unpublished.
 
 **Everything from `verify` on is set-shaped**: a change spanning two files can't compile one at a
 time, so a verdict covers the whole draft and one commit lands it. Cubes are **append-only**
@@ -228,11 +228,83 @@ because "does this chart fit these columns" is a question about a query and neve
 A Python sandbox on the *query* agent, not an agent of its own. Read `sandbox/__init__.py` first.
 **What keeps the gate load-bearing is that the sandbox holds no credential** — `run_query` and the
 interpreter are in the same hands, safe because the sandbox can't sign a Cube token and has no
-warehouse password. `export_result` is the only way rows cross over. This buys the arithmetic a
-`CubeQuery` can't express (ratios, period deltas, shares). `--network none` is gone with the move to
-a service — the accepted price of the portal running nothing. A script is shown before it runs
+warehouse password. `export_result` (a chat) and `extract` (a Phase) are the only ways rows cross
+over. This buys the arithmetic a `CubeQuery` can't express (ratios, period deltas, shares).
+`--network none` is gone with the move to a service — the accepted price of the portal running
+nothing. A script is shown before it runs
 (`approve_scripts`); the approval carries the script body and is the one event with a body. Stopping
 asks the service to kill the process *group*; it does not cancel the stream.
+
+### Flows — `flows/`, `api/flows/`
+A sequential pipeline someone repeats, defined by a folder rather than by code, following
+*Interpretable Context Methodology* (arXiv:2603.16021). Read `docs/adr/0006` before proposing a
+table for any of it: **the folder is the definition**, there is no row and no builder behind it,
+and the numbering of `phases/NN_name/` *is* the execution order — so inserting a step is renaming
+folders. The root is the directory `analyst` was launched from, `FLOWS_DIR` overrides it, and it
+is deliberately not `DATA_DIR`: a Flow beside the code is a Flow in git, which is the only way the
+prose that decides an agent's behaviour becomes diffable.
+
+Two files at every level and the same split at both: `.yml` is what the machine reads, `.md` is
+what the model reads. A Phase is `kind: agent` (one `run_turn` with a scoped prompt and the tool
+**Bundles** it asked for, plus `write_output`, which no Bundle contains) or `kind: script` (one
+named `.py` posted to `sandbox.run`, no model call at all). A **Reference** input is inlined into
+the prompt verbatim; a **Working** input arrives as prose or as a `Profile` shape with the bytes
+in the sandbox. That is the whole of the layer distinction, and it is expressed as two path roots
+— Reference resolves against the Flow, Working against the Run.
+
+**A Run pauses in two structurally different places**, and conflating them is the mistake this
+section exists to prevent. A **Gate** is between Phases, recorded in `run.json`, and survives a
+restart. An **approval** is mid-Phase on an in-memory queue and cannot; a restart while a script
+waits fails that Phase. Everything that goes wrong **fails the Phase** rather than continuing — a
+spent model-call limit, an unanswered approval, a declared output that never appeared. This is why
+a Phase does not run under the chat's `exit_behavior="end"`: an unattended Run that writes a
+confident artifact from half the work is worse than one that stops.
+
+**A Phase's `query` Bundle is not the chat's.** `run_query` answers a person — rows in the reply,
+a table in the transcript, capped at `max_rows`. A Phase answers the next Phase, so it gets
+`extract` instead: `gate.check`, then `gate.pages` reading 50,000-row pages (Cube's per-request
+maximum) straight into a CSV in the Phase's `output/`, up to `flow_max_rows`, past which it writes
+nothing rather than a file that looks finished. The model gets the file's `Profile` and never the
+rows, and the event carries no `preview`, so no rows reach the Run's log either. Offset paging is
+safe because there is no `ungrouped`: every row has a unique set of dimension values, and `pages`
+appends them all to the order. The `python` Bundle is `run_python` alone — an extract is already
+in the sandbox, and `export_result` exists to move a chat's stored rows there.
+
+`run_turn` takes its sink so a Run's events land in `runs/<id>/events.jsonl` — one seam, two
+sinks, never a second copy of the loop. Declared outputs land in `output/` and everything else
+the script wrote lands in `scratch/`, because only `output/` is visible to the next Phase while a
+chart nobody declared is still worth keeping.
+
+One Run per Flow, held by a lock file in the Flow's folder — **never `core.jobs`**, whose lock is
+machine-wide and would let a twelve-minute Run block a model rebuild. There is no scheduler, and
+adding one would undercut the Gate the rest of this rests on.
+
+**Prepared work is written with the Flow, so a Run does not re-derive it.** An agent Phase may
+list `queries:` (`phases/NN/queries/<name>.json`, each writing `<name>.csv`) and `scripts:` (`.py`
+beside `phase.yml`). The Phase's prompt inlines them and the agent runs them with
+`extract_prepared` / `run_prepared`; it writes its own only when the Brief or the data needs it,
+and the Run page flags a step that was not the prepared one. An unchanged prepared script runs
+without approval — it was reviewed when it was saved, as a `kind: script` Phase is — and that is
+matched on the whole text (`Session.prepared`), so any edit asks again. The flow chat writes them
+at creation with `search_model` and `check_query`, which compile a query without running it and
+return the CSV header `extract` will write; that header is what lets a script be written against
+real column names. `contract.load` checks a query's shape only; `validate_flow` checks its members
+against the served model. A script cannot be checked until a Run executes it.
+
+A declared `.csv`/`.tsv` holding only a header **fails its Phase** — an agent that could not find
+its data wrote a header-only `routes.csv` once, and the Phase passed. `may_be_empty` in `phase.yml`
+names the outputs for which no rows is a correct answer, so the exception is written where the
+output is declared.
+
+On screen: `FlowNav` reuses the shared `.nav*` sidebar chrome, and the Edit tab reuses
+`CodeEditor` — but **not `FileTree`**, which is hardcoded to `cubes/`/`views/` and means the model.
+`FlowFiles` groups by phase instead, because a Phase is the unit someone thinks in and the folder
+*is* the meaning, the same argument `FileTree` makes for its two groups.
+
+Tests cover the deterministic half: contract parsing and each of its refusals, path-root
+resolution, which checks belong to write time versus run time, `run.json`'s transitions including
+**Stale**, `layout.writable`'s line between a definition and a record, and which artifact a Gate
+permits. A real Run needs both services and a model, so it is verified by running one.
 
 ### Web portal — `web/`, `src/web/`, `core/transcript.py`, `core/events.py`
 `analyst` opens a browser Jupyter-style. **One flat event stream is the contract** between agent and
@@ -240,19 +312,34 @@ browser. Two invariants: **the event log is the transcript** — `Session` prove
 it (`agent.session.replay`), so nothing lives only in memory; and **tools author their own events**
 via `agent/tools/trace.py`, so a gate rejection reaches the browser with its reasons. The one
 exception is `output` (a running script's stdout, live-only — the whole of it lands trimmed on
-`tool_end`); check a type is already stored elsewhere before adding another wire-only one. Both
-agents share every seam: `run_turn`, `api.streamTurn`, `events.applyEvent`, `Transcript.tsx` — each
-was two copies once and the copy always dropped something.
+`tool_end`); check a type is already stored elsewhere before adding another wire-only one. **All
+three agents share every seam**: `run_turn`, `api.streamTurn`, `events.applyEvent`,
+`Transcript.tsx`, `Approval.tsx` — each was two copies once and the copy always dropped something.
+A Run shares `run_turn`, `api.streamTurn` and `Approval` and needed two parameters rather than a
+fork: `run_turn` takes its sink and its checkpointer thread, and `Approval` takes where the answer
+goes. It does **not** share `Transcript`: a Run answers in its files, and a transcript of a
+model's turn is the wrong shape for reviewing one. `RunStory.tsx` renders it phase by phase —
+the plan (`controller._plan`, lifted from each Phase's `phase.yml` and the first heading and
+paragraph of its `CONTEXT.md`), what it did as plain sentences, and each output's head with every
+row counted (`/runs/{id}/preview/…`). It reads `run.json` and `events.jsonl` every two seconds
+while a Run streams — the runner files each event under its Phase's name — and takes from the
+stream only the approval, which is stored nowhere.
 
 **Rows are not in the trace.** `tool_end` holds `rows[:MAX_POINTS]` plus a `result_id`; the full set
 is its own transcript block from the `results` table. Header and chart are pure functions of (query,
 catalog, rows) in `modelstore/shape.py` / `modelstore/charts.py` — derived, never asked for; `chart_for`
 returning `None` (no chart) is a normal, correct answer.
 
-**The HTTP surface is six product areas**, each a package under `api/` and a prefix on the wire:
+**The HTTP surface is seven product areas**, each a package under `api/` and a prefix on the wire:
 `/api/onboarding` (connect → hand over → build), `/api/ide` (the model and its branches),
-`/api/chats` (a chat in use), `/api/dashboard`, `/api/mcp`. A seventh prefix is a claim there is a
-seventh thing someone is trying to do.
+`/api/chats` (a chat in use), `/api/dashboard`, `/api/flows` (a **Flow**, its **Runs**, and the
+chat that authors it), `/api/mcp`. An eighth prefix is a claim there is an eighth thing someone is
+trying to do.
+
+`flows` carries its own chat routes rather than sharing `/api/chats`, on the `ide` precedent —
+and the flow chat's scope is `flows/<flow>/chat.json`, not a column on `chats`. There is no
+migration mechanism, so a new column would mean every existing user deleting `analyst.db` to get
+the feature.
 
 Two of the six do not get a prefix of their own, for reasons worth keeping. `chat_management`
 shares `/api/chats` with `chat` — making and naming a chat is a different product surface from
@@ -265,8 +352,11 @@ gets — under a shared `/api/onboarding` prefix it would have answered for `/co
 `modelstore.catalog.Catalog` (the served model), and the warehouse's tables are
 `/api/onboarding/pipeline/tables`.
 
-The browser is separate products, so separate modes (`Rail.tsx` — chat / boards / data / agents),
-read off the hash and nowhere else.
+The browser is separate products, so separate modes (`Rail.tsx` — chat / boards / data / flows /
+agents), read off the hash and nowhere else. **`agents` is the MCP page**, not Flows: it is about
+handing these tools to something that is not this app. Flows has two tabs over one Flow, because
+authoring it is an unbounded editing session and running it is a stateful object with consequential
+buttons — the same argument the rail makes about chat versus data.
 
 ## The deployment — the portal runs nothing
 
@@ -305,7 +395,7 @@ receives `store_url` and `sandbox_url` and checks each before storing. Four cond
 conflating them is the mistake the glossary exists to prevent: `deployed` (an address is stored) →
 `onboarded` (both are, plus a model) → *reachable* (something answers and it's the right thing) →
 *serving* (Cube is compiling a model). Only the first two are properties of the row; the other two
-cost a request. `api/onboarding/reachable.py` holds both reachability questions — see `docs/adr/0001`.
+cost a request. `api/onboarding/reachable.py` holds both reachability questions.
 
 ## Storage — one file, one schema
 
@@ -327,6 +417,11 @@ deleting the file. Affordable for one machine, the first thing to revisit if thi
 **sandbox service's** volume, one directory per chat, with no table — a row would only ever be a
 stale copy of `ls`.
 
+**Everything about a Flow is the same argument, made deliberately** — its definition, its Runs,
+each Run's event log and artifacts, and the record of where a Run is paused are all files under
+`flows/`, and `SCHEMA` gains nothing. `docs/adr/0006` is why, and the one thing given up: an
+approval pause cannot be written down, so a restart mid-Phase costs that Phase.
+
 ## Conventions
 
 - **Tiers before packages.** A module's home is what it imports, not what it's about. `test_layering`
@@ -343,6 +438,10 @@ stale copy of `ls`.
 - **A name is taken once.** `Catalog`/`Entity`/`MemberDoc`/`Folder` mean the *served* model
   (`modelstore.catalog`); the generation side is `Introspection`/`Definition`/`MemberDescription`/
   `FolderDecision`. Grep before naming.
+- **`flows/` points at two sizes of thing, and both are correct.** `flows/` in the launch directory
+  is the *content* — the Flow folders someone authors and commits. `analyst_agent.flows` is the
+  *engine* that reads them. The same shape as `modelstore` beside `semantic`, and documented here
+  rather than renamed: renaming either would move the name off the thing the domain word means.
 - **One rule, one place.** What re-running a step discards, what a failed step looks like, layout
   validation — each lives once and is shipped to the browser, never recomputed there.
 - **No single-caller private helpers** — inline them; procedural flow reads better than one-use hops.
