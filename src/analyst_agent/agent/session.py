@@ -36,9 +36,13 @@ class Session:
     # separate from `chat_id`: a Phase wants the workspace *without* the `results` rows, since a
     # Run keeps nothing in the database.
     workspace: str = ""
-    # This turn's most recent successful result. Held because a Phase has no `results` row to
-    # address by id, so this is the only copy of the rows `export_result` would write.
-    rows: list[dict] = field(default_factory=list)
+    # Scripts reviewed when their Flow was written, text → filename. One sent to `run_python`
+    # verbatim runs without asking; any other text asks. Empty everywhere but a Phase.
+    prepared: dict[str, str] = field(default_factory=dict)
+    # Every file a script wrote in this turn, by the path the sandbox reported. A Phase's
+    # `write_output` reads it: a declared output a script already wrote is finished, and a model
+    # re-typing it is a model that read the rows first.
+    wrote: set[str] = field(default_factory=set)
 
     @property
     def workspace_key(self) -> str:

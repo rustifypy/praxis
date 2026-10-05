@@ -61,7 +61,8 @@ class RunState(BaseModel):
 
 
 def begin(run_id: str, flow: str, dir_names: list[str]) -> RunState:
-    """A Run at Phase one, with every Phase pending.
+    """A Run at Phase one, with every Phase pending — and `paused`, because nothing runs until
+    someone advances it. `running` here was a Run nobody was running, listed as if it were.
 
     The Phase list is fixed here, from the folders as they are *now*. A Flow edited mid-Run would
     otherwise change what the Run is, and "which Phases did this Run have" is a question its own
@@ -70,7 +71,7 @@ def begin(run_id: str, flow: str, dir_names: list[str]) -> RunState:
     return RunState(
         id=run_id,
         flow=flow,
-        status="running",
+        status="paused",
         current=dir_names[0] if dir_names else "",
         started_at=time.time(),
         phases=[PhaseState(dir_name=name) for name in dir_names],

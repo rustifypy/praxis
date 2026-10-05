@@ -228,9 +228,10 @@ because "does this chart fit these columns" is a question about a query and neve
 A Python sandbox on the *query* agent, not an agent of its own. Read `sandbox/__init__.py` first.
 **What keeps the gate load-bearing is that the sandbox holds no credential** — `run_query` and the
 interpreter are in the same hands, safe because the sandbox can't sign a Cube token and has no
-warehouse password. `export_result` is the only way rows cross over. This buys the arithmetic a
-`CubeQuery` can't express (ratios, period deltas, shares). `--network none` is gone with the move to
-a service — the accepted price of the portal running nothing. A script is shown before it runs
+warehouse password. `export_result` (a chat) and `extract` (a Phase) are the only ways rows cross
+over. This buys the arithmetic a `CubeQuery` can't express (ratios, period deltas, shares).
+`--network none` is gone with the move to a service — the accepted price of the portal running
+nothing. A script is shown before it runs
 (`approve_scripts`); the approval carries the script body and is the one event with a body. Stopping
 asks the service to kill the process *group*; it does not cancel the stream.
 
@@ -259,15 +260,41 @@ spent model-call limit, an unanswered approval, a declared output that never app
 a Phase does not run under the chat's `exit_behavior="end"`: an unattended Run that writes a
 confident artifact from half the work is worse than one that stops.
 
-`export_result` writes a CSV into the Phase's `output/` here instead of saving a `results` row,
-and `run_turn` takes its sink so a Run's events land in `runs/<id>/events.jsonl`. Both are one
-move — one seam, two sinks, never a second copy of the loop. Declared outputs land in `output/`
-and everything else the script wrote lands in `scratch/`, because only `output/` is visible to the
-next Phase while a chart nobody declared is still worth keeping.
+**A Phase's `query` Bundle is not the chat's.** `run_query` answers a person — rows in the reply,
+a table in the transcript, capped at `max_rows`. A Phase answers the next Phase, so it gets
+`extract` instead: `gate.check`, then `gate.pages` reading 50,000-row pages (Cube's per-request
+maximum) straight into a CSV in the Phase's `output/`, up to `flow_max_rows`, past which it writes
+nothing rather than a file that looks finished. The model gets the file's `Profile` and never the
+rows, and the event carries no `preview`, so no rows reach the Run's log either. Offset paging is
+safe because there is no `ungrouped`: every row has a unique set of dimension values, and `pages`
+appends them all to the order. The `python` Bundle is `run_python` alone — an extract is already
+in the sandbox, and `export_result` exists to move a chat's stored rows there.
+
+`run_turn` takes its sink so a Run's events land in `runs/<id>/events.jsonl` — one seam, two
+sinks, never a second copy of the loop. Declared outputs land in `output/` and everything else
+the script wrote lands in `scratch/`, because only `output/` is visible to the next Phase while a
+chart nobody declared is still worth keeping.
 
 One Run per Flow, held by a lock file in the Flow's folder — **never `core.jobs`**, whose lock is
 machine-wide and would let a twelve-minute Run block a model rebuild. There is no scheduler, and
 adding one would undercut the Gate the rest of this rests on.
+
+**Prepared work is written with the Flow, so a Run does not re-derive it.** An agent Phase may
+list `queries:` (`phases/NN/queries/<name>.json`, each writing `<name>.csv`) and `scripts:` (`.py`
+beside `phase.yml`). The Phase's prompt inlines them and the agent runs them with
+`extract_prepared` / `run_prepared`; it writes its own only when the Brief or the data needs it,
+and the Run page flags a step that was not the prepared one. An unchanged prepared script runs
+without approval — it was reviewed when it was saved, as a `kind: script` Phase is — and that is
+matched on the whole text (`Session.prepared`), so any edit asks again. The flow chat writes them
+at creation with `search_model` and `check_query`, which compile a query without running it and
+return the CSV header `extract` will write; that header is what lets a script be written against
+real column names. `contract.load` checks a query's shape only; `validate_flow` checks its members
+against the served model. A script cannot be checked until a Run executes it.
+
+A declared `.csv`/`.tsv` holding only a header **fails its Phase** — an agent that could not find
+its data wrote a header-only `routes.csv` once, and the Phase passed. `may_be_empty` in `phase.yml`
+names the outputs for which no rows is a correct answer, so the exception is written where the
+output is declared.
 
 On screen: `FlowNav` reuses the shared `.nav*` sidebar chrome, and the Edit tab reuses
 `CodeEditor` — but **not `FileTree`**, which is hardcoded to `cubes/`/`views/` and means the model.
@@ -286,10 +313,17 @@ it (`agent.session.replay`), so nothing lives only in memory; and **tools author
 via `agent/tools/trace.py`, so a gate rejection reaches the browser with its reasons. The one
 exception is `output` (a running script's stdout, live-only — the whole of it lands trimmed on
 `tool_end`); check a type is already stored elsewhere before adding another wire-only one. **All
-three agents and a Run share every seam**: `run_turn`, `api.streamTurn`, `events.applyEvent`,
+three agents share every seam**: `run_turn`, `api.streamTurn`, `events.applyEvent`,
 `Transcript.tsx`, `Approval.tsx` — each was two copies once and the copy always dropped something.
-A Run is the fourth caller and needed two parameters rather than a fork: `run_turn` takes its sink
-and its checkpointer thread, and `Approval` takes where the answer goes.
+A Run shares `run_turn`, `api.streamTurn` and `Approval` and needed two parameters rather than a
+fork: `run_turn` takes its sink and its checkpointer thread, and `Approval` takes where the answer
+goes. It does **not** share `Transcript`: a Run answers in its files, and a transcript of a
+model's turn is the wrong shape for reviewing one. `RunStory.tsx` renders it phase by phase —
+the plan (`controller._plan`, lifted from each Phase's `phase.yml` and the first heading and
+paragraph of its `CONTEXT.md`), what it did as plain sentences, and each output's head with every
+row counted (`/runs/{id}/preview/…`). It reads `run.json` and `events.jsonl` every two seconds
+while a Run streams — the runner files each event under its Phase's name — and takes from the
+stream only the approval, which is stored nowhere.
 
 **Rows are not in the trace.** `tool_end` holds `rows[:MAX_POINTS]` plus a `result_id`; the full set
 is its own transcript block from the `results` table. Header and chart are pure functions of (query,

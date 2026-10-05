@@ -32,14 +32,17 @@ class Profile(BaseModel):
         if self.note:
             lines.append(f"({self.note})")
         for column in self.columns:
-            said = [f"{column.distinct:,} distinct"]
+            # Zero is "not counted": a profile the portal makes itself, while the sandbox is
+            # down, has no distinct counts, and "0 distinct" would be a claim about the data.
+            said = [f"{column.distinct:,} distinct"] if column.distinct else []
             if column.unique:
                 said.append("unique")
             if column.nulls:
                 said.append(f"{column.nulls:.0%} null")
             if column.min is not None and column.min != column.max:
                 said.append(f"{column.min} … {column.max}")
-            lines.append(f"- {column.name} ({column.type}) — {', '.join(said)}")
+            line = f"- {column.name} ({column.type})"
+            lines.append(f"{line} — {', '.join(said)}" if said else line)
         for row in self.head:
             lines.append("  " + " | ".join(f"{value}" for value in row.values()))
         return "\n".join(lines)

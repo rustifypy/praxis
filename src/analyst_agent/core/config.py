@@ -17,6 +17,11 @@ class Settings(BaseSettings):
 
     max_rows: int = 5_000
     query_timeout_s: float = 60.0
+    # A Phase's `extract` writes a file rather than a reply, so the chat's `max_rows` does not
+    # apply to it. The page is Cube's own per-request maximum; the ceiling is not a cap but a
+    # refusal — past it, `extract` writes nothing rather than a file that looks finished.
+    flow_page_rows: int = 50_000
+    flow_max_rows: int = 5_000_000
 
     data_dir: str = "~/.analyst"
     # Relative on purpose, and deliberately not under `data_dir`: a Flow beside the code is a Flow

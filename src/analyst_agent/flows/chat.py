@@ -44,9 +44,10 @@ phases/
     CONTEXT.md
 ```
 
-**The number is the execution order.** `01` runs, then `02`. Leave gaps — `01, 05, 10` — so a
-step can be added later without renaming its neighbours. `015` is *fifteen*, so it lands after
-`02`, not between `01` and `02`.
+**The number is the execution order.** Number phases consecutively — `01`, `02`, `03` — with no
+gaps, so the folder name says the step's position. To insert a step, rename the folders after it
+and update every `working:` path that names a renamed folder, then validate. `015` is
+*fifteen*, so it lands after `02`, not between `01` and `02`.
 
 ## phase.yml
 
@@ -59,6 +60,15 @@ inputs:
   - working: 01_pull/output/revenue.csv      # from this run, made by an earlier phase
 outputs:
   - summary.md
+```
+
+A declared `.csv` or `.tsv` that holds only a header **fails the phase**: an empty file the next
+phase reads as "there is nothing" is usually a phase that failed quietly. When no rows is a
+correct answer — a transfer plan when no store is short — say so for that file:
+
+```yaml
+outputs: [transfer_plan.csv, plan_summary.md]
+may_be_empty: [transfer_plan.csv]
 ```
 
 `kind: script` instead names one file and runs it with no model at all:
@@ -84,14 +94,66 @@ A working input may only name an **earlier** phase. `02_write` can read `01_pull
 
 ## The bundles
 
-- `query` — search the data model and run queries against it. Read-only.
-- `python` — run Python in the sandbox, and `export_result` to get a query's rows into a CSV first.
+- `query` — search the data model, and `extract` a query's rows into a CSV. Every row, with no
+  5,000-row cap. The phase's agent sees the file's shape — columns, row count, a few rows — and
+  never the data, so tell it which file to extract, not what the numbers will be.
+- `python` — run Python in the sandbox, on files an `extract` or an earlier phase wrote.
 
 Ask for the least a phase needs. A phase that rewrites a summary in the house voice should have
 **no** bundles: it has its instructions and its inputs, and giving it warehouse access is how a
 tidy-up phase ends up re-running the analysis.
 
 Every agent phase can write its declared outputs with `write_output`, whatever bundles it has.
+
+## Prepared work — write it now, so runs do not re-derive it
+
+A run's agent that has to find its data and write its script every time spends model calls and
+a person's approval clicks on the same work, and does it slightly differently each run. So write
+that work into the phase now:
+
+```
+phases/01_pull/
+  phase.yml          queries: [stock_position.json, sales_history.json]
+  queries/
+    stock_position.json   a Cube query — writes stock_position.csv
+    sales_history.json    writes sales_history.csv
+phases/02_forecast/
+  phase.yml          scripts: [forecast.py]
+  forecast.py        reads the CSVs, writes the declared outputs
+```
+
+```yaml
+kind: agent
+tools: [query, python]
+queries: [stock_position.json]   # needs the query bundle
+scripts: [shape_stock.py]         # needs the python bundle
+outputs: [stock_position.csv]
+```
+
+How to write them so they work on the first run:
+
+1. **Queries first.** `search_model` for the members, write `queries/<name>.json` with full
+   member ids, then `check_query` it. Fix it until it compiles. Leave `limit` out to get every
+   row. `check_query` returns the exact CSV header `extract` will write — the member ids, in
+   order. Use those names in scripts; never guess a column.
+2. **Scripts second**, from those headers. A script runs in the sandbox's working directory:
+   - an extract of this phase, and every working input, is at `uploads/<filename>`, e.g.
+     `pd.read_csv("uploads/stock_position.csv")`;
+   - it writes each declared output by its plain filename, e.g. `df.to_csv("forecast.csv",
+     index=False)` — it is collected into the phase's `output/`;
+   - it prints a short summary (row counts, totals, anything odd) and never the rows;
+   - `today`, windows and thresholds come from the data or from `_config/` rules, never from the
+     machine clock or a hardcoded date.
+   A later phase reads an earlier phase's outputs with the columns that phase's script wrote —
+   write both, so you know them.
+3. **The phase's CONTEXT.md** says what the prepared work does and when not to use it as is: what
+   in a brief would need a different query or a changed script.
+4. `validate_flow` checks every prepared query against the data model. A script cannot be
+   checked until a run executes it — say so when you hand the flow over.
+
+A run's agent calls `extract_prepared` and `run_prepared`, which run these exact files; an
+unchanged prepared script needs no approval. It writes its own only when the brief or the data
+calls for it, and says so.
 
 ## How to write a good flow
 

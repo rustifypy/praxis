@@ -11,14 +11,26 @@ its folder, and a structured tool would become the real interface with the files
 the two would drift the first time somebody hand-edited one. What keeps that honest is that every
 write is validated the same way a route's write is, and the agent is told what is wrong in the
 same words.
+
+Two tools read the data model, never data: `search_model` and `check_query`. They exist for a
+Phase's prepared queries — written when the Flow is, so a Run does not search for its data each
+time — and `check_query` returns the CSV header an extract will write, which is what lets a
+prepared script be written against real column names rather than guessed ones.
 """
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
+import httpx
 from langchain.tools import tool
 
+from ..agent.retrieval import LexicalRetriever, render
 from ..agent.tools.trace import end, start
+from ..core.config import settings
+from ..modelstore import gate
+from ..modelstore.client import StoreError, open_store
+from ..modelstore.shape import columns_of
 from . import contract, layout, runner, state
 
 
@@ -193,14 +205,70 @@ def build_flow_tools(context: FlowContext) -> list:
         )
 
     @tool
-    def validate_flow() -> str:
-        """Check this flow without running it: fields, phase numbering, and every declared input
-        that can be checked before a run exists."""
+    async def search_model(question: str) -> str:
+        """Find the measures and dimensions in the data model, to write a prepared query with.
+        Returns member ids, types and valid filter operators. It reads the model, never data."""
+        start("search_model", question)
+        try:
+            async with await open_store() as store:
+                hits = LexicalRetriever(await store.at().catalog()).search(question)
+        except (StoreError, httpx.RequestError) as exc:
+            end("search_model", False, errors=[str(exc)])
+            return f"The data model could not be read: {exc}"
+        end("search_model", True, hits=len(hits))
+        return render(hits) if hits else "The data model is empty."
+
+    @tool
+    async def check_query(query: dict) -> str:
+        """Check a Cube query exactly as a run will, without running it: its shape, its members
+        and operators, and Cube compiling it. Returns the columns `extract` will write, in order —
+        the exact CSV header a prepared script reads. Call it on every prepared query."""
+        start("check_query", "")
+        try:
+            async with await open_store() as store:
+                bound = store.at()
+                catalog = await bound.catalog()
+                checked = await gate.check(query, catalog, bound, settings.flow_page_rows)
+        except (StoreError, httpx.RequestError) as exc:
+            end("check_query", False, errors=[str(exc)])
+            return f"The query could not be checked — the data model did not answer: {exc}"
+        if not checked.ok:
+            end("check_query", False, errors=checked.errors)
+            return checked.as_message() + "\n\nFix the query and check it again."
+        end("check_query", True)
+        header = "\n".join(f"- {c.id} ({c.type or c.kind})" for c in columns_of(query, catalog))
+        warned = f"\n\n{checked.as_message()}" if checked.warnings else ""
+        return f"It compiles. `extract` writes these columns, in this order:\n{header}{warned}"
+
+    @tool
+    async def validate_flow() -> str:
+        """Check this flow without running it: fields, phase numbering, every declared input that
+        can be checked before a run exists, and every prepared query against the data model."""
         start("validate_flow", context.name)
         if refusal := scoped():
             end("validate_flow", False, errors=[refusal])
             return refusal
-        _, report = contract.load(context.directory)
+        flow, report = contract.load(context.directory)
+        # The half `contract.load` cannot do: whether a prepared query's members exist and Cube
+        # compiles it. It needs the served model, so it is asked here and not on every write.
+        if flow is not None and report.ok and any(p.spec.queries for p in flow.phases):
+            try:
+                async with await open_store() as store:
+                    bound = store.at()
+                    catalog = await bound.catalog()
+                    for phase in flow.phases:
+                        for name in phase.spec.queries:
+                            text = (phase.directory / layout.QUERIES / name).read_text()
+                            checked = await gate.check(
+                                json.loads(text), catalog, bound, settings.flow_page_rows
+                            )
+                            report.errors += [
+                                f"{phase.dir_name}: query {name} — {error}"
+                                for error in checked.errors
+                            ]
+            except (StoreError, httpx.RequestError) as exc:
+                report.warnings.append(f"prepared queries were not checked — {exc}")
+            report.ok = not report.errors
         end("validate_flow", report.ok, errors=report.errors)
         return said(report)
 
@@ -260,6 +328,8 @@ def build_flow_tools(context: FlowContext) -> list:
         read_flow_file,
         write_flow_file,
         delete_flow_file,
+        search_model,
+        check_query,
         validate_flow,
         start_run,
         read_run_state,

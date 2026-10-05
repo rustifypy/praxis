@@ -80,10 +80,6 @@ def build_query_tools(
             result_id = await transcript.save_result(
                 session.chat_id, session.turn_id, columns, rows
             )
-        # Kept in hand as well as saved, because a Phase saves nothing: a Run has no `results`
-        # row, so without this `export_result` would have no rows to write and the query→Python
-        # bridge would close for exactly the case Flows need it open.
-        session.rows = rows
         end(
             "run_query",
             True,

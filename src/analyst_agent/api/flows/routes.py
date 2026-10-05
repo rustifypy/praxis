@@ -18,6 +18,7 @@ from fastapi.responses import PlainTextResponse
 from ...core import transcript
 from ...flows import authoring, contract, layout, runner, state
 from ...flows import chat as flow_chat
+from ..support.preview import FilePreview
 from ..support.stream import turn_stream
 from . import controller, dto
 
@@ -179,6 +180,15 @@ async def read_artifact(flow: str, run_id: str, path: str) -> str:
     return controller.artifact(run, current, path, writing=False).read_text(errors="replace")
 
 
+@router.get("/{flow}/runs/{run_id}/preview/{path:path}", response_model=FilePreview)
+async def preview_artifact(flow: str, run_id: str, path: str) -> FilePreview:
+    """One output's head and row count — what the Run page shows under each Phase, so a person
+    sees what landed without opening the file."""
+    directory = controller.flow_or_404(flow)
+    run, current = controller.run_or_404(directory, run_id)
+    return controller.artifact_preview(run, current, path)
+
+
 @router.put("/{flow}/runs/{run_id}/artifacts/{path:path}", response_model=dto.Written)
 async def write_artifact(flow: str, run_id: str, path: str, body: dto.FileBody) -> dict:
     """Edit a Phase's output at its **Gate**. This is what the Gate is for.
@@ -220,13 +230,18 @@ async def rerun_phase(flow: str, run_id: str, dir_name: str) -> dict:
 
 
 @router.delete("/{flow}/runs/{run_id}", response_model=dto.Removed)
-async def delete_run(flow: str, run_id: str) -> dict:
+async def delete_run(flow: str, run_id: str, request: Request) -> dict:
     """Delete one Run. Nothing prunes automatically — an audit trail should go when someone says
-    so, not to save disk."""
+    so, not to save disk.
+
+    Refused while the Run is streaming: its Phase would go on writing into a folder that no
+    longer exists, and the next `run.json` write would bring half of it back."""
     import shutil
 
     directory = controller.flow_or_404(flow)
     run, _ = controller.run_or_404(directory, run_id)
+    if f"{flow}/{run_id}" in request.app.state.cancels:
+        raise HTTPException(409, "this run is going — stop it before deleting it")
     await runner.forget(flow, run_id)
     shutil.rmtree(run, ignore_errors=True)
     return {"removed": True}

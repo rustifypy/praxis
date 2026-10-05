@@ -129,6 +129,8 @@ export interface FilePreview {
   text: string;
   bytes: number;
   truncated: boolean;
+  /** Every data row in the file. Only a Run's output preview counts them. */
+  rows_total?: number | null;
 }
 
 export const filePreview = (chatId: string, path: string) =>
@@ -310,7 +312,7 @@ export const advanceRun = (flow: string, run: string, signal: AbortSignal) =>
   streamTurn(`/api/flows/${flow}/runs/${run}/advance`, {}, signal);
 
 export const stopRun = (flow: string, run: string) =>
-  json(`/api/flows/${flow}/runs/${run}/stop`, { method: "POST" });
+  json<{ stopped: boolean }>(`/api/flows/${flow}/runs/${run}/stop`, { method: "POST" });
 
 export const approveRunScript = (flow: string, run: string, choice: "yes" | "always" | "no") =>
   json(`/api/flows/${flow}/runs/${run}/approve`, {
@@ -323,6 +325,10 @@ export const runArtifact = (flow: string, run: string, path: string) =>
 
 /** Edit a Phase's output at its Gate. Refused with a 409 anywhere else — the surface exists for
  *  the moment before the next Phase reads it, and not afterwards. */
+/** One Phase output's head, with every row counted. What the Run page shows under each Phase. */
+export const runPreview = (flow: string, run: string, path: string) =>
+  json<FilePreview>(`/api/flows/${flow}/runs/${run}/preview/${encodePath(path)}`);
+
 export const writeRunArtifact = (flow: string, run: string, path: string, body: string) =>
   json<{ path: string; ok: boolean }>(
     `/api/flows/${flow}/runs/${run}/artifacts/${encodePath(path)}`,

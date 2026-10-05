@@ -247,6 +247,12 @@
       "answers": "Started"
     },
     {
+      "method": "GET",
+      "path": "/api/flows/{flow}/runs/{run_id}/preview/{path:path}",
+      "name": "preview_artifact",
+      "answers": "FilePreview"
+    },
+    {
       "method": "POST",
       "path": "/api/flows/{flow}/runs/{run_id}/stop",
       "name": "stop_run",

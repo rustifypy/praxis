@@ -20,6 +20,8 @@ PHASE_YML = "phase.yml"
 PHASES = "phases"
 CONFIG = "_config"
 REFERENCES = "references"
+# A Phase's prepared Cube queries, one `<name>.json` each.
+QUERIES = "queries"
 # The flow chat's id. In the folder and not on `chats`, because there is no migration mechanism
 # and a new column would cost every existing user their database — see `docs/adr/0006`.
 CHAT_JSON = "chat.json"
@@ -97,10 +99,12 @@ def phase_dirs(flow: Path) -> list[str]:
     numbers past nine — which is also why leaving gaps does not work the way it looks like it
     should: `015` is fifteen, and lands after `02` rather than between it and `01`.
 
-    Numbering need not be contiguous, and `01`, `05`, `10` is the reason to leave it that way:
-    a step can then be inserted later without renaming its neighbours. Two adjacent numbers have
-    no room between them and inserting there means renumbering, which is a rename of folders and
-    nothing else — cheap, but not free, and worth knowing before the first Flow is written.
+    Flows are numbered consecutively — `01`, `02`, `03` — so a folder's name is its position,
+    and that is what the authoring agent is told to write. Gaps are read without complaint all
+    the same, because a hand-edited Flow is still a Flow. Inserting a step means renaming the
+    folders after it and every `working:` path naming them. A path missed in that rename fails its
+    Phase as a missing input — `contract.load` checks only that the number is earlier — so it is
+    loud, but at run time rather than at write time.
     """
     here = phases_dir(flow)
     if not here.is_dir():
@@ -158,9 +162,11 @@ def writable(path: str) -> str:
         return ""
     if parts[2] == REFERENCES:
         return ""
+    if parts[2] == QUERIES and len(parts) == 4 and parts[3].endswith(".json"):
+        return ""
     return (
         f"{parts[2]} is not something a phase holds — {PHASE_YML}, {CONTEXT_MD}, "
-        f"a .py file, or {REFERENCES}/"
+        f"a .py file, {REFERENCES}/, or {QUERIES}/<name>.json"
     )
 
 

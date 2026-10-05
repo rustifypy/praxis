@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
 from pydantic import ValidationError
@@ -169,6 +170,40 @@ async def execute(checked: GateResult, client: Bound) -> GateResult:
         )
     except StoreError as exc:
         return GateResult(ok=False, errors=[f"Execution failed: {exc}"], sql=checked.sql)
+
+
+async def pages(
+    checked: GateResult, client: Bound, size: int, most: int
+) -> AsyncIterator[list[dict]]:
+    """Tier 4 for a result too large for one request: the rows, `size` at a time, until a page
+    comes back short or `most` rows have been read.
+
+    Cube answers at most 50,000 rows to one request, so a larger result is read by `offset`.
+    That is safe only under a total order, and a Cube query always has one available: there is
+    no `ungrouped`, so no two rows share every dimension value. The dimensions are appended after
+    whatever order was asked for — a measure alone can tie, and a tie lets a row move between
+    pages, so one page repeats it and the next skips it.
+    """
+    if not checked.ok or checked.query is None:
+        raise ValueError("pages() takes a GateResult that passed check()")
+    query = checked.query.model_copy(deep=True)
+    order = dict(query.order or {})
+    # A time dimension is a column only when it has a granularity; a bare dateRange narrows
+    # and adds nothing to order by.
+    grouped = [td.dimension for td in query.timeDimensions if td.granularity]
+    for member in [*grouped, *query.dimensions]:
+        order.setdefault(member, "asc")
+    query.order = order or None
+
+    read = 0
+    while read < most:
+        query.limit = min(size, most - read)
+        query.offset = checked.query.offset + read
+        rows = (await client.load(query)).rows
+        read += len(rows)
+        yield rows
+        if len(rows) < query.limit:
+            return
 
 
 async def run(payload: dict, catalog: Catalog, client: Bound, max_rows: int) -> GateResult:

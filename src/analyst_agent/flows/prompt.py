@@ -33,9 +33,10 @@ repeats, with a person reading your output before the next step runs.
   earlier conversation to remember — a Phase is a scoped task, not a chat.
 - Produce every declared output with `write_output`, using exactly the filenames listed. A Phase
   that says nothing and writes nothing has failed, however good its reasoning was.
-- **One exception: a file `export_result` or a script already wrote is already an output.** Do not
-  call `write_output` for it at all — not with its contents re-typed, and not with an empty
-  string. The real file is collected for you.
+- **One exception: a file `extract` or a script already wrote is already an output.** Do not
+  call `write_output` for it at all, and do not print it to check it: when a script reports that
+  it wrote a file, the file is there and is collected for you. Print counts and totals from
+  inside the script that makes a file, never the file afterwards.
 - Reference material is a constraint: follow it. Working material is input: transform it.
 - Write for the person who opens the file next, not for a chat window. No preamble, no "here is
   your summary" — the file is the answer.
@@ -56,6 +57,10 @@ class Material:
     # Anything cut at `INLINE_LIMIT`. Said out loud in the prompt: a model reasoning from half a
     # voice guide should know it has half.
     truncated: list[str] = field(default_factory=list)
+    # (filename, text) — the Phase's prepared work, inlined whole: the model has to read a script
+    # to decide it still fits the Brief, and the tools run these exact texts.
+    queries: list[tuple[str, str]] = field(default_factory=list)
+    scripts: list[tuple[str, str]] = field(default_factory=list)
 
 
 def clip(text: str, path: str, truncated: list[str]) -> str:
@@ -113,6 +118,43 @@ def build(flow: Flow, phase: Phase, material: Material) -> str:
                 )
     else:
         parts.append("(none — this Phase produces its output from its instructions alone)")
+
+    if material.queries or material.scripts:
+        steps = [
+            f'- `extract_prepared("{name}")` writes {name.rsplit(".", 1)[0]}.csv'
+            for name, _ in material.queries
+        ] + [f'- `run_prepared("{name}")` runs {name}' for name, _ in material.scripts]
+        parts.append(
+            "# Prepared work — run this\n\n"
+            "This Phase's queries and scripts were written and reviewed with the Flow. Run them as "
+            "they are, in this order:\n\n" + "\n".join(steps) + "\n\n"
+            "Write your own with `extract` or `run_python` only when the Brief asks for something "
+            "these do not do, or a prepared step fails. If you do, say in your output what you "
+            "changed and why — the person reviewing this Run expects the prepared work."
+        )
+        for name, text in material.queries:
+            parts.append(f"## queries/{name}\n\n```json\n{text.strip()}\n```")
+        for name, text in material.scripts:
+            parts.append(f"## {name}\n\n```python\n{text.strip()}\n```")
+
+    if "query" in phase.spec.tools:
+        # Said here and not in the preamble, for the reason the shapes note above branches: a
+        # Phase without `python` must not be pointed at a tool it does not have.
+        said = (
+            "`extract` writes a query's rows to a CSV and shows you only the file's shape — "
+            "columns, row count, a few rows. You never see the data itself, and that is "
+            "deliberate. "
+        )
+        parts.append(
+            "# Getting data\n\n"
+            + said
+            + (
+                "Compute from the file with `run_python`, and print aggregates, never rows."
+                if "python" in phase.spec.tools
+                else "This Phase cannot run code, so work from the shape and say so if the "
+                "question needs more."
+            )
+        )
 
     parts.append("# Outputs you must write")
     if phase.spec.outputs:

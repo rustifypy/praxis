@@ -12,6 +12,7 @@ gate rejection reaching the query agent as text it can act on.
 this package would be the second spelling of each.
 """
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -19,6 +20,7 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
+from ..modelstore.schema import CubeQuery
 from . import layout
 
 BUNDLES = ("query", "python")
@@ -89,8 +91,19 @@ class PhaseSpec(BaseModel):
     tools: list[Literal["query", "python"]] = []
     inputs: list[Input] = []
     outputs: list[str] = []
+    # Declared outputs for which no rows is a correct answer — a transfer plan when no store is
+    # short. Every other declared .csv/.tsv fails the Phase when it holds only a header, because
+    # an empty file the next Phase reads as "there is nothing" is usually a Phase that failed
+    # quietly. Opt-in per file, so the exception is written down where the output is declared.
+    may_be_empty: list[str] = []
     # `kind: script` only — the one file it runs.
     script: str = ""
+    # `kind: agent` only — work prepared when the Flow was written, so a Run does not re-derive
+    # it. Each query is `queries/<name>.json` and writes `<name>.csv`; each script is a `.py` in
+    # the Phase's folder. The agent runs them as they are, and writes its own only when the Brief
+    # or the data needs something they do not do.
+    queries: list[str] = []
+    scripts: list[str] = []
 
     @model_validator(mode="after")
     def _kind_agrees(self):
@@ -100,7 +113,33 @@ class PhaseSpec(BaseModel):
             if self.tools:
                 raise ValueError("a script Phase runs no model, so it cannot ask for tools")
         if self.kind == "agent" and self.script:
-            raise ValueError("'script:' belongs to a script Phase — an agent Phase writes its own")
+            raise ValueError(
+                "'script:' belongs to a script Phase — an agent Phase lists its prepared scripts "
+                "under 'scripts:'"
+            )
+        if self.kind == "script" and (self.queries or self.scripts):
+            raise ValueError(
+                "a script Phase runs its one 'script:' — 'queries:' and 'scripts:' "
+                "are an agent Phase's prepared work"
+            )
+        # A prepared query is run by the `query` Bundle and a prepared script by `python`; a Phase
+        # without the Bundle would be handed work it has no tool to do.
+        if self.queries and "query" not in self.tools:
+            raise ValueError("'queries:' needs the query Bundle — add query to 'tools:'")
+        if self.scripts and "python" not in self.tools:
+            raise ValueError("'scripts:' needs the python Bundle — add python to 'tools:'")
+        misnamed = [name for name in self.queries if not name.endswith(".json") or "/" in name]
+        misnamed += [name for name in self.scripts if not name.endswith(".py") or "/" in name]
+        if misnamed:
+            raise ValueError(
+                f"{', '.join(misnamed)}: a query is a name.json in queries/, a script a name.py "
+                "beside phase.yml"
+            )
+        undeclared = [name for name in self.may_be_empty if name not in self.outputs]
+        if undeclared:
+            raise ValueError(
+                f"may_be_empty names {', '.join(undeclared)}, which 'outputs:' does not declare"
+            )
         return self
 
 
@@ -223,6 +262,22 @@ def load(directory: Path) -> tuple[Flow | None, Report]:
                 phase_prose = context.read_text()
         elif not (here / phase_spec.script).is_file():
             errors.append(f"{dir_name}: {phase_spec.script} is named by phase.yml but not there")
+
+        for name in phase_spec.scripts:
+            if not (here / name).is_file():
+                errors.append(f"{dir_name}: script {name} is named by phase.yml but not there")
+        # Tier 1 only — the shape of a Cube query. Whether its members exist needs the served
+        # model, which this function never asks for; `validate_flow` does that half.
+        for name in phase_spec.queries:
+            target = here / layout.QUERIES / name
+            if not target.is_file():
+                errors.append(f"{dir_name}: query {layout.QUERIES}/{name} is not there")
+                continue
+            try:
+                CubeQuery.model_validate(json.loads(target.read_text()))
+            except (ValueError, ValidationError) as exc:
+                first = _said(exc)[0] if isinstance(exc, ValidationError) else str(exc)
+                errors.append(f"{dir_name}: query {name} is not a Cube query — {first}")
 
         if not phase_spec.outputs:
             warnings.append(

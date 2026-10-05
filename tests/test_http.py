@@ -1073,7 +1073,7 @@ async def test_a_run_starts_at_phase_one_and_keeps_its_brief(api):
 
     detail = await api.get(f"/api/flows/weekly/runs/{run_id}")
     assert detail.json()["brief"] == "Focus on the EU region."
-    assert detail.json()["status"] == "running"
+    assert detail.json()["status"] == "paused", "nothing runs until it is advanced"
     assert detail.json()["editable"] == "", "nothing is editable before a phase has produced"
     assert [p["dir_name"] for p in detail.json()["phases"]] == ["01_pull"]
     assert detail.json()["phases"][0]["output"] == []
@@ -1097,3 +1097,75 @@ async def test_a_missing_flow_or_run_is_a_404_not_a_traceback(api):
     assert (await api.get("/api/flows/nope/runs")).status_code == 404
     await api.post("/api/flows", json={"name": "weekly", "title": "Weekly"})
     assert (await api.get("/api/flows/weekly/runs/nope")).status_code == 404
+
+
+async def test_a_run_says_what_each_phase_is_for_and_previews_what_it_made(api):
+    """The Run page tells the story from these two answers: the plan from the Phase's folder, and
+    each output's head with every row counted — not only the rows that fit in the head."""
+    from analyst_agent.flows import layout, runner
+
+    await api.post("/api/flows", json={"name": "weekly", "title": "Weekly"})
+    await api.put(
+        "/api/flows/weekly/files/phases/01_pull/phase.yml",
+        json={"text": "kind: agent\ntools: [query]\noutputs: [revenue.csv]\n"},
+    )
+    await api.put(
+        "/api/flows/weekly/files/phases/01_pull/CONTEXT.md",
+        json={"text": "# Pull revenue\n\nPull revenue by region for the week.\n\n- one\n"},
+    )
+    run_id = (await api.post("/api/flows/weekly/runs", json={"brief": ""})).json()["run_id"]
+
+    plan = (await api.get(f"/api/flows/weekly/runs/{run_id}")).json()["phases"][0]["plan"]
+    assert plan["title"] == "Pull revenue"
+    assert plan["purpose"] == "Pull revenue by region for the week."
+    assert plan["outputs"] == ["revenue.csv"] and plan["tools"] == ["query"]
+
+    output = layout.phase_output(layout.run_dir(runner.root() / "weekly", run_id), "01_pull")
+    output.mkdir(parents=True)
+    rows = "".join(f"R{i},{i}\n" for i in range(120))
+    (output / "revenue.csv").write_text("region,revenue\n" + rows)
+
+    shown = await api.get(f"/api/flows/weekly/runs/{run_id}/preview/01_pull/output/revenue.csv")
+    assert shown.status_code == 200
+    assert shown.json()["kind"] == "table"
+    assert shown.json()["columns"] == ["region", "revenue"]
+    assert shown.json()["rows_total"] == 120, "every row is counted, not only the head"
+    assert len(shown.json()["rows"]) < 120
+
+    outside = await api.get(f"/api/flows/weekly/runs/{run_id}/preview/run.json")
+    assert outside.status_code == 400, "only a phase's output is previewed"
+
+
+async def test_a_run_is_deleted_with_its_folder_but_not_while_it_is_going(api, monkeypatch):
+    """A going Run would keep writing into a folder that no longer exists, and its next
+    `run.json` write would bring half of it back."""
+    import asyncio
+
+    from analyst_agent.api import server
+    from analyst_agent.flows import layout, runner
+
+    async def nothing(*args):
+        return None
+
+    monkeypatch.setattr(runner, "forget", nothing)
+    await api.post("/api/flows", json={"name": "weekly", "title": "Weekly"})
+    await api.put(
+        "/api/flows/weekly/files/phases/01_pull/phase.yml",
+        json={"text": "kind: agent\noutputs: [a.md]\n"},
+    )
+    await api.put("/api/flows/weekly/files/phases/01_pull/CONTEXT.md", json={"text": "Pull."})
+    run_id = (await api.post("/api/flows/weekly/runs", json={"brief": ""})).json()["run_id"]
+    folder = layout.run_dir(runner.root() / "weekly", run_id)
+
+    server.app.state.cancels[f"weekly/{run_id}"] = asyncio.Event()
+    try:
+        refused = await api.delete(f"/api/flows/weekly/runs/{run_id}")
+    finally:
+        server.app.state.cancels.pop(f"weekly/{run_id}")
+    assert refused.status_code == 409
+    assert folder.is_dir()
+
+    removed = await api.delete(f"/api/flows/weekly/runs/{run_id}")
+    assert removed.json() == {"removed": True}
+    assert not folder.exists()
+    assert (await api.get("/api/flows/weekly/runs")).json() == []

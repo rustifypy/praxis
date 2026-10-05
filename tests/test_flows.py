@@ -7,6 +7,8 @@ run, the ordering the folder names carry, and the transitions `run.json` records
 A real Run needs both a model store and a sandbox, so it is verified by running one.
 """
 
+import asyncio
+import json
 import textwrap
 from pathlib import Path
 
@@ -30,6 +32,9 @@ def build(root: Path, phases: dict[str, str], *, flow_yml: str = "title: Weekly"
         target.write_text(text)
     return flow
 
+
+# `output`, `scratch` and the pushed set, for a test that only asks which tools a Phase has.
+NOWHERE = (Path("out"), Path("scratch"), set())
 
 AGENT = """
 kind: agent
@@ -282,7 +287,8 @@ def test_declaring_no_outputs_warns_and_does_not_refuse(tmp_path):
 
 def test_a_run_begins_at_phase_one_with_everything_pending():
     run = state.begin("r1", "weekly", ["01_pull", "02_write"])
-    assert run.status == "running"
+    assert run.status == "paused", "nothing is running until someone advances it"
+    assert run.waiting == "", "paused before Phase one, which is not a Gate"
     assert run.current == "01_pull"
     assert [p.status for p in run.phases] == ["pending", "pending"]
 
@@ -427,7 +433,7 @@ async def test_write_output_refuses_a_filename_the_phase_did_not_declare(tmp_pat
 
     phase = phase_of("02_write", "kind: agent\noutputs: [summary.md]\n", "Write.")
     session = Session(catalog=None, client=None)
-    built = tools.build_phase_tools(session, phase, tmp_path)
+    built = tools.build_phase_tools(session, phase, tmp_path, tmp_path / "scratch", set())
     write_output = next(t for t in built if t.name == "write_output")
 
     said = await write_output.ainvoke({"filename": "summary.markdown", "text": "hi"})
@@ -446,14 +452,19 @@ def test_a_phase_gets_only_the_bundles_it_asked_for():
 
     session = Session(catalog=None, client=None)
     prose_only = phase_of("02_write", "kind: agent\noutputs: [a.md]\n", "Write.")
-    assert [t.name for t in tools.build_phase_tools(session, prose_only, Path("out"))] == [
+    assert [t.name for t in tools.build_phase_tools(session, prose_only, *NOWHERE)] == [
         "write_output"
     ], "write_output is in no Bundle and every agent Phase has it"
 
     with_python = phase_of("01_pull", "kind: agent\ntools: [python]\noutputs: [a.md]\n", "Pull.")
-    named = {t.name for t in tools.build_phase_tools(session, with_python, Path("out"))}
-    assert named == {"write_output", "run_python", "export_result"}
-    assert "run_query" not in named, "a Phase that did not ask for query cannot reach the warehouse"
+    named = {t.name for t in tools.build_phase_tools(session, with_python, *NOWHERE)}
+    assert named == {"write_output", "run_python"}
+    assert "extract" not in named, "a Phase that did not ask for query cannot reach the warehouse"
+
+    with_query = phase_of("01_pull", "kind: agent\ntools: [query]\noutputs: [a.csv]\n", "Pull.")
+    named = {t.name for t in tools.build_phase_tools(session, with_query, *NOWHERE)}
+    assert named == {"write_output", "search_model", "extract", "explain_last_query"}
+    assert "run_query" not in named, "a Phase's query result goes to a file, never into a reply"
 
 
 # --- one Run at a time -------------------------------------------------------
@@ -646,7 +657,9 @@ async def test_write_output_refuses_an_empty_declared_output(tmp_path):
     from analyst_agent.flows import tools
 
     phase = phase_of("01_pull", "kind: agent\noutputs: [revenue.csv]\n", "Pull.")
-    built = tools.build_phase_tools(Session(catalog=None, client=None), phase, tmp_path)
+    built = tools.build_phase_tools(
+        Session(catalog=None, client=None), phase, tmp_path, tmp_path / "scratch", set()
+    )
     write_output = next(t for t in built if t.name == "write_output")
 
     for empty in ("", "   \n\t"):
@@ -654,3 +667,591 @@ async def test_write_output_refuses_an_empty_declared_output(tmp_path):
         assert "would be empty" in said
         assert "do not call write_output for it at all" in said
         assert not (tmp_path / "revenue.csv").exists()
+
+
+# --- extract: a Phase's query goes to a file ----------------------------------
+
+
+def paged(cube, rows: list[dict]) -> None:
+    """Make the fake answer `limit` and `offset` the way Cube does, over a fixed result."""
+    from analyst_agent.modelstore.client import LoadResult
+
+    async def load(query):
+        cube.loaded.append(query.to_payload())
+        window = rows[query.offset : query.offset + query.limit]
+        return LoadResult(rows=window, duration_ms=1, resolved_ranges={})
+
+    cube.load = load
+
+
+STATUSES = [{"orders.status": f"s{i:02}", "orders.count": i} for i in range(25)]
+BY_STATUS = {"measures": ["orders.count"], "dimensions": ["orders.status"]}
+
+
+class FakeSandbox:
+    def __init__(self):
+        self.uploaded: list[tuple[str, bytes]] = []
+        self.read_paths: list[str] = []
+        self.files: list[str] = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return None
+
+    async def listing(self, workspace):
+        return list(self.files), []
+
+    async def delete(self, workspace, path):
+        self.files.remove(path)
+
+    async def upload(self, workspace, filename, data):
+        body = data if isinstance(data, bytes) else data.read()
+        self.uploaded.append((filename, body))
+        self.files.append(f"uploads/{filename}")
+        profile = {"path": f"uploads/{filename}", "rows": 25, "columns": [], "note": "profiled"}
+        return {"path": f"uploads/{filename}", "profile": profile}
+
+    async def read(self, workspace, path):
+        self.read_paths.append(path)
+        return b"data", path
+
+
+def with_sandbox(monkeypatch, module, fake: FakeSandbox | None):
+    """`fake` stands in for the service; `None` is a sandbox that does not answer."""
+    from analyst_agent.sandbox import SandboxError
+
+    async def opened(*args, **kwargs):
+        if fake is None:
+            raise SandboxError("no sandbox is configured for this deployment")
+        return fake
+
+    monkeypatch.setattr(module, "open_sandbox", opened)
+
+
+def extract_phase(catalog, cube, tmp_path, outputs="[orders.csv]"):
+    from analyst_agent.agent.session import Session
+    from analyst_agent.flows import tools
+
+    phase = phase_of("01_pull", f"kind: agent\ntools: [query]\noutputs: {outputs}\n", "Pull.")
+    pushed: set[str] = set()
+    built = tools.build_phase_tools(
+        Session(catalog=catalog, client=cube),
+        phase,
+        tmp_path / "output",
+        tmp_path / "scratch",
+        pushed,
+    )
+    return {t.name: t for t in built}, pushed
+
+
+async def test_pages_read_by_offset_under_a_total_order_and_stop_at_a_short_page(catalog, cube):
+    """Cube answers at most 50,000 rows to one request, so a larger result is read by offset —
+    safe only if no row can move between pages. A measure can tie, so the dimensions follow it."""
+    from analyst_agent.modelstore import gate
+
+    paged(cube, STATUSES)
+    asked = {**BY_STATUS, "order": {"orders.count": "desc"}}
+    checked = await gate.check(asked, catalog, cube, 10)
+    got = [page async for page in gate.pages(checked, cube, 10, 1_000)]
+
+    assert [len(page) for page in got] == [10, 10, 5]
+    assert [query["offset"] for query in cube.loaded] == [0, 10, 20]
+    assert cube.loaded[0]["order"] == {"orders.count": "desc", "orders.status": "asc"}
+
+
+async def test_pages_stop_at_the_most_asked_for(catalog, cube):
+    from analyst_agent.modelstore import gate
+
+    paged(cube, STATUSES)
+    checked = await gate.check(BY_STATUS, catalog, cube, 10)
+    got = [page async for page in gate.pages(checked, cube, 10, 15)]
+    assert [len(page) for page in got] == [10, 5]
+    assert cube.loaded[-1]["limit"] == 5
+
+
+async def test_extract_writes_every_row_and_shows_the_model_only_the_shape(
+    catalog, cube, tmp_path, monkeypatch
+):
+    """The point of the tool: past the chat's 5,000-row cap, and with no rows in the reply
+    beyond the few a shape shows."""
+    from analyst_agent.core.config import settings
+    from analyst_agent.flows import tools
+
+    monkeypatch.setattr(settings, "flow_page_rows", 10)
+    with_sandbox(monkeypatch, tools, None)
+    paged(cube, STATUSES)
+    built, _ = extract_phase(catalog, cube, tmp_path)
+
+    said = await built["extract"].ainvoke({"query": BY_STATUS, "filename": "orders.csv"})
+
+    written = (tmp_path / "output" / "orders.csv").read_text().splitlines()
+    assert written[0] == "orders.status,orders.count"
+    assert len(written) == 1 + len(STATUSES)
+    assert "25 rows" in said
+    assert "s00" in said, "the head of the file is part of its shape"
+    assert "s24" not in said, "a row past the head reached the model"
+    assert "0 distinct" not in said, "the portal's own profile counts nothing it did not count"
+
+
+async def test_extract_past_the_ceiling_writes_nothing(catalog, cube, tmp_path, monkeypatch):
+    """A file cut at the ceiling looks finished, and the next Phase would read it as the whole
+    result."""
+    from analyst_agent.core.config import settings
+    from analyst_agent.flows import tools
+
+    monkeypatch.setattr(settings, "flow_page_rows", 10)
+    monkeypatch.setattr(settings, "flow_max_rows", 20)
+    with_sandbox(monkeypatch, tools, None)
+    paged(cube, STATUSES)
+    built, _ = extract_phase(catalog, cube, tmp_path)
+
+    said = await built["extract"].ainvoke({"query": BY_STATUS, "filename": "orders.csv"})
+    assert "more than 20 rows" in said
+    assert not (tmp_path / "output" / "orders.csv").exists()
+
+
+async def test_an_undeclared_extract_lands_in_scratch(catalog, cube, tmp_path, monkeypatch):
+    from analyst_agent.flows import tools
+
+    with_sandbox(monkeypatch, tools, None)
+    paged(cube, STATUSES)
+    built, _ = extract_phase(catalog, cube, tmp_path)
+
+    said = await built["extract"].ainvoke({"query": BY_STATUS, "filename": "detail.csv"})
+    assert (tmp_path / "scratch" / "detail.csv").is_file()
+    assert not (tmp_path / "output" / "detail.csv").exists()
+    assert "not a declared output" in said
+
+
+async def test_extract_refuses_a_path_for_a_filename(catalog, cube, tmp_path, monkeypatch):
+    from analyst_agent.flows import tools
+
+    with_sandbox(monkeypatch, tools, None)
+    built, _ = extract_phase(catalog, cube, tmp_path)
+    for bad in ("../orders.csv", "out/orders.csv", "orders.txt", ".hidden.csv"):
+        said = await built["extract"].ainvoke({"query": BY_STATUS, "filename": bad})
+        assert "plain filename" in said
+    assert not cube.loaded, "nothing may be queried for a name that will be refused"
+
+
+async def test_extract_hands_the_file_to_the_sandbox_and_records_the_path(
+    catalog, cube, tmp_path, monkeypatch
+):
+    """The sandbox's profile is the one a later Phase sees for the same file, so the model sees
+    one shape for it throughout. The path goes in `pushed` so `_collect` does not copy it back."""
+    from analyst_agent.flows import tools
+
+    fake = FakeSandbox()
+    fake.files.append("uploads/orders.csv")  # an earlier extract of the same name
+    with_sandbox(monkeypatch, tools, fake)
+    paged(cube, STATUSES)
+    built, pushed = extract_phase(catalog, cube, tmp_path)
+
+    said = await built["extract"].ainvoke({"query": BY_STATUS, "filename": "orders.csv"})
+    assert pushed == {"uploads/orders.csv"}
+    assert fake.files == ["uploads/orders.csv"], "the old copy must go, or the new one is renamed"
+    assert fake.uploaded[0][1] == (tmp_path / "output" / "orders.csv").read_bytes()
+    assert "(profiled)" in said
+
+
+async def test_no_extract_event_carries_a_row(catalog, cube, tmp_path, monkeypatch):
+    """The Run's log is not where data is read: no `preview`, so the browser draws no table."""
+    from analyst_agent.agent.tools import trace
+    from analyst_agent.flows import tools
+
+    captured: list[dict] = []
+    monkeypatch.setattr(trace, "emit", lambda event: captured.append(event.model_dump()))
+    with_sandbox(monkeypatch, tools, None)
+    paged(cube, STATUSES)
+    built, _ = extract_phase(catalog, cube, tmp_path)
+
+    await built["extract"].ainvoke({"query": BY_STATUS, "filename": "orders.csv"})
+    ends = [e for e in captured if e["type"] == "tool_end" and e["data"]["tool"] == "extract"]
+    assert ends and ends[0]["data"]["ok"] and ends[0]["data"]["rows_total"] == 25
+    for event in captured:
+        extra = set(event["data"]) - tools.EVENT_KEYS
+        assert not extra, f"an extract event carried {extra}"
+        assert "s07" not in str(event["data"]), "an event carried a row"
+
+
+async def test_write_output_cannot_replace_an_extract(catalog, cube, tmp_path, monkeypatch):
+    """The extract came through Cube. Nothing a model types may take its place."""
+    from analyst_agent.flows import tools
+
+    with_sandbox(monkeypatch, tools, None)
+    paged(cube, STATUSES)
+    built, _ = extract_phase(catalog, cube, tmp_path)
+
+    await built["extract"].ainvoke({"query": BY_STATUS, "filename": "orders.csv"})
+    before = (tmp_path / "output" / "orders.csv").read_text()
+    said = await built["write_output"].ainvoke({"filename": "orders.csv", "text": "a,b\n1,2\n"})
+    assert "written by extract" in said
+    assert (tmp_path / "output" / "orders.csv").read_text() == before
+
+
+async def test_collect_does_not_copy_back_what_the_portal_sent(tmp_path, monkeypatch):
+    """An extract is already in `output/`. Downloading it again moves a large file twice."""
+    from analyst_agent.flows import runner
+
+    fake = FakeSandbox()
+    fake.files = ["uploads/orders.csv", "chart.png"]
+    with_sandbox(monkeypatch, runner, fake)
+    phase = phase_of("01_pull", "kind: agent\ntools: [query]\noutputs: [orders.csv]\n", "Pull.")
+
+    await runner._collect(
+        "flow-weekly-1", phase, tmp_path / "output", tmp_path / "scratch", {"uploads/orders.csv"}
+    )
+    assert fake.read_paths == ["chart.png"]
+    assert (tmp_path / "scratch" / "chart.png").is_file()
+
+
+async def test_a_phase_whose_stream_is_closed_is_failed_not_left_running(tmp_path, monkeypatch):
+    """A closed tab cancels the Run's generator from outside. Before this, `run.json` kept saying
+    `running` for a Run nobody was running, and the page showed it as still going."""
+    from analyst_agent.core.events import Event
+    from analyst_agent.flows import runner
+
+    with_sandbox(monkeypatch, runner, None)
+
+    async def endless(*args, **kwargs):
+        yield Event(type="thinking", data={"text": "…"})
+        await asyncio.sleep(3600)
+        yield Event(type="done", data={})
+
+    monkeypatch.setattr(runner, "_agent_phase", endless)
+    phase = phase_of("01_pull", "kind: agent\noutputs: [a.md]\n", "Pull.")
+    current = state.begin("r1", "weekly", ["01_pull"])
+    stream = runner._one_phase(flow_of(), phase, tmp_path, current, _ignore, None, None)
+
+    await stream.__anext__()
+    await stream.aclose()
+
+    written = state.read(tmp_path)
+    assert written.status == "failed"
+    assert written.phase("01_pull").status == "failed"
+    assert "stopped before it finished" in written.phase("01_pull").error
+
+
+async def _ignore(turn_id, event):
+    return None
+
+
+async def test_a_declared_csv_with_only_a_header_fails_the_phase(tmp_path, monkeypatch):
+    """Seen live: an agent that could not find the routes wrote a header-only `routes.csv`, the
+    Phase passed, and the next Phase would have read it as "there are no routes"."""
+    from analyst_agent.flows import runner
+
+    with_sandbox(monkeypatch, runner, None)
+
+    async def header_only(flow, phase, output, *args, **kwargs):
+        (output / "routes.csv").write_text("route_id,origin,destination\n\n")
+        (output / "notes.md").write_text("")
+        return
+        yield
+
+    monkeypatch.setattr(runner, "_agent_phase", header_only)
+    phase = phase_of("01_pull", "kind: agent\noutputs: [routes.csv, notes.md]\n", "Pull.")
+    current = state.begin("r1", "weekly", ["01_pull"])
+    said = [
+        e async for e in runner._one_phase(flow_of(), phase, tmp_path, current, _ignore, None, None)
+    ]
+
+    record = state.read(tmp_path).phase("01_pull")
+    assert record.status == "failed"
+    assert record.error == "declared output has no rows: routes.csv"
+    assert said[-1].type == "error", "the failure reaches the stream, not only run.json"
+
+
+async def test_a_declared_csv_with_one_row_passes(tmp_path, monkeypatch):
+    from analyst_agent.flows import runner
+
+    with_sandbox(monkeypatch, runner, None)
+
+    async def one_row(flow, phase, output, *args, **kwargs):
+        (output / "routes.csv").write_text("route_id\nR1\n")
+        return
+        yield
+
+    monkeypatch.setattr(runner, "_agent_phase", one_row)
+    phase = phase_of("01_pull", "kind: agent\noutputs: [routes.csv]\n", "Pull.")
+    current = state.begin("r1", "weekly", ["01_pull"])
+    [e async for e in runner._one_phase(flow_of(), phase, tmp_path, current, _ignore, None, None)]
+    assert state.read(tmp_path).phase("01_pull").status == "done"
+
+
+def test_may_be_empty_names_only_declared_outputs(tmp_path):
+    flow = build(
+        tmp_path,
+        {"01_plan": "kind: agent\noutputs: [plan.csv]\nmay_be_empty: [plan.cvs]\n"},
+        **{"phases__01_plan__CONTEXT.md": "Plan."},
+    )
+    _, report = contract.load(flow)
+    assert not report.ok
+    assert any("may_be_empty names plan.cvs" in line for line in report.errors)
+
+
+async def test_an_output_allowed_to_be_empty_passes_with_only_a_header(tmp_path, monkeypatch):
+    """A transfer plan when no store is short: no rows is the right answer, declared as such."""
+    from analyst_agent.flows import runner
+
+    with_sandbox(monkeypatch, runner, None)
+
+    async def nothing_to_move(flow, phase, output, *args, **kwargs):
+        (output / "plan.csv").write_text("origin,destination,units\n")
+        return
+        yield
+
+    monkeypatch.setattr(runner, "_agent_phase", nothing_to_move)
+    phase = phase_of(
+        "01_plan", "kind: agent\noutputs: [plan.csv]\nmay_be_empty: [plan.csv]\n", "Plan."
+    )
+    current = state.begin("r1", "weekly", ["01_plan"])
+    [e async for e in runner._one_phase(flow_of(), phase, tmp_path, current, _ignore, None, None)]
+    assert state.read(tmp_path).phase("01_plan").status == "done"
+
+
+# --- prepared work: queries and scripts written with the Flow -----------------
+
+PREPARED = """
+kind: agent
+tools: [query, python]
+queries: [by_status.json]
+scripts: [shape.py]
+outputs: [by_status.csv]
+"""
+BY_STATUS_JSON = '{"measures": ["orders.count"], "dimensions": ["orders.status"]}'
+
+
+def prepared_flow(root: Path, **files) -> Path:
+    return build(
+        root,
+        {"01_pull": PREPARED},
+        **{
+            "phases__01_pull__CONTEXT.md": "Pull orders by status.",
+            "phases__01_pull__queries__by_status.json": BY_STATUS_JSON,
+            "phases__01_pull__shape.py": "print('shaped')\n",
+            **files,
+        },
+    )
+
+
+def test_a_phase_with_prepared_work_loads(tmp_path):
+    _, report = contract.load(prepared_flow(tmp_path))
+    assert report.ok, report.errors
+
+
+def test_prepared_work_that_is_not_there_is_refused(tmp_path):
+    flow = prepared_flow(tmp_path)
+    (flow / "phases/01_pull/shape.py").unlink()
+    (flow / "phases/01_pull/queries/by_status.json").unlink()
+    _, report = contract.load(flow)
+    assert any("script shape.py" in line for line in report.errors)
+    assert any("query queries/by_status.json is not there" in line for line in report.errors)
+
+
+def test_a_prepared_query_that_is_not_a_cube_query_is_refused(tmp_path):
+    flow = prepared_flow(tmp_path, **{"phases__01_pull__queries__by_status.json": '{"measure": 1}'})
+    _, report = contract.load(flow)
+    assert any("by_status.json is not a Cube query" in line for line in report.errors)
+
+
+def test_prepared_work_needs_the_bundle_that_runs_it(tmp_path):
+    no_python = "kind: agent\ntools: [query]\nscripts: [shape.py]\noutputs: [a.csv]\n"
+    flow = build(tmp_path, {"01_pull": no_python}, **{"phases__01_pull__CONTEXT.md": "Pull."})
+    _, report = contract.load(flow)
+    assert any("'scripts:' needs the python Bundle" in line for line in report.errors)
+
+
+def test_a_script_phase_cannot_carry_prepared_work(tmp_path):
+    body = "kind: script\nscript: run.py\nqueries: [a.json]\noutputs: [a.csv]\n"
+    flow = build(tmp_path, {"01_run": body}, **{"phases__01_run__run.py": "print(1)"})
+    _, report = contract.load(flow)
+    assert any("an agent Phase's prepared work" in line for line in report.errors)
+
+
+def test_a_prepared_query_is_a_writable_definition_file():
+    assert layout.writable("phases/01_pull/queries/by_status.json") == ""
+    assert layout.writable("phases/01_pull/queries/notes.txt")
+    assert layout.writable("phases/01_pull/queries/deep/a.json")
+
+
+def test_the_prompt_hands_over_the_prepared_work_whole():
+    from analyst_agent.flows import prompt
+
+    phase = phase_of("01_pull", PREPARED, "Pull.")
+    material = prompt.Material(
+        queries=[("by_status.json", BY_STATUS_JSON)], scripts=[("shape.py", "print('shaped')")]
+    )
+    built = prompt.build(flow_of(), phase, material)
+    assert '`extract_prepared("by_status.json")` writes by_status.csv' in built
+    assert '`run_prepared("shape.py")`' in built
+    assert "print('shaped')" in built, "the model reads a script to judge that it fits"
+    assert "# Prepared work" not in prompt.build(flow_of(), phase, prompt.Material())
+
+
+async def test_extract_prepared_runs_the_stored_query_into_its_named_file(
+    catalog, cube, tmp_path, monkeypatch
+):
+    from analyst_agent.agent.session import Session
+    from analyst_agent.flows import prompt, tools
+
+    with_sandbox(monkeypatch, tools, None)
+    paged(cube, STATUSES)
+    phase = phase_of("01_pull", PREPARED, "Pull.")
+    material = prompt.Material(queries=[("by_status.json", BY_STATUS_JSON)])
+    built = {
+        t.name: t
+        for t in tools.build_phase_tools(
+            Session(catalog=catalog, client=cube),
+            phase,
+            tmp_path / "output",
+            tmp_path / "scratch",
+            set(),
+            material,
+        )
+    }
+
+    said = await built["extract_prepared"].ainvoke({"name": "by_status.json"})
+    assert "25 rows" in said
+    assert (tmp_path / "output" / "by_status.csv").read_text().startswith("orders.status,")
+
+    refused = await built["extract_prepared"].ainvoke({"name": "nope.json"})
+    assert "not one of this Phase's prepared queries: by_status.json" in refused
+
+
+async def test_a_prepared_script_runs_without_asking_and_an_edited_one_asks(
+    catalog, cube, tmp_path, monkeypatch
+):
+    """Reviewed when it was saved into the Flow, like a `kind: script` Phase. Matched on the whole
+    text, so the agent changing one character makes it a new script that asks like any other."""
+    from analyst_agent.agent.session import Session
+    from analyst_agent.agent.tools import code, trace
+    from analyst_agent.flows import prompt, tools
+    from analyst_agent.sandbox import Run
+
+    class Sandbox:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def run(self, workspace, script, *, on_output=None):
+            return Run(code=0, out="ran\n", script="scripts/run-001.py")
+
+    async def opened(*args, **kwargs):
+        return Sandbox()
+
+    monkeypatch.setattr(code, "open_sandbox", opened)
+    captured: list[dict] = []
+    monkeypatch.setattr(trace, "emit", lambda e: captured.append(e.model_dump()))
+    monkeypatch.setattr(code, "emit", lambda e: captured.append(e.model_dump()))
+
+    session = Session(catalog=catalog, client=cube, approvals=asyncio.Queue())
+    material = prompt.Material(scripts=[("shape.py", "print('shaped')")])
+    phase = phase_of("01_pull", PREPARED, "Pull.")
+    built = {
+        t.name: t
+        for t in tools.build_phase_tools(
+            session, phase, tmp_path / "out", tmp_path / "scratch", set(), material
+        )
+    }
+
+    said = await asyncio.wait_for(built["run_prepared"].ainvoke({"name": "shape.py"}), timeout=2)
+    assert "exited 0" in said
+    assert not [e for e in captured if e["type"] == "approval"], "a prepared script asked"
+    assert captured[0]["data"]["label"] == "shape.py", "the step names the prepared script"
+
+    edited = asyncio.create_task(built["run_python"].ainvoke({"script": "print('shaped!')"}))
+    while not [e for e in captured if e["type"] == "approval"]:
+        await asyncio.sleep(0)
+    await session.approvals.put("yes")
+    assert "exited 0" in await asyncio.wait_for(edited, timeout=2)
+
+
+async def test_check_query_returns_the_header_a_prepared_script_reads(
+    catalog, cube, monkeypatch, opening
+):
+    from analyst_agent.flows import authoring
+
+    class Store:
+        def at(self, ref="main"):
+            return cube
+
+    monkeypatch.setattr(authoring, "open_store", opening(Store()))
+    built = {t.name: t for t in authoring.build_flow_tools(authoring.FlowContext(root=Path(".")))}
+
+    said = await built["check_query"].ainvoke({"query": json.loads(BY_STATUS_JSON)})
+    assert "orders.status" in said and "orders.count" in said
+    assert said.index("orders.status") < said.index("orders.count"), "dimensions come first"
+
+    refused = await built["check_query"].ainvoke({"query": {"measures": ["orders.cnt"]}})
+    assert "orders.count" in refused, "a rejection names the nearest member"
+
+
+async def test_validate_flow_checks_prepared_queries_against_the_model(
+    tmp_path, catalog, cube, monkeypatch, opening
+):
+    from analyst_agent.flows import authoring
+
+    class Store:
+        def at(self, ref="main"):
+            return cube
+
+    monkeypatch.setattr(authoring, "open_store", opening(Store()))
+    flow = prepared_flow(
+        tmp_path, **{"phases__01_pull__queries__by_status.json": '{"measures": ["orders.cnt"]}'}
+    )
+    context = authoring.FlowContext(root=tmp_path, name=flow.name)
+    built = {t.name: t for t in authoring.build_flow_tools(context)}
+
+    said = await built["validate_flow"].ainvoke({})
+    assert "will not run" in said
+    assert "01_pull: query by_status.json" in said
+
+
+async def test_write_output_refuses_a_file_a_script_already_wrote(
+    catalog, cube, tmp_path, monkeypatch
+):
+    """Seen live: a prepared script wrote demand_forecast.csv, and the agent printed it and
+    re-typed it with write_output — reading every row to do so. The script's file is the output."""
+    from analyst_agent.agent.session import Session
+    from analyst_agent.agent.tools import code
+    from analyst_agent.flows import prompt, tools
+    from analyst_agent.sandbox import Run
+
+    class Sandbox:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def run(self, workspace, script, *, on_output=None):
+            return Run(
+                code=0, out="348 rows\n", script="scripts/run-001.py", wrote=["forecast.csv"]
+            )
+
+    async def opened(*args, **kwargs):
+        return Sandbox()
+
+    monkeypatch.setattr(code, "open_sandbox", opened)
+    phase = phase_of(
+        "02_forecast",
+        "kind: agent\ntools: [python]\nscripts: [forecast.py]\noutputs: [forecast.csv]\n",
+        "Forecast.",
+    )
+    material = prompt.Material(scripts=[("forecast.py", "print('348 rows')")])
+    built = {
+        t.name: t
+        for t in tools.build_phase_tools(
+            Session(catalog=catalog, client=cube), phase, tmp_path, tmp_path / "s", set(), material
+        )
+    }
+
+    await built["run_prepared"].ainvoke({"name": "forecast.py"})
+    said = await built["write_output"].ainvoke({"filename": "forecast.csv", "text": "a\n1\n"})
+    assert "written by a script in this Phase" in said
+    assert not (tmp_path / "forecast.csv").exists()

@@ -448,3 +448,22 @@ async def test_the_tools_run_with_the_real_emit_left_alone(session, sandbox):
     out = await named(tools.build_code_tools(session), "export_result").ainvoke({})
     assert "2 rows" in out
     assert fake.uploaded
+
+
+async def test_two_scripts_asked_for_at_once_are_approved_one_at_a_time(session, sandbox, events):
+    """A model can call `run_python` twice in one step. Both used to wait on the one approval
+    queue, so a click answered one and the other waited for ever. Seen on a Flow's Phase."""
+    sandbox()
+    session.approvals = asyncio.Queue()
+    run = named(tools.build_code_tools(session), "run_python")
+
+    both = asyncio.gather(run.ainvoke({"script": "print(1)"}), run.ainvoke({"script": "print(2)"}))
+    for _ in range(2):
+        while sum(e["type"] == "approval" for e in events) <= _:
+            await asyncio.sleep(0)
+        await session.approvals.put("yes")
+    outs = await asyncio.wait_for(both, timeout=2)
+
+    assert all("exited 0" in out for out in outs)
+    kinds = [e["type"] for e in events if e["type"] in ("approval", "tool_end")]
+    assert kinds == ["approval", "tool_end", "approval", "tool_end"]

@@ -315,6 +315,22 @@ export interface FlowDetail extends FlowSummary {
 
 /** A Phase within one Run. `outputs` is what it declared and produced; `output` and `scratch` are
  *  what is on disk, which is how a Phase can have failed after its model call succeeded. */
+/** What a Phase is meant to do, from its folder as it is now. `title` and `purpose` are the first
+ *  heading and paragraph of its CONTEXT.md, as its author wrote them. */
+export interface PhasePlan {
+  kind: "agent" | "script";
+  review: "required" | "none";
+  tools: string[];
+  inputs: { kind: "reference" | "working"; path: string }[];
+  outputs: string[];
+  may_be_empty: string[];
+  /** Work prepared with the Flow: query files in queries/, scripts beside phase.yml. */
+  queries: string[];
+  scripts: string[];
+  title: string;
+  purpose: string;
+}
+
 export interface RunPhase {
   dir_name: string;
   status: "pending" | "running" | "done" | "failed" | "stale";
@@ -324,6 +340,8 @@ export interface RunPhase {
   outputs: string[];
   output: string[];
   scratch: string[];
+  /** Null when the Phase was renamed or removed since this run began. */
+  plan: PhasePlan | null;
 }
 
 export interface RunSummary {

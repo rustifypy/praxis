@@ -20,10 +20,11 @@ from fastapi.responses import Response, StreamingResponse
 
 from ...agent.turn import stream_turn
 from ...core import transcript
+from ..support.preview import FilePreview
 from ..support.stream import turn_stream
 from . import controller
 from .controller import CHUNK, MAX_BYTES, TOO_BIG
-from .dto import Decided, Decision, Discarded, FilePreview, Question, ResultPage, Stopped, Uploaded
+from .dto import Decided, Decision, Discarded, Question, ResultPage, Stopped, Uploaded
 
 router = APIRouter(prefix="/api/chats")
 

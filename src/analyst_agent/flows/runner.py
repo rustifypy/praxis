@@ -210,7 +210,9 @@ async def _one_phase(
     if record is None:
         return
     record.status, record.started_at, record.error = "running", time.time(), ""
-    current.waiting = ""
+    # The Run is running while one of its Phases is, and not otherwise. Set here, where a Phase
+    # starts, so a Run resumed from a Gate or a re-run says so the moment it does.
+    current.status, current.waiting, current.error, current.ended_at = "running", "", "", 0.0
     state.write(run, current)
 
     output = layout.phase_output(run, phase.dir_name)
@@ -220,6 +222,9 @@ async def _one_phase(
     # One workspace per Run, so a later Phase finds an earlier one's CSV beside its script. It is
     # not shared with any chat, and it is forgotten when the Run ends unless the Run failed.
     workspace = f"flow-{current.flow}-{current.id}"
+    # The sandbox paths `extract` uploaded. Their bytes are already in `output/` or `scratch/`, so
+    # `_collect` copying them back would move a large file twice for nothing.
+    pushed: set[str] = set()
 
     try:
         material, missing = await _gather(flow, phase, run, workspace)
@@ -237,14 +242,33 @@ async def _one_phase(
                 yield event
         else:
             async for event in _agent_phase(
-                flow, phase, output, workspace, material, append, cancel, approvals
+                flow, phase, output, scratch, pushed, workspace, material, append, cancel, approvals
             ):
                 yield event
+        # Stopped on purpose, so say that — and not "declared output not produced", which is
+        # what the missing files would otherwise report.
+        if cancel is not None and cancel.is_set():
+            raise RunFailed("stopped by the user")
 
-        landed = await _collect(workspace, phase, output, scratch, already)
+        landed = await _collect(workspace, phase, output, scratch, already | pushed)
         absent = [name for name in phase.spec.outputs if not (output / name).is_file()]
         if absent:
             raise RunFailed(f"declared output not produced: {', '.join(absent)}")
+        # A delimited file with a header and nothing under it is present and empty, and the next
+        # Phase reads it as "there is nothing". Seen live: an agent that could not find the
+        # routes wrote a header-only `routes.csv`, and the Phase passed. Only .csv/.tsv are
+        # checked — a line count means nothing for parquet or xlsx — and `may_be_empty` names the
+        # files for which no rows is a correct answer.
+        headless = []
+        for name in phase.spec.outputs:
+            if not name.lower().endswith((".csv", ".tsv")) or name in phase.spec.may_be_empty:
+                continue
+            with (output / name).open(errors="replace") as handle:
+                lines = (line for line in handle if line.strip())
+                if next(lines, None) is None or next(lines, None) is None:
+                    headless.append(name)
+        if headless:
+            raise RunFailed(f"declared output has no rows: {', '.join(headless)}")
         record.outputs = landed
         record.status = "done"
     except RunFailed as exc:
@@ -257,6 +281,15 @@ async def _one_phase(
         failure = Event(type="error", data={"message": record.error, "phase": phase.dir_name})
         await append(phase.dir_name, failure)
         yield failure
+    except BaseException:
+        # The stream went away mid-Phase: a closed tab or a dropped connection cancels this
+        # generator from outside, and nothing above gets to write the outcome. Left alone,
+        # `run.json` would say `running` for ever — a Run nobody is running, which the page shows
+        # as still going. Re-raised: the cancellation is not ours to swallow.
+        record.status, record.error = "failed", "the phase stopped before it finished"
+        current.status, current.error = "failed", record.error
+        current.ended_at = time.time()
+        raise
     finally:
         record.ended_at = time.time()
         # Re-running a Phase invalidates what came after it: the output is still there and still
@@ -280,7 +313,22 @@ async def _gather(
     """
     material = prompt.Material()
     missing: list[str] = []
-    pushing: list[tuple[str, bytes]] = []
+    pushing: list[Path] = []
+
+    # Prepared work is part of the definition, so it is read from the Flow's folder like a
+    # Reference — and like one, a file that is not there is a missing input, not a quiet skip.
+    for name in phase.spec.queries:
+        found = phase.directory / layout.QUERIES / name
+        if found.is_file():
+            material.queries.append((name, found.read_text()))
+        else:
+            missing.append(f"{layout.QUERIES}/{name}")
+    for name in phase.spec.scripts:
+        found = phase.directory / name
+        if found.is_file():
+            material.scripts.append((name, found.read_text()))
+        else:
+            missing.append(name)
 
     for declared in phase.spec.inputs:
         resolved = layout.resolve_input(flow.directory, run, declared.kind, declared.path)
@@ -295,7 +343,7 @@ async def _gather(
             continue
         # A Working input goes to the sandbox whatever it is, so `run_python` can reach it; what
         # differs is whether the model sees its words or only its shape.
-        pushing.append((resolved.name, resolved.read_bytes()))
+        pushing.append(resolved)
         if resolved.suffix.lower() in TABULAR:
             continue
         text = resolved.read_text(errors="replace")
@@ -316,12 +364,14 @@ async def _gather(
         found, _ = await sandbox.listing(workspace)
         existing = {path.rsplit("/", 1)[-1]: path for path in found}
         landed: set[str] = set()
-        for name, data in pushing:
-            if name in existing:
+        for resolved in pushing:
+            if resolved.name in existing:
                 with contextlib.suppress(SandboxError):
-                    await sandbox.delete(workspace, existing[name])
-            pushed = await sandbox.upload(workspace, name, data)
-            landed.add(str(pushed.get("path") or name))
+                    await sandbox.delete(workspace, existing[resolved.name])
+            # Streamed from disk: a Working input can be a large extract from an earlier Phase.
+            with resolved.open("rb") as handle:
+                pushed = await sandbox.upload(workspace, resolved.name, handle)
+            landed.add(str(pushed.get("path") or resolved.name))
 
         # Only this Phase's own inputs. `profiles.saved` answers for the whole workspace, which is
         # every earlier Phase's files too — and a Phase seeing the shape of a file it never
@@ -371,6 +421,8 @@ async def _agent_phase(
     flow: contract.Flow,
     phase: contract.Phase,
     output: Path,
+    scratch: Path,
+    pushed: set[str],
     workspace: str,
     material: prompt.Material,
     append: Sink,
@@ -387,7 +439,7 @@ async def _agent_phase(
         session = Session(
             catalog=await bound.catalog(),
             client=bound,
-            max_rows=settings.max_rows,
+            # No `max_rows`: a Phase has no `run_query`, and `extract` pages past any cap.
             # No `chat_id`: a Run writes no `results` row and has no transcript. The workspace is
             # its own, which is the distinction `Session.workspace_key` exists to make.
             workspace=workspace,
@@ -400,7 +452,7 @@ async def _agent_phase(
             model = build_model()
             return create_agent(
                 model=model,
-                tools=tools.build_phase_tools(session, phase, output),
+                tools=tools.build_phase_tools(session, phase, output, scratch, pushed, material),
                 system_prompt=instructions,
                 middleware=[
                     AuditLog(),
@@ -418,8 +470,15 @@ async def _agent_phase(
         # The Phase's own thread, so a Phase is a scoped task rather than a conversation that
         # remembers the last Run of the same Flow.
         thread = f"{workspace}:{phase.dir_name}"
+
+        # Filed under the Phase's name rather than the turn's random id, so the Run's log reads
+        # as one section per Phase — which is how the Run page tells the story. A script Phase
+        # and a Phase's failure are filed the same way.
+        async def in_this_phase(_turn_id: str, event: Event) -> None:
+            await append(phase.dir_name, event)
+
         failed = False
-        async for event in run_turn(build, append, thread, "Begin this Phase.", cancel):
+        async for event in run_turn(build, in_this_phase, thread, "Begin this Phase.", cancel):
             if event.type == "error":
                 failed = True
             yield event
@@ -443,7 +502,7 @@ async def _collect(
     phase: contract.Phase,
     output: Path,
     scratch: Path,
-    already: set[str],
+    skip: set[str],
 ) -> list[str]:
     """Bring the sandbox's files back: declared outputs to `output/`, everything else to
     `scratch/`.
@@ -452,17 +511,22 @@ async def _collect(
     `scratch/` exists because a chart nobody thought to declare is still worth keeping, and
     discarding it silently would be the first surprise of every new Flow.
 
+    `skip` is what is not this Phase's script output: files there before the Phase began, and the
+    files `extract` uploaded, whose bytes the portal already holds. So a script that rewrites an
+    extract under the same name is not collected — it should write a new name, which says what
+    it did.
+
     **A file that came back from the sandbox wins over one `write_output` wrote.** Seen on the
-    first real run: the agent called `export_result` to make `revenue.csv` and then wrote the same
-    name with `write_output`, having retyped the rows out of `run_query`'s reply. The two matched
-    that time. One is data that went through Cube and one is data a model transcribed, and the
-    transcription must not be the copy the next Phase reads.
+    first real run: the agent made `revenue.csv` with a tool and then wrote the same name with
+    `write_output`, having retyped the rows out of a query's reply. One is data that went
+    through Cube and one is data a model transcribed, and the transcription must not be the copy
+    the next Phase reads.
     """
     landed = [name for name in phase.spec.outputs if (output / name).is_file()]
     try:
         async with await open_sandbox() as sandbox:
             found, _ = await sandbox.listing(workspace)
-            for path in sorted(set(found) - already):
+            for path in sorted(set(found) - skip):
                 name = path.rsplit("/", 1)[-1]
                 target = output / name if name in phase.spec.outputs else scratch / name
                 data, _ = await sandbox.read(workspace, path)
