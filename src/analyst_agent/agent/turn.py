@@ -20,14 +20,8 @@ from .session import Session, replay
 from .tools.dashboards import DashboardContext
 from .tools.editor import EditContext
 
-# Given this turn's id, the agent to run. A callable rather than an agent so that building one
-# — which reads a catalog over HTTP — fails into the transcript like any other error.
 Build = Callable[[str], Awaitable[Any]]
 
-# Where this turn's events are kept: `(turn_id, event)`. A parameter rather than a call to
-# `transcript.append`, because a Flow keeps its events in `runs/<id>/events.jsonl` and not in the
-# database — see `docs/adr/0006`. One seam with two sinks; the alternative was a second copy of
-# the loop below, which this codebase has been burned by before.
 Sink = Callable[[str, Event], Awaitable[None]]
 
 
@@ -126,8 +120,6 @@ async def stream_turn(
             client=cube,
             # Pinned to main: a question chat and a dashboard must never silently read an edit ref.
             max_rows=settings.max_rows,
-            # Result sets live beside the transcript under this turn, so the table and the CSV
-            # have something to address after the stream has closed.
             chat_id=chat_id,
             turn_id=turn_id,
             cancel=cancel,

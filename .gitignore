@@ -39,3 +39,5 @@ skills-lock.json
 .agents/
 
 docs/
+
+/flows/*

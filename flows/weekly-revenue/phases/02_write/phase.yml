@@ -1,5 +1,0 @@
-kind: agent
-inputs:
-  - working: 01_pull/output/revenue.csv
-outputs:
-  - summary.md

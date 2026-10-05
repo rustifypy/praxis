@@ -63,11 +63,28 @@ class Table:
         return len(self.primary_key) > 1
 
     @property
+    def ambiguous_targets(self) -> set[str]:
+        """Tables more than one foreign key here points at — `from_store_id` and `to_store_id`
+        both reaching `dim_stores`. Cube names a join after the cube it reaches, so the two would
+        be one join name twice, and the direction each id carries would be lost with it."""
+        targets = [fk.ref_table for fk in self.foreign_keys if fk.ref_table != self.name]
+        return {target for target in targets if targets.count(target) > 1}
+
+    @property
+    def joined_keys(self) -> list[ForeignKey]:
+        """The foreign keys that become joins. An ambiguous one does not, so its column stays a
+        dimension — the same rule as a key to a table the selection left out."""
+        return [fk for fk in self.foreign_keys if fk.ref_table not in self.ambiguous_targets]
+
+    @property
     def key_columns(self) -> set[str]:
-        """Primary and foreign key columns — join plumbing, not slicing dimensions."""
-        return set(self.primary_key) | {
-            column for foreign_key in self.foreign_keys for column in foreign_key.columns
-        }
+        """A single-column primary key and every joined foreign key — join plumbing, not slicing
+        dimensions. A composite key's other parts are not plumbing: `sale_date` in
+        `(sale_date, store_id, item_id)` is the grain of the row, and the synthesised key replaces
+        the key, not the date."""
+        single = set(self.primary_key) if len(self.primary_key) == 1 else set()
+        joined = {column for foreign_key in self.joined_keys for column in foreign_key.columns}
+        return single | joined
 
     def column(self, name: str) -> Column | None:
         return next((column for column in self.columns if column.name == name), None)
@@ -79,6 +96,12 @@ class Schema:
 
     def table(self, name: str) -> Table | None:
         return next((table for table in self.tables if table.name == name), None)
+
+    @property
+    def exposed_keys(self) -> set[str]:
+        """Tables whose primary key is public. An ambiguous foreign key arrives as a bare id, and
+        an id with nothing to match it against says nothing."""
+        return {target for table in self.tables for target in table.ambiguous_targets}
 
 
 # These two stay each other's inverse without anyone maintaining it: `asdict` emits every field a

@@ -26,8 +26,11 @@ class Cubes:
     notes: list[str] = field(default_factory=list)
 
 
-def primary_key_dimension(table: Table) -> dict | None:
-    """Cube allows one primary_key dimension, so a composite key is concatenated."""
+def primary_key_dimension(table: Table, public: bool = False) -> dict | None:
+    """Cube allows one primary_key dimension, so a composite key is concatenated.
+
+    `public` only for a single-column key: a concatenation is never something to slice by.
+    """
     if not table.primary_key:
         return None
     if len(table.primary_key) == 1:
@@ -38,7 +41,7 @@ def primary_key_dimension(table: Table) -> dict | None:
             "sql": name,
             "type": column.type if column else "string",
             "primary_key": True,
-            "public": False,
+            "public": public,
         }
     parts = f", '{KEY_SEPARATOR}', ".join(f"{{CUBE}}.{column}" for column in table.primary_key)
     return {
@@ -54,6 +57,13 @@ def joins(table: Table, schema: Schema, notes: list[str]) -> list[dict]:
     out = []
     for foreign_key in table.foreign_keys:
         target = schema.table(foreign_key.ref_table)
+        if foreign_key.ref_table in table.ambiguous_targets:
+            columns = ", ".join(foreign_key.columns)
+            notes.append(
+                f"{table.name} -> {foreign_key.ref_table}: more than one key reaches it, so no "
+                f"join — {columns} is kept as a dimension"
+            )
+            continue
         if target is None:
             notes.append(f"{table.name} -> {foreign_key.ref_table}: table not in this schema")
             continue
@@ -89,7 +99,7 @@ def cube(table: Table, schema: Schema, notes: list[str]) -> dict:
         body["joins"] = joined
 
     dims = []
-    key = primary_key_dimension(table)
+    key = primary_key_dimension(table, public=table.name in schema.exposed_keys)
     if key:
         dims.append(key)
     dims.extend(dimensions(table))
@@ -171,23 +181,28 @@ def measure_candidates(schema: Schema) -> list[MeasureCandidate]:
         )
         for table in schema.tables
         for column in table.columns
-        if column.name not in table.key_columns and column.type == "number"
+        # Every part of the key, not only `key_columns`: a composite key's date is a dimension
+        # now, and its ids would otherwise be offered for summing.
+        if column.name not in table.key_columns | set(table.primary_key) and column.type == "number"
     ]
 
 
-def _public_members(table: Table) -> list[str]:
-    return [column.name for column in table.columns if column.name not in table.key_columns]
+def _public_members(table: Table, schema: Schema) -> list[str]:
+    shown = [column.name for column in table.columns if column.name not in table.key_columns]
+    if table.name in schema.exposed_keys and len(table.primary_key) == 1:
+        shown.insert(0, table.primary_key[0])
+    return shown
 
 
 def join_paths(schema: Schema, root: Table, depth: int = MAX_PATH_DEPTH) -> dict[str, list[str]]:
     """Walk many_to_one edges upward from root. Every path is joinable by construction."""
-    paths: dict[str, list[str]] = {root.name: _public_members(root)}
+    paths: dict[str, list[str]] = {root.name: _public_members(root, schema)}
     frontier = [(root, root.name, 0)]
     while frontier:
         table, path, level = frontier.pop()
         if level >= depth:
             continue
-        for foreign_key in table.foreign_keys:
+        for foreign_key in table.joined_keys:
             if foreign_key.ref_table == table.name:
                 continue
             target = schema.table(foreign_key.ref_table)
@@ -196,7 +211,7 @@ def join_paths(schema: Schema, root: Table, depth: int = MAX_PATH_DEPTH) -> dict
             next_path = f"{path}.{target.name}"
             if next_path in paths:
                 continue
-            paths[next_path] = _public_members(target)
+            paths[next_path] = _public_members(target, schema)
             frontier.append((target, next_path, level + 1))
     return paths
 

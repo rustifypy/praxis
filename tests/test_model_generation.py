@@ -150,6 +150,58 @@ def test_key_columns_are_not_offered_as_dimensions():
     assert dims == {"title"}
 
 
+def retail() -> Schema:
+    """A daily fact keyed by (date, store, item), and a route table with two keys to one store."""
+    stores = Table(
+        name="dim_stores",
+        columns=[col("store_id"), col("store_name", "text")],
+        primary_key=["store_id"],
+    )
+    sales = Table(
+        name="fact_daily_sales",
+        columns=[col("sale_date", "date"), col("store_id"), col("units_sold")],
+        primary_key=["sale_date", "store_id"],
+        foreign_keys=[ForeignKey(["store_id"], "dim_stores", ["store_id"])],
+    )
+    routes = Table(
+        name="transfer_routes",
+        columns=[col("route_id"), col("from_store_id"), col("to_store_id"), col("lead_time_days")],
+        primary_key=["route_id"],
+        foreign_keys=[
+            ForeignKey(["from_store_id"], "dim_stores", ["store_id"]),
+            ForeignKey(["to_store_id"], "dim_stores", ["store_id"]),
+        ],
+    )
+    return Schema(tables=[stores, sales, routes])
+
+
+def test_a_composite_keys_date_is_still_a_dimension():
+    """The synthesised key replaces the key, not the date — without it a daily fact has no time."""
+    dims = {d["name"]: d["type"] for d in build.dimensions(retail().table("fact_daily_sales"))}
+    assert dims == {"sale_date": "time", "units_sold": "number"}
+
+
+def test_two_keys_to_one_table_make_no_join_and_stay_dimensions():
+    """Two joins called `dim_stores` is one name twice, and which id is the source is lost."""
+    schema = retail()
+    skipped: list[str] = []
+    assert build.joins(schema.table("transfer_routes"), schema, skipped) == []
+    assert len(skipped) == 2 and "more than one key" in skipped[0]
+    dims = {d["name"] for d in build.dimensions(schema.table("transfer_routes"))}
+    assert dims == {"from_store_id", "to_store_id", "lead_time_days"}
+
+
+def test_the_key_an_ambiguous_id_points_at_is_public():
+    """A bare `to_store_id` means something only if `dim_stores.store_id` can be read too."""
+    schema = retail()
+    body = build.cube(schema.table("dim_stores"), schema, [])
+    key = next(d for d in body["dimensions"] if d.get("primary_key"))
+    assert key["public"] is True
+    paths = build.join_paths(schema, schema.table("fact_daily_sales"))
+    assert "store_id" in paths["fact_daily_sales.dim_stores"]
+    assert set(build.join_paths(schema, schema.table("transfer_routes"))) == {"transfer_routes"}
+
+
 # --- the candidate menu ----------------------------------------------------
 
 
@@ -334,6 +386,20 @@ def test_view_paths_must_descend_from_one_root():
     kept, rejected = validate_paths(view, available)
     assert [e.join_path for e in kept] == ["invoice_line"]
     assert "does not descend from root" in rejected[0]
+
+
+def test_a_view_named_like_a_cube_is_rejected():
+    """Cube fails the whole model on the clash without saying which name it was."""
+    roots = build.view_roots(chinook())
+    view = ViewDecision(
+        name="invoice_line",
+        description="",
+        ai_context="",
+        cubes=[ViewCube(join_path="invoice_line", includes=["unit_price"])],
+    )
+    kept, rejected = validate_views([view], roots, {"invoice_line": CubeDecision(description="")})
+    assert kept == []
+    assert "a cube already has that name" in rejected[0]
 
 
 def test_joined_cubes_are_always_prefixed():
