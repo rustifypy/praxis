@@ -3,272 +3,344 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-An analytics agent over a self-hosted Cube Core semantic layer.
+Ask questions about your data in plain English, and run repeatable data work step by step.
 
-The agent never writes SQL. It emits **Cube JSON queries**, which pass a four-tier
-gate before anything touches the warehouse. Cube compiles the query to SQL and
-executes it; the agent only ever speaks HTTP to Cube and holds no database
-credentials.
+analyst-agent sits on top of your SQL warehouse. It does five things:
 
-- **Chat** — ask questions in plain English, get a governed query, a table, a chart, and the trace
-- **Boards** — pin questions asked repeatedly as dashboard tiles that store the query, not the rows
-- **Data** — connect a warehouse, generate its Cube model in four steps, then edit that model on a branch
+1. **Connects** to almost any SQL warehouse.
+2. **Builds a semantic layer** on top of it: what each table means, how tables join, and which
+   numbers you can add up.
+3. **Lets you shape views and meaning** (an ontology) on top of that layer.
+4. **Answers questions through Cube queries**, not SQL written by an AI.
+5. **Runs agentic workflows** (Flows): data work done in clear steps, with files you can open
+   and a person who checks each step.
 
-Everything above is one portal, one process, one machine. See [Contributing](#contributing)
-if you want to help build the parts in [Next](#next).
+Everything runs on your machine. One portal in your browser, one process.
 
-## Why JSON queries and not SQL
+---
 
-A JSON query is a closed grammar — measures, dimensions, typed filter operators.
-It cannot express an ungoverned column, an arbitrary join, or a hand-rolled
-metric. An LLM writing SQL fails silently with a plausible wrong number; an LLM
-writing JSON queries fails loudly with a fixable error.
+## How it fits together
 
-## The gate
+```
+   You (browser)
+        │
+        ▼
+ ┌──────────────────────────┐
+ │  analyst portal          │   chat · dashboards · data · flows
+ │  (this repository)       │   holds no data, only addresses and credentials
+ └──────┬─────────────┬─────┘
+        │ Cube JSON   │ Python scripts
+        ▼             ▼
+ ┌──────────────┐  ┌─────────────┐
+ │ model store  │  │  sandbox    │   runs Python on files,
+ │ + Cube       │  │             │   has no database password
+ └──────┬───────┘  └─────────────┘
+        │ SQL (written by Cube, not by the AI)
+        ▼
+ ┌──────────────┐
+ │ your SQL     │   Postgres, Snowflake, BigQuery, ...
+ │ warehouse    │
+ └──────────────┘
+```
 
-| Tier | What | Cost |
+The AI never talks to your warehouse. It talks to Cube, and Cube talks to the warehouse.
+
+---
+
+## 1. Connect any SQL warehouse
+
+Open **Data** in the left rail and choose **Connect a database**. Pick your warehouse type and
+fill in the form.
+
+Supported warehouses:
+
+| Postgres | MySQL | SQL Server | Redshift |
+|---|---|---|---|
+| **Snowflake** | **BigQuery** | **Databricks** | **Athena** |
+| **ClickHouse** | **Trino** | **DuckDB** | |
+
+The portal does not start anything itself. After you fill in the form, it gives you two
+ready-made `docker compose` files:
+
+- **Semantic layer**: the model store, Cube, and Cube Store.
+- **Sandbox**: where Python scripts run.
+
+Save each file anywhere, run `docker compose up -d` next to it, and paste the two addresses
+back into the portal. That is the whole connection.
+
+A database on your own machine is `host.docker.internal` from inside a container, not
+`localhost`.
+
+---
+
+## 2. Build the semantic layer
+
+A semantic layer is a description of your data that a computer can check. It says:
+
+- which tables matter,
+- what each column means,
+- how tables join to each other,
+- which numbers can be added up (measures) and which values you group by (dimensions).
+
+The portal builds it in four steps. You can run each step again on its own.
+
+| Step | What happens |
+|---|---|
+| **Read tables** | Reads every schema and table in the warehouse, and remembers it. |
+| **Build cubes** | You pick tables. Each table becomes a *cube* with its keys and joins. |
+| **Describe with AI** | The AI writes a description for each table and column, and suggests measures. |
+| **Build views** | Builds *views* that combine joined cubes into one clean surface. |
+
+The AI gives **decisions**, never files. The portal writes the files, and **Cube checks them**.
+If Cube does not accept a new model, the old model keeps working. Nothing you are using
+breaks.
+
+The model is kept in the **model store**, with full history, like code in git.
+
+---
+
+## 3. Views and ontology
+
+The semantic layer is also your **ontology**: the shared meaning of your business data.
+
+| Concept | What it means here | Example |
 |---|---|---|
-| 1 | Pydantic schema (`modelstore/schema.py`) | free, local |
-| 2 | Member existence, operator/type match, WHERE-vs-HAVING rule, granularity, scope (`modelstore/gate.py`) | free, local |
-| 3 | `POST /v1/sql` — Cube compiles to SQL, executes nothing | 1 HTTP call, no warehouse cost |
-| 4 | `POST /v1/load` — execute with row and time caps | warehouse |
+| **Cube** | One business thing, built from one table | `dim_stores`, `fact_daily_sales` |
+| **Measure** | A number you can add up or count | `total_revenue`, `total_units_sold` |
+| **Dimension** | A value you group or filter by | `region`, `category`, `sale_date` |
+| **Join** | How two things relate | a sale belongs to a store |
+| **View** | A clean, joined surface for questions | `daily_sales` = sales + stores + items |
+| **Description** | What a table or column means, in words | "Revenue after discounts, in GBP" |
+| **Agent note** | A hint for the AI about how to use it | "Use `sale_date` for time, not `created_at`" |
+| **Folder** | Groups members inside a view | "Store", "Product", "Money" |
 
-Every failure returns as text the agent can act on, never an exception. Tier 2
-rejections include the nearest matching member names, so the agent corrects on
-the next turn instead of flailing.
+Views are what people and the AI ask questions against. They hide the raw join details and show
+one clear set of names.
 
-## Quick start
+**Change the model safely.** Open the model on a *branch*, not on `main`. You can edit the YAML
+files yourself, or ask the editor chat to make the change. Every change is checked before it is
+saved:
 
-```bash
-cp .env.example .env          # Azure OpenAI key + endpoint, check QUERY_MODEL
-make install
-make web                      # build the frontend, then open the portal
+- Cubes are append-only: you can add and describe, but you cannot rename or remove.
+- Views can be changed freely.
+- **Validate** asks Cube to compile the branch, and checks every saved dashboard query against
+  it.
+- **Merge** moves the branch into `main`. It refuses if the change would break a saved query.
+
+A model change is live within seconds. Cube does not need a restart.
+
+---
+
+## 4. Ask questions with Cube queries, not AI-written SQL
+
+When an AI writes SQL, a small mistake gives a **number that looks right but is wrong**: a
+wrong join, a double count, a missing filter. You cannot easily see the mistake in a long SQL
+query.
+
+Here, the AI never writes SQL. It writes a small **Cube JSON query** instead:
+
+```json
+{
+  "measures":   ["daily_sales.total_revenue"],
+  "dimensions": ["daily_sales.dim_stores_region"],
+  "timeDimensions": [
+    { "dimension": "daily_sales.sale_date", "granularity": "week" }
+  ],
+  "order": { "daily_sales.total_revenue": "desc" }
+}
 ```
 
-Then: **Data** in the rail → Connect a database. The portal hands you a compose file per
-service; save each one anywhere, `docker compose up -d`, and paste the addresses back.
-Then walk the four stages, and the Model panel shows what Cube compiled. Switch to **Chat** and
-ask questions; the header there names the database you are querying and how much of it is
-modelled. **Boards** sits between the two — pin a question you'll ask again and it becomes a
-tile.
+You can read this in a few seconds: *revenue, by region, by week, biggest first.* Every name in
+it comes from the semantic layer. Cube turns it into correct SQL, with the joins already known.
 
-There is no bundled database — bring your own. A database running on this machine is
-`host.docker.internal` from inside the container, not `localhost`.
+Why this is safer:
 
-`cubejs/cubestore:latest` is amd64 only, so on Apple Silicon set `CUBESTORE_TAG=arm64v8` in
-that file — the generated one carries it as a commented line. Without it the pull fails with
-`no matching manifest for linux/arm64/v8` rather than emulating.
-
-## The web portal
-
-```bash
-make web-build          # build the frontend once (needs npm; output is committed)
-uv run analyst          # opens a browser, Jupyter-style, with a token in the URL
-```
-
-Multiple chats, each with its own history. Answers stream, and so does the model's
-reasoning — the panel fills while the agent plans, then collapses when it answers.
-
-Every step shows up as a line you can expand: which members `search_model` found, the
-Cube JSON that went to the gate, the SQL Cube generated, and the rejections in between.
-Tool labels are derived from the query itself, so the trace can never claim a query that
-did not run.
-
-The **data** is not in that trace. Each query's rows render as their own block below the
-answer they support — a formatted, sortable table with a chart above it where the query's
-shape suits one, and CSV beside it. Both the header and the chart are derived from the
-query in Python (`modelstore/shape.py`, `modelstore/charts.py`), so they are free, testable, and
-cannot describe a column nobody fetched; **no chart is a normal outcome** and means the
-table is the better answer. Full result sets live in a `results` table keyed by a handle,
-which is what `Show all` and the CSV read.
-
-Bound to `127.0.0.1` with a token generated per launch. It is one person on one machine
-— there is no login and no user table.
-
-Reasoning summaries need `AZURE_OPENAI_API_VERSION=2025-03-01-preview` or later;
-`analyst` refuses to start below it rather than showing an empty thinking panel.
-
-The frontend source is `src/web/` (React + Vite). `npm run dev` there gives hot reload
-against a running `analyst`. `make web-build` is what produces what ships.
-
-## Storage
-
-One SQLite file, `~/.analyst/analyst.db`, holds all of it: chats and the flat event stream
-that *is* the transcript, full result sets, dashboards and their tiles and refresh history,
-the connection with its credentials, and the LangGraph checkpointer that gives a chat its
-memory. `DATA_DIR` moves the lot, so pointing it at a scratch directory gives you a scratch
-*everything* — including an unconnected database.
-
-The file is chmod 600, because the database credentials in it are plaintext.
-
-There is no migration mechanism, deliberately. `CREATE TABLE IF NOT EXISTS` does not diff,
-so adding a table to an existing database works and adding a column silently does not —
-changing a column means deleting the file and starting again. That is an affordable answer
-for one person on one machine and a bad one for anything else; it is the first thing to
-revisit if this ever runs somewhere shared.
-
-## Dashboards
-
-A dashboard is the same machinery pointed at a question someone asks repeatedly. A tile
-stores the **query**, not the rows — so a dashboard costs nothing to keep around and
-nothing goes stale silently.
-
-The agent authors and arranges tiles from chat ("put yesterday's revenue next to this
-board" adds a tile); it never refreshes one. **Refresh is a button on the page**,
-deliberately — an agent that could trigger a refresh would turn "tidy up this dashboard"
-into a dozen warehouse queries nobody asked for. A newly-added tile has no data until
-someone clicks it, and the agent says so rather than implying otherwise.
-
-A refresh is atomic: every tile compiles before any tile executes, so one broken tile
-can't leave the rest half-updated, and the same compile pass runs when a board opens —
-a member a model rebuild dropped shows up as a banner, not a silent gap. A refresh also
-**re-executes rather than rewrites**: a tile asking for "last 30 days" moves with every
-refresh, one asking for `2026-01-01..2026-01-31` never does, and the tile labels which
-kind it is from what Cube actually resolved.
-
-## The deployment
-
-**The portal runs nothing at all.** It holds the credentials, mints the secrets, and renders a
-compose file; you run each deployment wherever you want it and tell the portal its address.
-
-The semantic layer is one of them — one compose file, three published images:
-
-| container | what it is |
+| AI writes SQL | AI writes a Cube query |
 |---|---|
-| `modelstore` | the data model — files, refs and history, as a git repo behind an API — **and the gateway**: it serves Cube and signs its tokens. Built from its own repository |
-| `cube-api` | stock `cubejs/cube`, with `cube.py` supplied through compose `configs`. One process serves every branch at once |
-| `cubestore` | Cube's queue and cache driver. Production mode refuses to query without it |
+| Can join any table in any way | Can only use joins the model defines |
+| Can invent a formula for "revenue" | Can only use the defined `total_revenue` |
+| A mistake often still runs | A mistake fails with a clear message |
+| Hard to check by eye | Easy to check by eye: a short list of names |
 
-The same file serves a laptop and a server, because the portal only ever talks to **one** URL
-here: the store's. **Cube's port is not published** — queries go through the store at
-`/refs/{branch}/query`, which mints a token naming the branch *and* its revision, so
-`CUBEJS_API_SECRET` never leaves that compose file and there is exactly one authenticated door
-in. Nothing runs in dev mode, so there is no port here that must never be exposed. The code
-sandbox is a separate deployment, optional and sharing nothing with this one — its own published
-image, released from its own repository like the store.
+Every query passes **four checks** before it touches the warehouse:
 
-**One deployment, one row in the `deployment` table** — `id = 1` is a CHECK, not a convention —
-holding the credentials, the API secret and the store's token. `deployenv` is the one place
-that decides what a deployment needs, and it renders the hand-over with the values substituted
-and every image pinned — the pin is the only compatibility control there is, because the store
-reports no version handshake. There is no `.env`, and nothing is written to disk.
+| Check | What it checks | Cost |
+|---|---|---|
+| 1. Shape | Is it a valid Cube query? | free |
+| 2. Meaning | Do the names exist? Does each filter fit its type? Is the time grain allowed? | free |
+| 3. Compile | Can Cube turn it into SQL? (nothing runs yet) | one small call |
+| 4. Run | Run it, with a row limit and a time limit | warehouse |
 
-Connecting is two steps, because the portal cannot do the middle one:
+When a check fails, the AI gets a message it can fix, for example *"`orders.cnt` does not
+exist; did you mean `orders.count`?"*. It corrects the query and tries again.
 
-1. **Store the connection.** Credentials in, secrets minted, nothing running.
-2. **Paste the addresses.** Cube's and the store's, as this machine reaches them.
+In **Chat** you see every step: which names the AI looked up, the Cube query, the SQL Cube made,
+and the result as a table and a chart.
 
-That second step is also how you follow a deployment that moved, so there is one path rather
-than two. Connecting a *different* database replaces the first and takes the recorded steps with
-it — they describe a database that is no longer there. The model itself stays in the store,
-history and all.
+---
 
-The connection is managed from the portal — **Data** in the rail — and only from there: the
-deployment panel, a stepper for the four stages with one panel open at a time, a connection
-test, a **Model** panel showing what Cube compiled from `/v1/meta`, and a danger zone.
+## 5. Agentic workflows (Flows)
 
-### Four stages
+A **Flow** is data work you repeat, for example "every Monday, forecast demand and plan stock
+transfers". It runs in **phases**, one after another. You can check the result of each phase
+before the next one starts.
 
-Building a model is four stages rather than one pass, because a person chooses tables in the
-middle of it and because the expensive part deserves its own progress. There is no Connect
-stage: connecting is a form, and a stage records something that *ran*.
+### A Flow is a folder
 
-| stage | what it does |
-|---|---|
-| **Read tables** | introspect every schema at once and cache it |
-| **Build cubes** | pick tables, emit one cube each with keys and joins, install |
-| **Describe with AI** | one model call per table: descriptions, measures, `ai_context` |
-| **Build views** | views over the join paths, validated across every join |
+There is no hidden database for a Flow. **The folder is the Flow.** You can open it, read it,
+copy it, and keep it in git.
 
-Each is runnable and re-runnable on its own — what one needs from the last is stored on the
-deployment row, not held in memory. `steps.action` is the single entry point, so the order rule
-and what a failure records live in one place. The catalog read covers **every** schema at once,
-so choosing tables afterwards is instant and offline, and ticking a fact table pulls in what it
-references. That matters: describing is one model call per table, so four hundred tables is an
-hour of them.
-
-**Reading the catalog needs no container.** The probe cubes are committed to a `probe` ref, the
-connected Cube is asked about that ref, and the ref is deleted. Tables and columns come from
-`information_schema`, so it works against a production-mode Cube on someone else's machine.
-
-**A rebuild cannot lose the model it replaces.** Re-running a stage writes the whole model to a
-`candidate` ref, asks Cube about it *there*, and only then moves `main` — so a model Cube
-refuses never replaces the one being served, and stays readable at `candidate`. The stage before
-it is the parent commit, and `GET /diff` shows what changed. The portal still warns first:
-recoverable is not the same as intended.
-
-One job runs at a time, machine-wide, guarded by a `flock` — two portal processes rebuilding one
-model store would race on the same ref.
-
-**A model change is live without a restart.** Cube asks the store for the version of the ref it
-is serving on every request, so a commit is picked up within seconds. That is why the edit gate
-below runs before the write and not after.
-
-### Editing the model
-
-> **Being rebuilt.** This part was written when the model was a directory on this machine and
-> `git checkout` was the deploy. The model now lives in the store and Cube pulls it per ref, so
-> the editor still writes to a local directory that nothing serves. It is the unfinished half of
-> that move, not a bug to work around.
-
-The design it is moving to: the model store is a git repo, and every ref is servable at once —
-one Cube compiles each independently — so editing happens on a ref of its own, never on `main`,
-which the pipeline above generates.
-
-Create a branch, then either edit YAML files directly or open the editor chat and describe the
-change. Both paths run through the same two-tier gate before anything is committed — cubes are
-**append-only** (add measures/dimensions/segments, edit `description`/`title`/`meta`/`format`,
-never rename or remove what's there), views are freely rewritable. **Validate** asks Cube what
-compiled on that ref and checks every dashboard tile against what is actually being served. **Merge** does the same check once more, then folds the ref into `main` —
-refused if it would break a saved query, unless you force it.
-
-There's no remote and no PR review inside the tool: no pull, no rebase, nothing to sync with.
-
-`ungrouped` is absent from `CubeQuery` on purpose. It would return raw
-un-aggregated rows and void the aggregate-only guarantee.
-
-## Commands
-
-```bash
-uv run analyst                                          # the chat portal
-make web                                                # build the frontend, then serve
-make web-build                                          # the frontend artifact alone
-make test lint
+```
+flows/store-replenishment/
+  flow.yml                  title and description
+  CONTEXT.md                what this flow is for (the AI reads this)
+  _config/                  rules every run follows
+    replenishment-rules.md
+  phases/
+    01_pull/                phase 1: get the data
+      phase.yml             what it reads, what it must write
+      CONTEXT.md            instructions for this phase
+      queries/
+        stock_position.json a prepared Cube query
+    02_forecast/            phase 2: compute
+      phase.yml
+      forecast.py           a prepared Python script
+    03_review_forecast/     phase 3: write a summary for a person
+    04_transfer_plan/       phase 4: plan the transfers
+  runs/
+    20261005T020335-da6bbf/ one run: every file it made, and its log
 ```
 
-`analyst` only starts the portal, and takes no arguments — host, port and data directory
-come from the environment or `.env`. It cannot be replaced by pointing uvicorn at the app:
-the access token is minted at import and nothing else prints it.
+The number in the folder name **is the order**: `01` runs first, then `02`.
 
-`src/web/` is the frontend source and sits outside the Python package deliberately. Its
-build output does not: `uv_build` ships only `src/analyst_agent`, so Vite writes to
-`src/analyst_agent/api/static/`. That directory is **not** committed — hashed chunk names
-make it conflict on every branch — so a fresh clone has no frontend until you run
-`make web-build`, and `analyst` answers a 503 until you do. `make web` does both.
+A phase says what it needs and what it makes, in `phase.yml`:
 
-## Next
+```yaml
+kind: agent                 # an AI step (or "script": a fixed script, no AI)
+review: required            # stop here so a person can check the output
+tools: [query, python]      # what this phase may use
+inputs:
+  - reference: _config/replenishment-rules.md   # a rule, the same every run
+  - working: brief.md                            # this run's request
+outputs:
+  - stock_position.csv
+queries: [stock_position.json]                   # prepared Cube queries
+scripts: [shape_pull_outputs.py]                 # prepared Python scripts
+```
 
-- Add the eval harness: question -> golden JSON query, graded on result sets
-  (sort-invariant, 4 significant figures, column-name agnostic). This is next, not last:
-  everything below changes what the agent answers, and there is currently no way to tell
-  whether a prompt or tool change helped.
-- Search dimension *values*, not just member names. The gate checks that
-  `sales.billing_country` exists and never that `"USA"` is a value it holds, so a wrong
-  literal comes back as "No data matched" and the agent either retries blind or reports
-  zero. A `search_values(member, text)` tool over a `dimensions: [member]` query closes it
-  with no vector store.
-- Pin a result as a saved report.
-- Click a bar to drill: `drillMembers` is on `/v1/meta` measures and unparsed. Note a drill
-  query uses `measureFilter`, which pre-aggregations cannot serve.
-- Swap `LexicalRetriever` for pgvector once the model outgrows fuzzy matching.
-- Add the orchestrator and subagents once single-agent accuracy is measured.
+### Data goes to files, not to the AI
+
+This is the most important rule of a Flow:
+
+- A query in a Flow writes **every row to a CSV file**. There is no 5,000-row limit. Large
+  results are read from Cube in pages of 50,000 rows.
+- The AI sees only the **shape** of a file: its columns, how many rows it has, and a few sample
+  rows. It never sees all the data.
+- Python scripts in the sandbox do the real work on the full files.
+- Each phase's files go into its own `output/` folder, which the next phase reads.
+
+### Prepared work
+
+When you create a Flow, the flow chat writes the **queries and scripts in advance** and checks
+each query against the model. So a run does not search the model or write new code each time.
+The AI in a phase runs the prepared work, and **writes its own only if the brief asks for
+something new**. The Run page marks any step that was not the prepared one.
+
+A prepared script runs without asking for approval, because it was already reviewed. A new or
+changed script asks first.
+
+### Running a Flow
+
+1. Open **Flows**, pick a flow, and open the **Runs** tab.
+2. Write a short **brief**, for example *"Focus on the North region"*, and start a run.
+3. The run goes phase by phase. It stops at each **review point** (a *Gate*).
+4. At a Gate, read what the phase produced. You can edit its output files. Then continue.
+
+The Run page tells the story of each phase:
+
+- what the phase is for,
+- what it reads,
+- what it did, in plain sentences ("Pulled stock by store and item into stock.csv · 348 rows"),
+- what it produced, with a preview of each table and every row counted.
+
+If something goes wrong, the phase **fails and stops the run**. It never writes a half-finished
+file that looks complete. For example, a declared CSV with no rows fails the phase, unless the
+phase says that file may be empty (`may_be_empty`).
+
+### Creating a Flow
+
+You do not have to write the files by hand. Open a flow's **Edit** tab and describe the work to
+the flow chat, for example:
+
+> Pull today's stock and the last 4 weeks of sales. Forecast demand. Then plan transfers
+> from stores with too much stock to stores with too little. I want to review the forecast
+> before transfers are planned.
+
+The flow chat writes the folder, the prepared queries and the scripts, and checks that the flow
+is valid. You can also edit any file yourself.
+
+---
+
+## Also in the portal
+
+- **Chat**: ask a question, get a checked Cube query, a table, a chart, and the full trace.
+- **Boards**: save a question as a dashboard tile. A tile stores the *query*, not the rows, so it
+  never goes stale without you knowing. Refresh is a button.
+- **Agents (MCP)**: give other AI tools the same safe access: `search_model`, `run_query` and
+  `describe_model` over MCP.
+
+---
+
+## Setup
+
+You need: Python with [uv](https://docs.astral.sh/uv/), Node.js with npm, Docker, and an Azure
+OpenAI key.
+
+```bash
+git clone https://github.com/rustifypy/analyst-agent.git
+cd analyst-agent
+cp .env.example .env      # add your Azure OpenAI key and endpoint
+make install              # install Python packages
+make web                  # build the web app, then open the portal
+```
+
+`make web` opens the portal in your browser with a one-time token in the address.
+
+Then:
+
+1. Go to **Data → Connect a database** and fill in your warehouse details.
+2. Download the two compose files. Run `docker compose up -d` next to each one.
+3. Paste the two addresses (model store and sandbox) back into the portal.
+4. Run the four steps: **Read tables → Build cubes → Describe with AI → Build views**.
+5. Ask questions in **Chat**, or build a **Flow**.
+
+Notes:
+
+- On Apple Silicon, Cube Store needs the `arm64v8` image. The generated compose file has this
+  line ready; check it before `docker compose up`.
+- The portal keeps its own data in one file, `~/.analyst/analyst.db`. Set `DATA_DIR` to move
+  it. The file holds your warehouse password, so it is readable only by you.
+- Flows live in a `flows/` folder in the directory where you start the portal. Set `FLOWS_DIR`
+  to put them somewhere else.
+
+### Commands
+
+```bash
+make install      # install dependencies
+make web          # build the web app, then start the portal
+make web-build    # build the web app only
+make serve        # start the portal only
+make test         # run the tests (no containers, no AI calls)
+make lint         # check code style
+```
+
+---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup, the test/lint loop, and what to
-verify against a real container before opening a PR — the test suite deliberately skips
-anything that talks to a database or a model. Everyone participating is expected to follow
-the [Code of Conduct](CODE_OF_CONDUCT.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup and what to check before you
+open a pull request. Everyone taking part is expected to follow the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
