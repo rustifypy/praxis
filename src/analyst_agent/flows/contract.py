@@ -283,6 +283,19 @@ def load(directory: Path) -> tuple[Flow | None, Report]:
             warnings.append(
                 f"{dir_name}: declares no outputs, so it hands nothing to the next Phase"
             )
+        # Prepared work is the default, and the Brief is the one thing that can call for something
+        # else — so a Phase that never reads it runs its prepared work whatever a Run asks. Seen
+        # live: a brief asking for a store breakdown reached only the writing Phase, which could
+        # say the data was missing and nothing more. A warning: a fixed pull is a legitimate design.
+        reads_brief = any(
+            declared.kind == "working" and declared.path == layout.BRIEF_MD
+            for declared in phase_spec.inputs
+        )
+        if (phase_spec.queries or phase_spec.scripts) and not reads_brief:
+            warnings.append(
+                f"{dir_name}: has prepared work but does not read {layout.BRIEF_MD}, so a brief "
+                "cannot change what it pulls or computes — add `- working: brief.md` if it should"
+            )
 
         phases.append(Phase(number, dir_name, here, phase_spec, phase_prose))
 

@@ -1255,3 +1255,26 @@ async def test_write_output_refuses_a_file_a_script_already_wrote(
     said = await built["write_output"].ainvoke({"filename": "forecast.csv", "text": "a\n1\n"})
     assert "written by a script in this Phase" in said
     assert not (tmp_path / "forecast.csv").exists()
+
+
+def test_a_clock_relative_range_in_a_prepared_query_is_flagged():
+    """'last 14 days' on data ending a week ago held eight days, and a digest reported +650%."""
+    from analyst_agent.flows.authoring import clock_relative
+
+    relative = {"timeDimensions": [{"dimension": "s.day", "dateRange": "last 14 days"}]}
+    fixed = {"timeDimensions": [{"dimension": "s.day", "dateRange": ["2026-01-01", "2026-01-31"]}]}
+    assert "resolves against today's clock" in clock_relative(relative)[0]
+    assert clock_relative(fixed) == []
+    assert clock_relative({"measures": ["s.count"]}) == []
+
+
+def test_prepared_work_that_cannot_see_the_brief_is_warned_about(tmp_path):
+    """A brief asking for a store breakdown reached only the writing Phase, too late to pull it."""
+    _, report = contract.load(prepared_flow(tmp_path))
+    assert report.ok, "a fixed pull is a legitimate design — a warning, not a refusal"
+    assert any("does not read brief.md" in line for line in report.warnings)
+
+    reads = PREPARED.replace("outputs:", "inputs:\n  - working: brief.md\noutputs:")
+    (tmp_path / "weekly" / "phases" / "01_pull" / "phase.yml").write_text(reads)
+    _, report = contract.load(tmp_path / "weekly")
+    assert not any("does not read brief.md" in line for line in report.warnings)

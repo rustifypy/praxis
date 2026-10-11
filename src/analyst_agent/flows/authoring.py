@@ -73,6 +73,28 @@ def scaffold(root: Path, name: str, title: str, description: str = "") -> Path:
     return directory
 
 
+def clock_relative(query: dict) -> list[str]:
+    """A prepared query's date ranges that Cube resolves against the machine clock.
+
+    Seen on the first Flow written with prepared work: "last 14 days" on data ending a week
+    before today held eight days, so "last week" was one day and the digest reported a 650% rise.
+    A prepared query runs on every Run, months apart, and the clock moves while the data may not —
+    so a window meant as "the latest N days in the data" belongs in the script, from the data's
+    own latest date. A range of two fixed dates does not move, and is not flagged.
+    """
+    found = []
+    for td in query.get("timeDimensions") or []:
+        window = td.get("dateRange")
+        if isinstance(window, str):
+            found.append(
+                f"{td.get('dimension')} uses dateRange {window!r}, which Cube resolves against "
+                "today's clock, not the data's latest date. For 'the latest N days in the data', "
+                "leave dateRange out (or use a wide fixed range) and cut the window in the script "
+                "from the data's own maximum date."
+            )
+    return found
+
+
 def build_flow_tools(context: FlowContext) -> list:
     def said(report: contract.Report) -> str:
         if report.ok and not report.warnings:
@@ -237,6 +259,7 @@ def build_flow_tools(context: FlowContext) -> list:
             return checked.as_message() + "\n\nFix the query and check it again."
         end("check_query", True)
         header = "\n".join(f"- {c.id} ({c.type or c.kind})" for c in columns_of(query, catalog))
+        checked.warnings += clock_relative(query)
         warned = f"\n\n{checked.as_message()}" if checked.warnings else ""
         return f"It compiles. `extract` writes these columns, in this order:\n{header}{warned}"
 
@@ -259,9 +282,14 @@ def build_flow_tools(context: FlowContext) -> list:
                     for phase in flow.phases:
                         for name in phase.spec.queries:
                             text = (phase.directory / layout.QUERIES / name).read_text()
+                            prepared = json.loads(text)
                             checked = await gate.check(
-                                json.loads(text), catalog, bound, settings.flow_page_rows
+                                prepared, catalog, bound, settings.flow_page_rows
                             )
+                            report.warnings += [
+                                f"{phase.dir_name}: query {name} — {warning}"
+                                for warning in clock_relative(prepared)
+                            ]
                             report.errors += [
                                 f"{phase.dir_name}: query {name} — {error}"
                                 for error in checked.errors

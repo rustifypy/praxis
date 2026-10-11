@@ -143,11 +143,16 @@ How to write them so they work on the first run:
      index=False)` — it is collected into the phase's `output/`;
    - it prints a short summary (row counts, totals, anything odd) and never the rows;
    - `today`, windows and thresholds come from the data or from `_config/` rules, never from the
-     machine clock or a hardcoded date.
+     machine clock or a hardcoded date. That holds for queries too: a relative `dateRange` like
+     `"last 14 days"` is resolved against the clock on every run, so leave it out and cut the
+     window in the script from the data's latest date. `check_query` warns when one is present.
    A later phase reads an earlier phase's outputs with the columns that phase's script wrote —
    write both, so you know them.
 3. **The phase's CONTEXT.md** says what the prepared work does and when not to use it as is: what
-   in a brief would need a different query or a changed script.
+   in a brief would need a different query or a changed script. A phase can only react to a
+   brief it reads, so give it `- working: brief.md` — and remember its outputs are fixed: if a
+   brief can ask for an extra cut of the data, declare an output for it (with `may_be_empty`)
+   so it reaches the next phase. A `kind: script` phase never adapts; put the judgement before it.
 4. `validate_flow` checks every prepared query against the data model. A script cannot be
    checked until a run executes it — say so when you hand the flow over.
 
