@@ -616,6 +616,9 @@ textarea {
 .nav-list {
   flex: 1;
   overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
   display: flex;
   flex-direction: column;
   gap: var(--space-05);
@@ -636,10 +639,12 @@ textarea {
   margin-top: var(--space-05);
 }
 
-/* Source rows in the data sidebar. Two lines: identity, then where it is up to. */
+/* A sidebar row (a dashboard, a flow, a run). Two lines: its name with an optional count, then
+   where it is up to. */
 .nav-row {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+  width: 100%;
   align-items: center;
   gap: var(--space-1) var(--space-3);
   padding: var(--space-3) var(--space-4);
@@ -687,7 +692,7 @@ textarea {
 }
 
 .nav-row-sub {
-  grid-column: 2 / -1;
+  grid-column: 1 / -1;
   color: var(--faint);
   font-size: var(--text-xs);
   overflow: hidden;

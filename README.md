@@ -1,9 +1,17 @@
 # analyst-agent
 
+[![Documentation](https://img.shields.io/badge/docs-rustify.tech-3355dd.svg)](https://rustify.tech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 Ask questions about your data in plain English, and run repeatable data work step by step.
+
+**[Documentation and website → rustify.tech](https://rustify.tech)**
+
+[![A one-minute tour of the portal: a question answered with a chart, the semantic layer, and a Flow Run](.github/assets/portal-tour.gif)](https://rustify.tech)
+
+<sub>A real session against a retail warehouse: a question becomes a checked Cube query and a
+chart, the model it was checked against, then a four-step Flow Run with every output counted.</sub>
 
 analyst-agent sits on top of your SQL warehouse. It does five things:
 
@@ -17,8 +25,9 @@ analyst-agent sits on top of your SQL warehouse. It does five things:
 
 Everything runs on your machine. One portal in your browser, one process.
 
-**Full documentation** is in [`docs/`](docs/index.md) — a user guide, Flow authoring, operating,
-architecture and the API. Run `make docs` to read it as a site.
+**Full documentation** is at **[rustify.tech](https://rustify.tech)**: getting started, a user
+guide, Flow authoring, operating, architecture and the API. Its source is [`docs/`](docs/index.md);
+`make docs` serves it locally.
 
 ---
 
@@ -335,6 +344,7 @@ make web-build    # build the web app only
 make serve        # start the portal only
 make test         # run the tests (no containers, no AI calls)
 make lint         # check code style
+make docs         # serve the documentation locally at http://127.0.0.1:8001
 ```
 
 ---

@@ -452,6 +452,29 @@
 }
 
 /* Three promises, side by side. */
+/* The tour recording, framed like a window so it reads as the product rather than a figure. */
+.md-typeset .ax-video {
+  margin: 0 0 2rem;
+}
+
+.md-typeset .ax-video video {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--ax-line);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.08);
+  background: var(--ax-raised);
+}
+
+.md-typeset .ax-video figcaption {
+  max-width: none;
+  margin: 0.6rem 0 0;
+  color: var(--ax-muted);
+  font-size: 0.7rem;
+  font-style: normal;
+}
+
 .ax-points {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

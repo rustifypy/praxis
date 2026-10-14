@@ -16,6 +16,14 @@ with a person checking each one.</p>
 [How it works](#how-it-works){ .md-button }
 </div>
 
+<figure class="ax-video">
+<video controls muted loop playsinline preload="metadata" poster="assets/demo/portal-tour.png">
+  <source src="assets/demo/portal-tour.mp4" type="video/mp4">
+</video>
+<figcaption>One minute in the portal, against a retail warehouse: a question becomes a checked Cube
+query and a chart, then the model it was checked against, then a four-step Flow Run.</figcaption>
+</figure>
+
 <div class="ax-points">
 <div class="ax-point"><strong>The AI never writes SQL</strong><span>It writes a Cube query that is checked against your model before it reaches the warehouse. A wrong name comes back with the nearest real one.</span></div>
 <div class="ax-point"><strong>Every step is on screen</strong><span>The model search, the query, any rejection and retry, the SQL Cube made, and the rows — not just the answer.</span></div>

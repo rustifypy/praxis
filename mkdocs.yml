@@ -1,5 +1,8 @@
 site_name: analyst-agent
 site_description: Ask questions about your data in plain English, and run repeatable data work step by step.
+# Canonical links and the sitemap are built from this. docs/CNAME is what tells GitHub Pages the
+# domain, and the two must name the same host.
+site_url: https://rustify.tech/
 repo_url: https://github.com/rustifypy/analyst-agent
 repo_name: rustifypy/analyst-agent
 edit_uri: edit/main/docs/
