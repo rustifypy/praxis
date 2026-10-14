@@ -29,6 +29,13 @@ const TOKENS = {
   "#surface-text": "var(--ink)",
   "#surface-text-soft": "var(--muted)",
   "#placeholder": "var(--faint)",
+  // The kit's text greys. `Root` paints every word with `#dark-02`, and the kit's own ramp is a
+  // cool blue-grey — on this app's warm surfaces it read as a second, unrelated palette. Mapped
+  // to the app's ink steps so a kit label and a stylesheet label are the same colour.
+  "#dark-02": "var(--ink)",
+  "#dark-03": "var(--muted)",
+  "#dark-04": "var(--faint)",
+  "#dark-05": "var(--line)",
   $radius: "var(--app-radius)",
 };
 

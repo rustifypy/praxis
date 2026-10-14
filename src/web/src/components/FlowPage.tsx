@@ -92,13 +92,15 @@ export function FlowPage({ flow }: { flow: string }) {
           )}
         </div>
         {detail.description && <p className="flow-desc">{detail.description}</p>}
-        <div className="flow-tabs">
-          <Button className={tab === "edit" ? "on" : ""} onClick={() => setTab("edit")}>
+        {/* The model editor's control, not a pair of buttons: Edit and Runs are two views of one
+            Flow, the same choice as Files and Served model are of one model. */}
+        <div className="segmented flow-tabs" role="group" aria-label="What to show">
+          <button className={tab === "edit" ? "on" : ""} onClick={() => setTab("edit")}>
             Edit
-          </Button>
-          <Button className={tab === "runs" ? "on" : ""} onClick={() => setTab("runs")}>
+          </button>
+          <button className={tab === "runs" ? "on" : ""} onClick={() => setTab("runs")}>
             Runs
-          </Button>
+          </button>
         </div>
       </header>
 
