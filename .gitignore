@@ -42,3 +42,5 @@ skills-lock.json
 /site/
 
 /flows/*
+# A personal to-do list, kept beside the code but not in it.
+things_to_do.md
