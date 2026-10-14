@@ -18,6 +18,7 @@ make fmt                     # ruff format + ruff check --fix
 make web-build               # build src/web/ into src/analyst_agent/web/static/ (needs npm)
 make web                     # web-build, then serve
 make serve                   # uv run analyst — opens the portal in a browser with a token
+make docs                    # serve docs/ (MkDocs Material via uvx); make docs-build is CI's --strict check
 
 ```
 

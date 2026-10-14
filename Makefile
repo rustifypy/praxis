@@ -22,4 +22,14 @@ web: web-build serve
 serve:
 	uv run analyst
 
-.PHONY: install test lint fmt api web-build web serve
+# Run through uvx rather than added to the project: the docs toolchain has no business in uv.lock.
+MKDOCS = uvx --with 'mkdocs-material>=9.5,<10' --with 'mkdocs<2' mkdocs
+
+# 8001, because the model store already holds mkdocs' default 8000.
+docs:
+	$(MKDOCS) serve -a 127.0.0.1:8001
+
+docs-build:
+	$(MKDOCS) build
+
+.PHONY: install test lint fmt api web-build web serve docs docs-build

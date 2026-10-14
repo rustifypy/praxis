@@ -54,3 +54,19 @@ jobs:
       - name: The committed bundle is the one this source builds
         run: git diff --exit-code --stat -- ../analyst_agent/web/static
         working-directory: src/web
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      # Strict: a broken link or a page missing from the nav fails the build.
+      - name: Build the documentation
+        run: make docs-build
+        env:
+          NO_MKDOCS_2_WARNING: "1"

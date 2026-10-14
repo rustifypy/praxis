@@ -38,6 +38,7 @@ skills-lock.json
 .claude/
 .agents/
 
-docs/
+# The built documentation site; its source is docs/.
+/site/
 
 /flows/*

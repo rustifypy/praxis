@@ -1,0 +1,150 @@
+site_name: analyst-agent
+site_description: Ask questions about your data in plain English, and run repeatable data work step by step.
+repo_url: https://github.com/rustifypy/analyst-agent
+repo_name: rustifypy/analyst-agent
+edit_uri: edit/main/docs/
+docs_dir: docs
+# `make docs-build` writes here. Not under docs/, which mkdocs would then try to read as source.
+site_dir: site
+strict: true
+copyright: analyst-agent
+
+theme:
+  name: material
+  logo: assets/favicon.svg
+  favicon: assets/favicon.svg
+  # The portal uses the system font stack; so do its docs, and nothing is fetched from Google.
+  font: false
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    # Tabs are the categories across the top; sections group the pages inside each one.
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.indexes
+    - navigation.path
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.tabs.link
+    - content.tooltips
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+
+# extra.css puts the docs in the portal's colours. ui.css draws the mock screens of the portal in
+# HTML, so they follow the light/dark switch and cannot go stale the way a screenshot does unnoticed.
+extra_css:
+  - stylesheets/extra.css
+  - stylesheets/ui.css
+
+extra_javascript:
+  - javascripts/api.js
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  # The glossary is CONTEXT.md, included rather than copied, so it has one source.
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+
+nav:
+  - Home: index.md
+  - Get started:
+      - getting-started/index.md
+      - 1. Install and start the portal: getting-started/install.md
+      - 2. Connect your warehouse: getting-started/connect.md
+      - 3. Start the services: getting-started/services.md
+      - 4. Build the data model: getting-started/build-the-model.md
+      - 5. Ask your first question: getting-started/first-question.md
+  - User guide:
+      - user-guide/index.md
+      - Everyday use:
+          - Ask questions: user-guide/chat.md
+          - Dashboards: user-guide/boards.md
+          - Run a Flow: user-guide/running-flows.md
+      - Looking after it:
+          - Change the model: user-guide/editing-the-model.md
+          - Give tools to other agents: user-guide/agents.md
+  - Flow authoring:
+      - flows/index.md
+      - Concepts:
+          - Folder layout: flows/layout.md
+          - Getting data into a Phase: flows/data.md
+      - Writing a Flow:
+          - The flow chat: flows/authoring-chat.md
+          - Prepared work: flows/prepared-work.md
+          - "Example: weekly sales digest": flows/example.md
+      - Reference:
+          - phase.yml reference: flows/reference.md
+          - What fails a Phase: flows/failures.md
+  - Operating:
+      - operations/index.md
+      - Deploy:
+          - The two deployments: operations/deployment.md
+          - Configuration: operations/configuration.md
+          - Security: operations/security.md
+      - Maintain:
+          - Upgrading: operations/upgrading.md
+          - Troubleshooting: operations/troubleshooting.md
+  - Architecture:
+      - architecture/index.md
+      - Foundations:
+          - Layering: architecture/layering.md
+          - Storage: architecture/storage.md
+          - Events and the transcript: architecture/events.md
+      - Subsystems:
+          - The query gate: architecture/query-gate.md
+          - The data model: architecture/data-model.md
+          - The Flow engine: architecture/flow-engine.md
+      - Decisions:
+          - architecture/decisions.md
+          - "0006: A Flow keeps its state in its folder": adr/0006-a-flow-keeps-its-state-in-its-folder.md
+          - "0007: The analytics agent cannot run a Flow": adr/0007-the-analytics-agent-cannot-run-a-flow.md
+  - Reference:
+      - API:
+          - api/index.md
+          - HTTP: api/http.md
+          - MCP: api/mcp.md
+      - Glossary: glossary.md

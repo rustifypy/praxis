@@ -1,0 +1,562 @@
+/* The documentation in the portal's own colours and type (src/web/src/styles.css), so the
+   docs and the app it describes read as one product. */
+
+:root {
+  --ax-bg: #fbfbfa;
+  --ax-panel: #f4f3f0;
+  --ax-raised: #ffffff;
+  --ax-line: #e3e1dc;
+  --ax-ink: #1c1b19;
+  --ax-muted: #6f6c66;
+  --ax-faint: #97938c;
+  --ax-accent: #3a5bd9;
+  --ax-accent-soft: rgba(58, 91, 217, 0.1);
+  --ax-ok: #2f7d4f;
+  --ax-bad: #b3402f;
+  --ax-warn: #9a6b12;
+  --ax-code-bg: #edebe6;
+}
+
+[data-md-color-scheme="slate"] {
+  --ax-bg: #151519;
+  --ax-panel: #1c1c21;
+  --ax-raised: #212127;
+  --ax-line: #2d2d34;
+  --ax-ink: #e8e6e3;
+  --ax-muted: #9d9a95;
+  --ax-faint: #6c6a66;
+  --ax-accent: #8ea6ff;
+  --ax-accent-soft: rgba(142, 166, 255, 0.13);
+  --ax-ok: #6cc08b;
+  --ax-bad: #e08b7c;
+  --ax-warn: #d9ad5e;
+  --ax-code-bg: #26262d;
+}
+
+/* Material's own variables, pointed at the tokens above. */
+:root,
+[data-md-color-scheme="default"],
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: var(--ax-accent);
+  --md-primary-fg-color--light: var(--ax-accent);
+  --md-primary-fg-color--dark: var(--ax-accent);
+  --md-accent-fg-color: var(--ax-accent);
+  --md-accent-fg-color--transparent: var(--ax-accent-soft);
+  --md-default-bg-color: var(--ax-bg);
+  --md-default-fg-color: var(--ax-ink);
+  --md-default-fg-color--light: var(--ax-muted);
+  --md-default-fg-color--lighter: var(--ax-faint);
+  --md-default-fg-color--lightest: var(--ax-line);
+  --md-typeset-color: var(--ax-ink);
+  --md-typeset-a-color: var(--ax-accent);
+  --md-code-bg-color: var(--ax-code-bg);
+  --md-code-fg-color: var(--ax-ink);
+  --md-typeset-table-color: var(--ax-line);
+  --md-footer-bg-color: var(--ax-panel);
+  --md-footer-bg-color--dark: var(--ax-panel);
+  --md-footer-fg-color: var(--ax-ink);
+  --md-footer-fg-color--light: var(--ax-muted);
+  --md-footer-fg-color--lighter: var(--ax-faint);
+
+  /* The system stack, as the portal uses: no web font to fetch, and the docs look like the app. */
+  --md-text-font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --md-code-font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Diagrams in the same palette as everything around them. */
+  --md-mermaid-font-family: var(--md-text-font-family);
+  --md-mermaid-node-bg-color: var(--ax-accent-soft);
+  --md-mermaid-node-fg-color: var(--ax-ink);
+  --md-mermaid-edge-color: var(--ax-muted);
+  --md-mermaid-label-bg-color: var(--ax-bg);
+  --md-mermaid-label-fg-color: var(--ax-muted);
+  --md-mermaid-sequence-actor-bg-color: var(--ax-raised);
+  --md-mermaid-sequence-actor-fg-color: var(--ax-ink);
+  --md-mermaid-sequence-actor-border-color: var(--ax-line);
+  --md-mermaid-sequence-actor-line-color: var(--ax-line);
+  --md-mermaid-sequence-actorman-bg-color: var(--ax-raised);
+  --md-mermaid-sequence-actorman-line-color: var(--ax-muted);
+  --md-mermaid-sequence-box-bg-color: var(--ax-panel);
+  --md-mermaid-sequence-box-fg-color: var(--ax-ink);
+  --md-mermaid-sequence-label-bg-color: var(--ax-raised);
+  --md-mermaid-sequence-label-fg-color: var(--ax-ink);
+  --md-mermaid-sequence-loop-bg-color: var(--ax-panel);
+  --md-mermaid-sequence-loop-fg-color: var(--ax-ink);
+  --md-mermaid-sequence-loop-border-color: var(--ax-line);
+  --md-mermaid-sequence-message-fg-color: var(--ax-ink);
+  --md-mermaid-sequence-message-line-color: var(--ax-muted);
+  --md-mermaid-sequence-note-bg-color: var(--ax-panel);
+  --md-mermaid-sequence-note-fg-color: var(--ax-ink);
+  --md-mermaid-sequence-note-border-color: var(--ax-line);
+  --md-mermaid-sequence-number-bg-color: var(--ax-accent);
+  --md-mermaid-sequence-number-fg-color: var(--ax-raised);
+}
+
+/* ---------------------------------------------------------------- header and tabs
+   A light bar with a hairline, like the portal's own chrome, rather than a slab of colour. */
+.md-header,
+.md-tabs {
+  /* Material draws the header's text and icons in this colour; on a light bar it is the ink. */
+  --md-primary-bg-color: var(--ax-ink);
+  --md-primary-bg-color--light: var(--ax-muted);
+  background-color: var(--ax-bg);
+  color: var(--ax-ink);
+}
+
+.md-header {
+  box-shadow: none;
+}
+
+.md-header--shadow {
+  box-shadow: none;
+}
+
+.md-tabs {
+  border-bottom: 1px solid var(--ax-line);
+}
+
+.md-header__title {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.md-header__button.md-logo img {
+  height: 1.4rem;
+  width: 1.4rem;
+}
+
+.md-tabs__link {
+  margin-top: 0.55rem;
+  color: var(--ax-muted);
+  font-size: 0.7rem;
+  font-weight: 500;
+  opacity: 1;
+}
+
+.md-tabs__item--active .md-tabs__link {
+  color: var(--ax-ink);
+}
+
+.md-tabs__item--active {
+  box-shadow: inset 0 -2px 0 var(--ax-accent);
+}
+
+.md-tabs__link:hover,
+.md-tabs__link:focus {
+  color: var(--ax-accent);
+}
+
+.md-search__form {
+  border: 1px solid var(--ax-line);
+  border-radius: 8px;
+  background-color: var(--ax-panel);
+  box-shadow: none;
+}
+
+.md-search__form:hover {
+  background-color: var(--ax-raised);
+}
+
+.md-search__input {
+  color: var(--ax-ink);
+}
+
+.md-search__input::placeholder,
+.md-search__icon {
+  color: var(--ax-muted);
+}
+
+[data-md-toggle="search"]:checked ~ .md-header .md-search__form {
+  border-radius: 8px 8px 0 0;
+  background-color: var(--ax-raised);
+}
+
+/* ---------------------------------------------------------------- sidebars */
+.md-nav {
+  font-size: 0.68rem;
+}
+
+.md-nav__title {
+  color: var(--ax-ink);
+}
+
+/* The tab's own title at the top of the sidebar, then the groups inside it in small caps. */
+.md-nav--primary > .md-nav__list > .md-nav__item--section > .md-nav__link {
+  color: var(--ax-ink);
+  font-size: 0.74rem;
+  font-weight: 650;
+}
+
+.md-nav--primary .md-nav__item--section .md-nav__item--section > .md-nav__link {
+  margin-top: 1.1em;
+  color: var(--ax-faint);
+  font-size: 0.6rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.md-nav__link--active {
+  font-weight: 600;
+}
+
+.md-sidebar--primary .md-nav__link--active {
+  position: relative;
+}
+
+.md-sidebar--primary .md-nav__link--active::before {
+  content: "";
+  position: absolute;
+  top: 0.15em;
+  bottom: 0.15em;
+  left: -0.6rem;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--ax-accent);
+}
+
+/* ---------------------------------------------------------------- type */
+.md-typeset {
+  font-size: 0.78rem;
+  line-height: 1.7;
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4 {
+  color: var(--ax-ink);
+  letter-spacing: -0.015em;
+}
+
+.md-typeset h1 {
+  margin-bottom: 0.8em;
+  font-size: 1.85em;
+  font-weight: 700;
+}
+
+.md-typeset h2 {
+  margin-top: 2em;
+  padding-top: 1.2em;
+  border-top: 1px solid var(--ax-line);
+  font-size: 1.35em;
+  font-weight: 650;
+}
+
+/* The first section under a title needs no rule above it. */
+.md-typeset h1 + h2,
+.md-typeset h1 + p + h2 {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.md-typeset h3 {
+  margin-top: 1.8em;
+  font-size: 1.08em;
+  font-weight: 650;
+}
+
+/* A heading that is a name — `title`, `kind`, `/api/onboarding` — reads as the name, set in the
+   code face, not as a grey chip stuck in the middle of a heading. */
+.md-typeset h2 code,
+.md-typeset h3 code,
+.md-typeset h4 code {
+  padding: 0;
+  background: none;
+  color: inherit;
+  font-size: 0.95em;
+  font-weight: 600;
+}
+
+/* The "Step N of 5" line that opens each Get started page. */
+.md-typeset p.ax-step {
+  padding: 0.6em 0.9em;
+  border-left: 3px solid var(--ax-accent);
+  border-radius: 0 6px 6px 0;
+  background: var(--ax-accent-soft);
+  color: var(--ax-ink);
+  font-size: 0.92em;
+}
+
+.md-typeset code {
+  border-radius: 4px;
+  font-size: 0.84em;
+}
+
+.md-typeset pre > code {
+  border-radius: 8px;
+}
+
+.md-typeset blockquote {
+  border-left: 3px solid var(--ax-accent);
+  color: var(--ax-ink);
+  font-style: italic;
+}
+
+.md-typeset hr {
+  border-bottom-color: var(--ax-line);
+}
+
+/* ---------------------------------------------------------------- tables */
+.md-typeset table:not([class]) {
+  border: 1px solid var(--ax-line);
+  border-radius: 8px;
+  font-size: 0.72rem;
+  box-shadow: none;
+}
+
+.md-typeset table:not([class]) th {
+  background: var(--ax-panel);
+  color: var(--ax-muted);
+  font-size: 0.66rem;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.md-typeset table:not([class]) th,
+.md-typeset table:not([class]) td {
+  padding: 0.6em 0.95em;
+}
+
+.md-typeset table:not([class]) td {
+  border-top: 1px solid var(--ax-line);
+  vertical-align: top;
+}
+
+.md-typeset table:not([class]) tbody tr:hover {
+  background: var(--ax-accent-soft);
+  box-shadow: none;
+}
+
+/* A route table: the method as a coloured badge, and a path that never breaks mid-word. */
+.md-typeset .api-method {
+  display: inline-block;
+  min-width: 3.9em;
+  padding: 0.05em 0.45em;
+  border-radius: 4px;
+  font-family: var(--md-code-font-family);
+  font-size: 0.85em;
+  font-weight: 700;
+  text-align: center;
+}
+
+.md-typeset .api-method.get {
+  background: color-mix(in srgb, var(--ax-ok) 14%, transparent);
+  color: var(--ax-ok);
+}
+
+.md-typeset .api-method.post {
+  background: var(--ax-accent-soft);
+  color: var(--ax-accent);
+}
+
+.md-typeset .api-method.put,
+.md-typeset .api-method.patch {
+  background: color-mix(in srgb, var(--ax-warn) 16%, transparent);
+  color: var(--ax-warn);
+}
+
+.md-typeset .api-method.delete {
+  background: color-mix(in srgb, var(--ax-bad) 14%, transparent);
+  color: var(--ax-bad);
+}
+
+.md-typeset td.api-path code {
+  white-space: nowrap;
+  background: none;
+  padding: 0;
+}
+
+/* ---------------------------------------------------------------- admonitions */
+.md-typeset .admonition,
+.md-typeset details {
+  border-width: 1px;
+  border-radius: 8px;
+  box-shadow: none;
+  font-size: 0.74rem;
+}
+
+/* ---------------------------------------------------------------- footer */
+.md-footer {
+  border-top: 1px solid var(--ax-line);
+}
+
+.md-footer__link {
+  opacity: 1;
+}
+
+.md-footer__title {
+  color: var(--ax-ink);
+}
+
+.md-footer-meta {
+  background: var(--ax-panel);
+  border-top: 1px solid var(--ax-line);
+}
+
+/* ---------------------------------------------------------------- home page */
+.ax-hero {
+  margin: 1.5rem 0 2.5rem;
+}
+
+.ax-hero .ax-eyebrow {
+  display: inline-block;
+  margin-bottom: 1rem;
+  padding: 0.2em 0.75em;
+  border: 1px solid var(--ax-line);
+  border-radius: 999px;
+  color: var(--ax-muted);
+  font-size: 0.68rem;
+  font-weight: 500;
+}
+
+.md-typeset .ax-hero h1 {
+  max-width: 18em;
+  margin: 0 0 0.5em;
+  font-size: 2.6em;
+  font-weight: 750;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+}
+
+.ax-hero .ax-lede {
+  max-width: 36em;
+  margin: 0 0 1.6em;
+  color: var(--ax-muted);
+  font-size: 1.08em;
+  line-height: 1.65;
+}
+
+.md-typeset .ax-hero .md-button {
+  margin: 0 0.5rem 0.5rem 0;
+  padding: 0.55em 1.3em;
+  border-radius: 8px;
+  font-size: 0.78rem;
+}
+
+.md-typeset .ax-hero .md-button--primary {
+  border-color: var(--ax-accent);
+  background: var(--ax-accent);
+  color: var(--ax-raised);
+}
+
+.md-typeset .ax-hero .md-button:not(.md-button--primary) {
+  border-color: var(--ax-line);
+  color: var(--ax-ink);
+}
+
+.md-typeset .ax-hero .md-button:not(.md-button--primary):hover {
+  border-color: var(--ax-accent);
+  background: none;
+  color: var(--ax-accent);
+}
+
+/* Three promises, side by side. */
+.ax-points {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin: 0 0 2.5rem;
+}
+
+.ax-point {
+  padding-top: 0.8rem;
+  border-top: 2px solid var(--ax-accent);
+}
+
+.ax-point strong {
+  display: block;
+  margin-bottom: 0.25em;
+  color: var(--ax-ink);
+  font-size: 0.92em;
+}
+
+.ax-point span {
+  color: var(--ax-muted);
+  font-size: 0.88em;
+  line-height: 1.6;
+}
+
+/* Section cards: the whole card is the link. */
+.md-typeset .ax-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.8rem;
+  margin: 1rem 0 2rem;
+}
+
+.md-typeset a.ax-card {
+  display: block;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--ax-line);
+  border-radius: 10px;
+  background: var(--ax-raised);
+  color: var(--ax-ink);
+  transition:
+    border-color 120ms,
+    box-shadow 120ms,
+    transform 120ms;
+}
+
+.md-typeset a.ax-card:hover {
+  border-color: var(--ax-accent);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 8%);
+  transform: translateY(-1px);
+}
+
+.ax-card .ax-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  margin-bottom: 0.7rem;
+  border-radius: 8px;
+  background: var(--ax-accent-soft);
+  color: var(--ax-accent);
+}
+
+.ax-card .ax-icon svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  fill: currentColor;
+}
+
+.ax-card strong {
+  display: block;
+  margin-bottom: 0.3em;
+  font-size: 0.92em;
+}
+
+.ax-card span {
+  display: block;
+  color: var(--ax-muted);
+  font-size: 0.84em;
+  line-height: 1.55;
+}
+
+.ax-card .ax-for {
+  margin-top: 0.7em;
+  color: var(--ax-faint);
+  font-size: 0.74em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+@media screen and (max-width: 76.1875em) {
+  .md-typeset .ax-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media screen and (max-width: 44.9375em) {
+  .ax-points,
+  .md-typeset .ax-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .md-typeset .ax-hero h1 {
+    font-size: 2em;
+  }
+}

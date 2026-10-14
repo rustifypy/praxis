@@ -17,6 +17,9 @@ analyst-agent sits on top of your SQL warehouse. It does five things:
 
 Everything runs on your machine. One portal in your browser, one process.
 
+**Full documentation** is in [`docs/`](docs/index.md) — a user guide, Flow authoring, operating,
+architecture and the API. Run `make docs` to read it as a site.
+
 ---
 
 ## How it fits together

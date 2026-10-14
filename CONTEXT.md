@@ -6,6 +6,8 @@ run. Everything it queries, or stores a model in, sits behind an address someone
 This is the glossary. Implementation guidance lives in `CLAUDE.md`; nothing here should describe
 how anything works.
 
+<!-- The docs site's glossary page includes everything from here on. --8<-- [start:terms] -->
+
 ## Language
 
 ### What a deployment is
@@ -174,3 +176,4 @@ re-run, or a person edited what it read. The output is still there and still rea
 gone is the claim that it follows from what is above it.
 _Avoid_: dirty, invalid, outdated — the first two say it is wrong, and it is not
 
+<!-- --8<-- [end:terms] -->
