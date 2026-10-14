@@ -89,31 +89,35 @@
      is 2.3:1, under even the 3:1 floor for UI text. Every filled control read as disabled in
      dark mode because of it. */
   --on-fill: #fff;
+  color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #151519;
-    --panel: #1c1c21;
-    --raised: #212127;
-    --line: #2d2d34;
-    --ink: #e8e6e3;
-    --muted: #9d9a95;
-    --faint: #6c6a66;
-    --accent: #8ea6ff;
-    --accent-soft: rgba(142, 166, 255, 0.13);
-    --ok: #6cc08b;
-    --bad: #e08b7c;
-    --warn: #d9ad5e;
-    --code-bg: #26262d;
-    /* Roughly 3× the alpha: the ground is already dark, so the same shadow has far less to
-       darken. Tuned so a popover reads as floating without a visible black halo. */
-    --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
-    --shadow-md: 0 6px 20px rgb(0 0 0 / 55%);
-    --shadow-lg: 0 24px 60px rgb(0 0 0 / 70%);
-    /* The ground, not the ink: on `#8ea6ff` this is 7.9:1. */
-    --on-fill: #151519;
-  }
+/* Dark is an attribute, not a media query, so the rail's switch can override the system. index.html
+   resolves "auto" against `prefers-color-scheme` before first paint and theme.ts keeps it current;
+   the tokens themselves live here once. `data-schema` is the UI kit's name for it, and the kit
+   follows the media query unless it is set, so one attribute switches both. */
+:root[data-schema="dark"] {
+  color-scheme: dark;
+  --bg: #151519;
+  --panel: #1c1c21;
+  --raised: #212127;
+  --line: #2d2d34;
+  --ink: #e8e6e3;
+  --muted: #9d9a95;
+  --faint: #6c6a66;
+  --accent: #8ea6ff;
+  --accent-soft: rgba(142, 166, 255, 0.13);
+  --ok: #6cc08b;
+  --bad: #e08b7c;
+  --warn: #d9ad5e;
+  --code-bg: #26262d;
+  /* Roughly 3× the alpha: the ground is already dark, so the same shadow has far less to
+     darken. Tuned so a popover reads as floating without a visible black halo. */
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
+  --shadow-md: 0 6px 20px rgb(0 0 0 / 55%);
+  --shadow-lg: 0 24px 60px rgb(0 0 0 / 70%);
+  /* The ground, not the ink: on `#8ea6ff` this is 7.9:1. */
+  --on-fill: #151519;
 }
 
 /* Motion here is feedback, not decoration — so it all goes when asked. */
@@ -546,6 +550,12 @@ textarea {
   font-size: var(--text-2xs);
   letter-spacing: 0.03em;
   text-transform: uppercase;
+}
+
+/* The theme switch sits apart from the modes, at the foot of the rail: it changes how every mode
+   looks rather than which one you are in. */
+.rail-theme {
+  margin-top: auto;
 }
 
 /* A job started from the sources panel has to stay visible from a conversation. */
@@ -1941,20 +1951,18 @@ textarea {
   --grid: #eceae5;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    /* The same eight hues stepped for the dark surface, not an automatic flip. These
-       already cleared 3:1 against --raised unaided, so nothing here was re-stepped. */
-    --series-1: #3987e5;
-    --series-2: #d95926;
-    --series-3: #199e70;
-    --series-4: #c98500;
-    --series-5: #d55181;
-    --series-6: #008300;
-    --series-7: #9085e9;
-    --series-8: #e66767;
-    --grid: #26262c;
-  }
+:root[data-schema="dark"] {
+  /* The same eight hues stepped for the dark surface, not an automatic flip. These
+     already cleared 3:1 against --raised unaided, so nothing here was re-stepped. */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  --grid: #26262c;
 }
 
 .res-chart {

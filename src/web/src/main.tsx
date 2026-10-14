@@ -14,7 +14,7 @@ import "./styles.css";
  * token not named here still resolves from the `palette` seed below.
  *
  * They are `var()` rather than literals so `styles.css` stays the one place the theme lives: its
- * dark half is a `prefers-color-scheme` block, and these inherit straight through it.
+ * dark half is a `[data-schema="dark"]` block, and these inherit straight through it.
  *
  * `$radius` is not a preference but a *collision*. The kit ships `$radius: 6px`, which lands on
  * `body` and would silently have overridden the 10px `:root` corner this stylesheet uses nine

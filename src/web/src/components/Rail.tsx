@@ -1,3 +1,7 @@
+import type { ReactNode } from "react";
+
+import { type Theme, useTheme } from "../theme";
+
 /**
  * The mode switch, and the only thing on screen in every mode.
  *
@@ -62,6 +66,39 @@ const AGENTS = (
   </svg>
 );
 
+/** The theme switch's three faces: what is in force now, not what a press would change to. */
+const THEMES: Record<Theme, { icon: ReactNode; label: string; next: Theme }> = {
+  auto: {
+    label: "Auto",
+    next: "light",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="8.2" />
+        <path d="M12 3.8v16.4a8.2 8.2 0 0 0 0-16.4Z" fill="currentColor" />
+      </svg>
+    ),
+  },
+  light: {
+    label: "Light",
+    next: "dark",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7" />
+      </svg>
+    ),
+  },
+  dark: {
+    label: "Dark",
+    next: "auto",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20.2 14.4A8.4 8.4 0 0 1 9.6 3.8a8.4 8.4 0 1 0 10.6 10.6Z" />
+      </svg>
+    ),
+  },
+};
+
 export function Rail({
   view,
   jobRunning,
@@ -72,6 +109,8 @@ export function Rail({
   jobRunning: boolean;
   onSelect: (view: Mode) => void;
 }) {
+  const [theme, setTheme] = useTheme();
+  const face = THEMES[theme];
   return (
     <nav className="rail">
       <span className="rail-brand" title="analyst">
@@ -132,6 +171,16 @@ export function Rail({
       >
         {AGENTS}
         <span className="rail-label">Agents</span>
+      </button>
+
+      <button
+        className="rail-tab rail-theme"
+        onClick={() => setTheme(face.next)}
+        title={`Theme: ${face.label.toLowerCase()}${theme === "auto" ? ", following the system" : ""}. Switch to ${THEMES[face.next].label.toLowerCase()}.`}
+        aria-label={`Theme: ${face.label}`}
+      >
+        {face.icon}
+        <span className="rail-label">{face.label}</span>
       </button>
     </nav>
   );
