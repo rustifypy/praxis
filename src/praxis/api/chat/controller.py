@@ -8,11 +8,11 @@ and an approval queue if scripts are being approved.
 No `HTTPException` here: an unknown chat comes back as `None` and the route decides that is a 404.
 """
 
-import asyncio
 import contextlib
 import csv
 import io
 
+from ...agent.session import Approvals
 from ...core import transcript
 from ...core.config import settings
 from ...modelstore.shape import Column, export_value
@@ -43,11 +43,10 @@ def approve(app, chat_id: str, decision: str) -> Decided | None:
     asking again.
     """
     queue = app.state.approvals.get(chat_id)
-    if queue is None:
+    if queue is None or not queue.answer(decision):
         return None
     if decision == "always":
         app.state.always.add(chat_id)
-    queue.put_nowait(decision)
     return Decided(decision=decision)
 
 
@@ -81,7 +80,7 @@ async def prepare(app, chat_id: str, question: str, files: list[str]):
 
     approvals = None
     if settings.approve_scripts and chat_id not in app.state.always:
-        approvals = asyncio.Queue()
+        approvals = Approvals()
         app.state.approvals[chat_id] = approvals
 
     return cube, attached, approvals

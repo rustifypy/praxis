@@ -15,6 +15,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
+from ...agent.session import Approvals
 from ...core import transcript
 from ...flows import authoring, contract, layout, runner, state
 from ...flows import chat as flow_chat
@@ -139,7 +140,7 @@ async def advance_run(flow: str, run_id: str, request: Request):
     if current.status in ("done", "failed"):
         raise HTTPException(409, f"this run is {current.status}")
     key = f"{flow}/{run_id}"
-    approvals: asyncio.Queue = asyncio.Queue()
+    approvals = Approvals()
     request.app.state.approvals[key] = approvals
 
     def open_run(cancel: asyncio.Event):
@@ -160,16 +161,15 @@ async def stop_run(flow: str, run_id: str, request: Request) -> dict:
 
 
 @router.post("/{flow}/runs/{run_id}/approve", response_model=dto.Decided)
-async def approve_script(flow: str, run_id: str, body: dict, request: Request) -> dict:
+async def approve_script(flow: str, run_id: str, body: dto.Choice, request: Request) -> dict:
     """Answer the approval a Phase's script is waiting on.
 
     The Run blocks until this arrives — the queue is in memory inside the Phase, so an answer that
     never comes costs that Phase and not the Run's record. See `docs/adr/0006`.
     """
     queue = request.app.state.approvals.get(f"{flow}/{run_id}")
-    if queue is None:
+    if queue is None or not queue.answer(body.choice):
         raise HTTPException(409, "nothing is waiting for approval on this run")
-    await queue.put(str(body.get("choice", "no")))
     return {"decided": True}
 
 
