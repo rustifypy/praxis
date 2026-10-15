@@ -7,15 +7,7 @@ interface Entity {
 
 const pretty = (name: string) => name.replace(/_/g, " ");
 
-/**
- * Suggestions are built from what Cube actually exposes rather than hardcoded, so they
- * are never questions this model cannot answer. Views first — they are the curated
- * surface a question should reach.
- *
- * A described entity gets a question about its data; an undescribed one can only be asked
- * what it holds. Four buttons all asking "what can I analyse in X?" were four ways to
- * spend a turn learning what the Serving panel already says.
- */
+/** Suggestions come from what Cube exposes, so they are always answerable. Views first. */
 export function Welcome({ entities, onPick }: { entities: Entity[]; onPick: (q: string) => void }) {
   const suggestions = [...entities]
     .sort(
@@ -54,9 +46,6 @@ export function Welcome({ entities, onPick }: { entities: Entity[]; onPick: (q: 
               >
                 <span className="suggestion-name">
                   {pretty(entity.name)}
-                  {/* Kept visible even when there is a description to show instead: a
-                      view is the curated surface and a cube is the table under it, and
-                      which one you are about to ask about is worth knowing. */}
                   <span className={`suggestion-kind ${entity.view ? "view" : ""}`}>
                     {entity.view ? "view" : "cube"}
                   </span>

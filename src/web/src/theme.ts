@@ -1,15 +1,8 @@
 import { useEffect, useState } from "react";
 
 /**
- * Light, dark, or whatever the system says — the one preference the portal keeps in the browser.
- *
- * The stylesheet keys its dark tokens on `<html data-schema="dark">` — the UI kit's attribute,
- * which its own palette also obeys — so this module's whole job is to keep that attribute right.
- * `index.html` sets it once before first paint, from the same key and the same rule, because a
- * module script runs after the page has already drawn in the wrong colours.
- *
- * Stored in `localStorage` rather than on the server: it is a property of this browser, not of
- * the deployment, and a portal opened on a second machine should follow that machine.
+ * Keeps `<html data-schema>` (the UI kit's dark-mode attribute) in line with the chosen theme.
+ * `index.html` repeats this rule before first paint, so the two must agree.
  */
 export type Theme = "auto" | "light" | "dark";
 
@@ -21,7 +14,7 @@ function stored(): Theme {
     const value = localStorage.getItem(KEY);
     return value === "light" || value === "dark" ? value : "auto";
   } catch {
-    // Storage can be refused outright (a locked-down profile); the system's answer still works.
+    // Storage can be refused (a locked-down profile).
     return "auto";
   }
 }
@@ -37,8 +30,7 @@ export function useTheme(): [Theme, (next: Theme) => void] {
   useEffect(() => {
     apply(theme);
     if (theme !== "auto") return;
-    // Only "auto" follows the system, and it has to follow it live: a machine that switches to
-    // dark at sunset should take an open portal with it.
+    // "auto" follows the system live.
     const follow = () => apply("auto");
     SYSTEM.addEventListener("change", follow);
     return () => SYSTEM.removeEventListener("change", follow);
@@ -49,7 +41,7 @@ export function useTheme(): [Theme, (next: Theme) => void] {
       if (next === "auto") localStorage.removeItem(KEY);
       else localStorage.setItem(KEY, next);
     } catch {
-      // Not remembered across reloads, but it still applies to this page.
+      // Not remembered, but still applies to this page.
     }
     setTheme(next);
   };

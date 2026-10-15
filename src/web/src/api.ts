@@ -12,13 +12,8 @@ import type {
   RunSummary,
 } from "./types";
 
-/**
- * Trade the URL token for the cookie, then clean the address bar.
- *
- * Serving index.html already sets the cookie, but `npm run dev` serves the page from
- * Vite and only proxies /api — so one authenticated API call is what establishes the
- * session there. Harmless in production, required in dev.
- */
+/** Trade the URL token for the cookie. Required under `npm run dev`, where Vite serves the
+ *  page and only /api sets the cookie. */
 export async function claimToken(): Promise<void> {
   const url = new URL(window.location.href);
   if (!url.searchParams.get("token")) return;
@@ -27,16 +22,9 @@ export async function claimToken(): Promise<void> {
   window.history.replaceState({}, "", url.pathname);
 }
 
-/**
- * Every JSON call in the app.
- *
- * FastAPI puts its message in `detail`, and those messages are written to be read by a
- * person — "port 4001 is already assigned", not "400". Unwrapping it here means both the
- * chat and the sources panel show the same quality of error.
- */
+/** Every JSON call. Errors unwrap FastAPI's `detail`, which is written for a person. */
 export async function json<T>(path: string, init?: RequestInit): Promise<T> {
-  // An upload sends FormData, and the browser has to set that content type itself — it carries
-  // the multipart boundary, which nothing here can know.
+  // The browser must set a FormData content type itself: it carries the multipart boundary.
   const form = init?.body instanceof FormData;
   const response = await fetch(path, {
     ...init,
@@ -62,8 +50,7 @@ interface ModelEntity {
   description?: string;
 }
 
-/** One line per entity: the chat's example questions and the header's link. The data page
- *  reads the same model in full through `sources.model()`. */
+/** One line per entity, for the chat's example questions and the header's link. */
 export const modelSummary = () =>
   json<{ cube_url: string; entities: ModelEntity[] }>("/api/ide/model/summary");
 export const listChats = () => json<Chat[]>("/api/chats");
@@ -77,8 +64,7 @@ export const approveScript = (id: string, decision: "yes" | "always" | "no") =>
 export const renameChat = (id: string, title: string) =>
   json(`/api/chats/${id}`, { method: "PATCH", body: JSON.stringify({ title }) });
 
-/** A page of a stored result set. Only reached by "show all" — the transcript renders the
- *  head of the rows straight off the event, so opening a chat costs no extra request. */
+/** A page of a stored result set, for "show all"; the head comes off the event. */
 export const resultPage = (id: string, offset: number, limit: number) =>
   json<{
     id: string;
@@ -88,13 +74,11 @@ export const resultPage = (id: string, offset: number, limit: number) =>
     offset: number;
   }>(`/api/results/${id}?offset=${offset}&limit=${limit}`);
 
-/** The CSV is a plain link, not a fetch: the token cookie authenticates it and the browser
- *  handles the download. `csv` is a path segment because `{id}.csv` would be matched by the
- *  bare `{result_id}` route and never reach this one. */
+/** A plain link the cookie authenticates. `/csv`, not `.csv`: the bare `{result_id}` route
+ *  would match `{id}.csv`. */
 export const resultCsvUrl = (id: string) => `/api/results/${id}/csv`;
 
-/** What one upload landed as. `rows` is 0 when the sandbox could not read it, and `note` says
- *  why — an upload with no profile is still an upload. */
+/** `rows` is 0 when the sandbox could not read the file, and `note` says why. */
 export interface Upload {
   path: string;
   bytes: number;
@@ -111,17 +95,12 @@ export async function uploadFile(chatId: string, file: File): Promise<Upload> {
 
 const encodePath = (path: string) => path.split("/").map(encodeURIComponent).join("/");
 
-/** A workspace file as a plain link, like the result CSV — the cookie authenticates it. */
+/** A plain link; the cookie authenticates it. */
 export const chatFileUrl = (chatId: string, path: string) =>
   `/api/chats/${chatId}/files/${encodePath(path)}`;
 
-/**
- * The head of a workspace file, parsed enough to render — `table` for a CSV, `text` for
- * anything readable, `none` for bytes with no useful head.
- *
- * Columns are names only. These bytes never went through Cube, so there is no `ResultColumn`
- * to say a column is money, and a guess dressed as metadata is worse than plain strings.
- */
+/** The head of a workspace file. Columns are names only: the bytes never went through Cube,
+ *  so there is no `ResultColumn` metadata to give. */
 export interface FilePreview {
   kind: "table" | "text" | "none";
   columns: string[];
@@ -136,19 +115,12 @@ export interface FilePreview {
 export const filePreview = (chatId: string, path: string) =>
   json<FilePreview>(`/api/chats/${chatId}/preview/${encodePath(path)}`);
 
-/** Take a file back off the workspace. Only the composer calls it, and only before the question
- *  it was attached to has been sent — the prompt is built from the directory, so dropping the
- *  chip without dropping the file would leave the agent still holding it. */
+/** The prompt is built from the workspace directory, so a dropped chip must drop its file. */
 export const deleteChatFile = (chatId: string, path: string) =>
   json(chatFileUrl(chatId, path), { method: "DELETE" });
 
-/**
- * Stream one turn, whichever agent is answering it.
- *
- * EventSource is GET-only, so the SSE frames are parsed by hand off a fetch body.
- * Frames are split on a blank line because a single read can contain a partial frame
- * or several whole ones.
- */
+/** Stream one turn. EventSource is GET-only, so SSE frames are parsed by hand; a read may
+ *  hold a partial frame or several. */
 export async function* streamTurn(
   path: string,
   body: unknown,
@@ -160,9 +132,7 @@ export async function* streamTurn(
     body: JSON.stringify(body),
     signal,
   });
-  // A turn that is refused never starts a stream — no Cube deployment, no such chat. Unwrapped
-  // the way `json` does it, because App renders a thrown error as a transcript entry, and
-  // reading the frames off a JSON error body yields no events and so reads as a silent turn.
+  // A refused turn has a JSON error body; parsing it as frames would read as a silent turn.
   if (!response.ok) {
     const body = await response.text();
     let message = `POST ${path} → ${response.status}`;
@@ -233,19 +203,13 @@ export const setMcpEnabled = (enabled: boolean) =>
     body: JSON.stringify({ enabled }),
   });
 
-/** Returns the rebuilt configs alongside the token, so the panel never shows a new token
- *  beside a block still quoting the old one. */
+/** Returns the rebuilt configs too, so none still quotes the old token. */
 export const rotateMcpToken = () =>
   json<Pick<McpAccess, "token" | "url" | "desktop" | "cli">>("/api/mcp/rotate", { method: "POST" });
 
 // --- flows --------------------------------------------------------------------
 
-/**
- * A route that answers `text/plain`. `json` would throw on the first line of a markdown file.
- *
- * The error path is `json`'s, because a refusal *is* JSON even from a plain-text route — FastAPI
- * puts `detail` on it either way, and those messages are written to be read by a person.
- */
+/** A route that answers `text/plain`. A refusal is still JSON with `detail`. */
 export async function text(path: string, init?: RequestInit): Promise<string> {
   const response = await fetch(path, init);
   const body = await response.text();
@@ -274,8 +238,7 @@ export const flowDetail = (flow: string) => json<FlowDetail>(`/api/flows/${flow}
 export const flowFile = (flow: string, path: string) =>
   text(`/api/flows/${flow}/files/${encodePath(path)}`);
 
-/** Returns whether the *flow* still runs, not whether the write landed — it did either way, and a
- *  flow that will not run yet is the normal state of one being built. */
+/** `ok` is whether the *flow* still runs; the write lands either way. */
 export const writeFlowFile = (flow: string, path: string, body: string) =>
   json<{ path: string; ok: boolean; errors: string[]; warnings: string[] }>(
     `/api/flows/${flow}/files/${encodePath(path)}`,
@@ -301,13 +264,8 @@ export const runDetail = (flow: string, run: string) =>
 export const runEvents = (flow: string, run: string) =>
   json<AgentEvent[]>(`/api/flows/${flow}/runs/${run}/events`);
 
-/**
- * Run phases until the next Gate, streaming as they go.
- *
- * The same `streamTurn` a chat turn uses, because it is the same event stream — and calling this
- * again is how a Run continues past a Gate. A closed tab loses the stream, never the Run:
- * `run.json` is the Run throughout.
- */
+/** Run phases until the next Gate; call again to continue past it. A closed tab loses the
+ *  stream, never the Run. */
 export const advanceRun = (flow: string, run: string, signal: AbortSignal) =>
   streamTurn(`/api/flows/${flow}/runs/${run}/advance`, {}, signal);
 
@@ -323,19 +281,18 @@ export const approveRunScript = (flow: string, run: string, choice: "yes" | "alw
 export const runArtifact = (flow: string, run: string, path: string) =>
   text(`/api/flows/${flow}/runs/${run}/artifacts/${encodePath(path)}`);
 
-/** Edit a Phase's output at its Gate. Refused with a 409 anywhere else — the surface exists for
- *  the moment before the next Phase reads it, and not afterwards. */
-/** One Phase output's head, with every row counted. What the Run page shows under each Phase. */
+/** One Phase output's head, with every row counted. */
 export const runPreview = (flow: string, run: string, path: string) =>
   json<FilePreview>(`/api/flows/${flow}/runs/${run}/preview/${encodePath(path)}`);
 
+/** Edit a Phase's output at its Gate; a 409 anywhere else. */
 export const writeRunArtifact = (flow: string, run: string, path: string, body: string) =>
   json<{ path: string; ok: boolean }>(
     `/api/flows/${flow}/runs/${run}/artifacts/${encodePath(path)}`,
     { method: "PUT", body: JSON.stringify({ text: body }) },
   );
 
-/** Point the Run back at one Phase. It does not run it — `advanceRun` does that next. */
+/** Point the Run back at one Phase; `advanceRun` runs it. */
 export const rerunPhase = (flow: string, run: string, phase: string) =>
   json<{ run_id: string; current: string }>(
     `/api/flows/${flow}/runs/${run}/phases/${phase}/rerun`,

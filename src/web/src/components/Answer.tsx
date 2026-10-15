@@ -5,16 +5,9 @@ import remarkGfm from "remark-gfm";
 
 import { Copy } from "./Copy";
 
-/**
- * A fenced code block, with the language it was tagged with and a button that takes it.
- *
- * The answer already has one copy button, and it takes the whole answer — which is the wrong
- * unit for the thing people actually copy out of an analyst's reply, a SQL statement or a
- * snippet in the middle of three paragraphs of prose.
- */
+/** A fenced code block with its language and its own copy button. */
 function Fence({ children }: { children?: ReactNode }) {
-  // react-markdown hands `pre` the `code` element it wraps, and both the language and the raw
-  // text are on that child.
+  // react-markdown hands `pre` the `code` element, which carries the language and raw text.
   const code = Children.toArray(children).find(isValidElement) as
     | ReactElement<{ className?: string; children?: ReactNode }>
     | undefined;
@@ -41,8 +34,7 @@ function textOf(node: ReactNode): string {
     .join("");
 }
 
-// At module scope: a fresh object here would be a new component map on every token, and
-// react-markdown remounts the tree when that changes.
+// Module scope: a new component map per token makes react-markdown remount the tree.
 const COMPONENTS = { pre: Fence };
 
 export function Answer({ text, live }: { text: string; live: boolean }) {

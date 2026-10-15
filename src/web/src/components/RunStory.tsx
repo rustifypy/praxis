@@ -11,15 +11,8 @@ import { Badge } from "./Badge";
 import { Button } from "./Button";
 
 /**
- * One Run, told phase by phase: what each phase is for, what it read, what it did, and what it
- * produced — with the data itself, so a person can judge a phase without opening a file.
- *
- * **Not a chat.** A Run answers in its files, and a transcript of the model's turn — its prompt,
- * its thinking, its closing remarks — is the wrong shape for reading one. The log is still
- * complete in `events.jsonl`; this renders the parts a reviewer acts on.
- *
- * **Nothing here decides state.** Which phase is running, which is at a Gate, which output may be
- * edited: all of it is `run.json`, shipped as `detail`. What this component derives is wording.
+ * One Run told phase by phase for a reviewer, not as a chat transcript. All state comes from
+ * `run.json` via `detail`; this derives only wording.
  */
 
 const STATUS_TONE = {
@@ -205,8 +198,7 @@ function PhaseSection({
 }) {
   const plan = phase.plan;
   const steps = stepsOf(events);
-  // Steps the agent improvised in a phase that came with prepared work. Not wrong — the brief may
-  // have asked for something the prepared work does not do — but a reviewer should know.
+  // With prepared work, improvised steps are flagged: not wrong, but a reviewer should know.
   const prepared = (plan?.queries.length ?? 0) + (plan?.scripts.length ?? 0) > 0;
   const ran = phase.started_at > 0;
   const declared = plan?.outputs ?? phase.output;
@@ -500,8 +492,6 @@ function OutputCard({
   );
 }
 
-// --- what a phase did, in words ------------------------------------------
-
 type StepData =
   | { kind: "search"; looked: string[] }
   | {
@@ -518,8 +508,7 @@ type StepData =
 
 function stepsOf(events: AgentEvent[]): StepData[] {
   const steps: StepData[] = [];
-  // Parallel calls of one tool end in any order, so an end closes the earliest open start of the
-  // same tool rather than the last step.
+  // Parallel calls end in any order, so an end closes the earliest open start of that tool.
   const open: Extract<StepData, { kind: "tool" }>[] = [];
   for (const event of events) {
     const data = event.data ?? {};
@@ -643,14 +632,8 @@ function describe(step: Extract<StepData, { kind: "tool" }>): string {
   }
 }
 
-// --- grouping and wording -------------------------------------------------
-
-/**
- * Each event under the phase it belongs to. A run's log files events under the phase's name; a
- * log written before that falls back to the phase whose run window holds the event's time — and
- * an attempt overwritten by a re-run then falls outside every window, which is right: it is not
- * what the phase's outputs came from.
- */
+/** Events are filed under the phase's name; an unfiled one goes to the phase whose run window
+ *  holds its time, so an attempt overwritten by a re-run falls outside every window. */
 function groupByPhase(events: AgentEvent[], phases: RunPhase[]): Map<string, AgentEvent[]> {
   const groups = new Map<string, AgentEvent[]>();
   const names = new Set(phases.map((p) => p.dir_name));

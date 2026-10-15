@@ -5,7 +5,6 @@ import type { JobEvent, JobState } from "../sources";
 import { ACTION_LABEL } from "../sources";
 import { Button } from "./Button";
 
-/** Per-step state read off the event stream, so nothing has to be tracked separately. */
 function statusOf(job: JobState, step: string): "waiting" | "running" | "done" | "failed" {
   let state: "waiting" | "running" | "done" | "failed" = "waiting";
   for (const event of job.events ?? []) {
@@ -38,27 +37,15 @@ function logsOf(events: JobEvent[]): string {
     .join("\n");
 }
 
-/**
- * The seconds counter, alone.
- *
- * Its own component because `useElapsed` ticks ten times a second, and re-rendering the
- * whole panel that often would rescan every event of a four-hundred-table describe on
- * each tick.
- */
+/** Its own component so the 10/s tick re-renders only the counter, not the whole panel. */
 function Elapsed({ since, running }: { since?: number; running: boolean }) {
   const elapsed = useElapsed(since, running);
   return <span className="job-time">{duration(elapsed)}</span>;
 }
 
-/**
- * The running job, inline on the data page it was started from.
- *
- * Reconnecting is not special-cased: the server replays its buffer before going live, so
- * a refresh mid-describe draws exactly what was on screen before.
- */
+/** The running job. No reconnect logic: the server replays its buffer before going live. */
 export function JobProgress({ job, onCancel }: { job: JobState; onCancel: () => void }) {
   const events = job.events ?? [];
-  // Derived from the event list, so they recompute when it grows and not on every tick.
   const progress = useMemo(() => progressOf(job), [events]);
   const logs = useMemo(() => logsOf(events), [events]);
   const states = useMemo(

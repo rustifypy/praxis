@@ -20,12 +20,7 @@ export function duration(ms: number | undefined): string {
   return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
-/**
- * The URL hash, as state.
- *
- * The single source of truth for which view is showing. A mirrored React copy could
- * disagree with the address bar after a back button or a hand-edited URL.
- */
+/** The URL hash as state — the only source of truth for which view is showing. */
 export function useHash(): string {
   const [hash, setHash] = useState(() => window.location.hash);
   useEffect(() => {
@@ -47,25 +42,12 @@ export function ago(epochSeconds: number): string {
 
 /**
  * Close a popover on an outside click or Escape, and return the ref to wrap it in.
- *
- * `mousedown` rather than `click`: a selection drag that starts inside the panel and
- * releases outside is one click event on the document, and closing the panel underneath
- * the cursor mid-drag is maddening.
- *
- * `onClose` is held in a ref so a caller passing an inline arrow does not resubscribe
- * both listeners on every render.
+ * `mousedown`, not `click`: a drag from inside to outside fires a document click.
  */
 export function useDismiss<T extends HTMLElement>(
   open: boolean,
   onClose: () => void,
-  /**
-   * A second region to count as "inside".
-   *
-   * Most callers wrap trigger and panel in the one ref'd element and need nothing here.
-   * The source page's pipeline does not: it is opened from the actions row up in the
-   * page header, so without this a click there closes the panel on `mousedown` and
-   * reopens it on `click` — a visible flash between two events of the same gesture.
-   */
+  // A second "inside" region, for a trigger outside the ref'd element (else it re-opens).
   anchor?: RefObject<HTMLElement | null>,
 ) {
   const ref = useRef<T>(null);
@@ -94,12 +76,7 @@ export function useDismiss<T extends HTMLElement>(
   return ref;
 }
 
-/**
- * Which day-bucket a timestamp falls in, for grouping the chat list.
- *
- * Compared as calendar days rather than elapsed hours: something from 11pm yesterday is
- * "Yesterday" at 1am, not "Today".
- */
+/** Day-bucket for grouping the chat list, by calendar day rather than elapsed hours. */
 export function dayGroup(epochSeconds: number): string {
   const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   const days = Math.round((midnight(new Date()) - midnight(new Date(epochSeconds * 1000))) / 86400000);

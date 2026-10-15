@@ -5,8 +5,6 @@ import type { Refs } from "../sources";
 import { Badge } from "./Badge";
 import { Button } from "./Button";
 
-/** A bin, drawn like the rail's icons — a glyph would have inherited the row's mono font and
- *  sat at whatever weight that gave it. */
 const BIN = (
   <svg
     viewBox="0 0 24 24"
@@ -24,22 +22,8 @@ const BIN = (
 );
 
 /**
- * Which branch of the model you are on, and what it would cost to leave it.
- *
- * A native `<select>` was doing this, and it could say exactly one thing: a name. Everything that
- * decides whether you *should* be here — that main is generated and refuses edits, that another
- * branch has eight uncommitted files — either went unsaid or was crammed into the option label.
- * A read-only branch that looks identical to a writable one is a question you answer by clicking
- * a file and reading the empty state.
- *
- * So the trigger carries the state and not just the name, and creating a branch is an item in the
- * list rather than a button beside it — "start a new one" belongs with "switch to one". Dropping
- * one is in the list for the same reason, and per row rather than as one action on the branch you
- * are on: the branch worth deleting is usually a stale one you are *not* on, and having to switch
- * to it first would mean checking it out to throw it away.
- *
- * Main never gets the affordance. It is what the pipeline generates, and the server refuses the
- * call too — this only decides what to offer.
+ * Which branch of the model you are on, and its state. Delete is per row, since the branch worth
+ * dropping is usually one you are not on. Main is never offered (the server refuses it too).
  */
 export function BranchPicker({
   refs,
@@ -51,14 +35,13 @@ export function BranchPicker({
   onDelete,
 }: {
   refs: Refs | null;
-  /** The branch being shown. */
   on: string;
   /** The generated branch, which is never editable. */
   main: string;
   busy: boolean;
   onSwitch: (ref: string) => void;
   onCreate: () => void;
-  /** Ask to drop a branch. The confirmation and the call are the parent's. */
+  /** The parent confirms and makes the call. */
   onDelete: (ref: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -79,8 +62,6 @@ export function BranchPicker({
           ⑂
         </span>
         <span className="branch-name">{on}</span>
-        {/* One of the two, never both: on main the count is always zero by construction, and
-            "read-only" is the only thing worth the width. */}
         {on === main ? (
           <Badge variant="chip">read-only</Badge>
         ) : current?.changed ? (
@@ -94,8 +75,7 @@ export function BranchPicker({
       {open && (
         <div className="branch-panel" role="menu">
           {refs?.refs.map((r) => (
-            /* A row and not one button, because it carries two actions — switch to it, or drop
-               it — and a button inside a button is not markup. */
+            /* A row, not one button: it holds two buttons, and buttons can't nest. */
             <div className="branch-row" key={r.name}>
               <Button
                 role="menuitem"

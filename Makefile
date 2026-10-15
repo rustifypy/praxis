@@ -23,7 +23,8 @@ serve:
 	uv run analyst
 
 # Run through uvx rather than added to the project: the docs toolchain has no business in uv.lock.
-MKDOCS = uvx --with 'mkdocs-material>=9.5,<10' --with 'mkdocs<2' mkdocs
+# The banner is Material's notice about MkDocs 2.0, which the pin below already avoids.
+MKDOCS = NO_MKDOCS_2_WARNING=1 uvx --with 'mkdocs-material>=9.5,<10' --with 'mkdocs<2' mkdocs
 
 # 8001, because the model store already holds mkdocs' default 8000.
 docs:

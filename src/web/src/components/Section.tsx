@@ -4,18 +4,8 @@ import { Badge } from "./Badge";
 import { Info } from "./Info";
 
 /**
- * One collapsible group in a master–detail list column of the Serving panel. The header is the
- * only place the difference between the kinds is explained, and two copies would be two places
- * to say what a view is.
- *
- * The heading is the button, not the whole header — the info popover is a button too, and
- * nesting one inside the other is invalid and swallows its clicks. `kind` is a class
- * suffix; it colours the heading, see `.group.*`. Open state is the caller's —
- * see `ServedModel.isOpen`.
- *
- * The classes are `group-*` and not `served-*`: this is shared, and naming it for the one
- * screen it was extracted from is what made the next screen that wanted a collapsible group
- * start over instead. Five of them had.
+ * One collapsible group in a list column. Only the heading is the button: the info popover is a
+ * button too, and buttons can't nest. `kind` is a class suffix that colours the heading.
  */
 export function Section({
   kind,
@@ -53,7 +43,6 @@ export function Section({
           <h4>{title}</h4>
         </button>
         <Info label={`About ${title.toLowerCase()}`}>{info}</Info>
-        {/* The count stays when shut — that is what makes a collapsed column readable. */}
         <span className="group-count">
           <Badge>{count}</Badge>
         </span>

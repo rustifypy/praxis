@@ -1,21 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 
 import * as api from "./api";
-import { AddSource } from "./components/AddSource";
+import { Button } from "./components/Button";
 import { ChatHeader } from "./components/ChatHeader";
 import { ChatNav } from "./components/ChatNav";
-import { Dashboard } from "./components/Dashboard";
-import { FlowNav } from "./components/FlowNav";
-import { FlowPage } from "./components/FlowPage";
-import { DashboardNav } from "./components/DashboardNav";
-import type { ComposerHandle } from "./components/Composer";
-import { Button } from "./components/Button";
 import { Composer } from "./components/Composer";
+import type { ComposerHandle } from "./components/Composer";
+import { DashboardNav } from "./components/DashboardNav";
+import { FlowNav } from "./components/FlowNav";
 import { Rail } from "./components/Rail";
 import type { Mode } from "./components/Rail";
-import { McpPage } from "./components/McpPage";
-import { Setup } from "./components/Setup";
-import { SourceDetail } from "./components/SourceDetail";
 import { Transcript } from "./components/Transcript";
 import { Welcome } from "./components/Welcome";
 import { applyEvent, buildTranscript } from "./events";
@@ -23,6 +17,22 @@ import { useHash } from "./hooks";
 import * as sourcesApi from "./sources";
 import type { JobState, SourceRow } from "./sources";
 import type { Chat, DashboardRow, FlowSummary, Item } from "./types";
+
+// Chat is the landing page and ships in the entry chunk; every other page loads on first visit.
+const AddSource = lazy(() =>
+  import("./components/AddSource").then((m) => ({ default: m.AddSource })),
+);
+const Dashboard = lazy(() =>
+  import("./components/Dashboard").then((m) => ({ default: m.Dashboard })),
+);
+const FlowPage = lazy(() =>
+  import("./components/FlowPage").then((m) => ({ default: m.FlowPage })),
+);
+const McpPage = lazy(() => import("./components/McpPage").then((m) => ({ default: m.McpPage })));
+const Setup = lazy(() => import("./components/Setup").then((m) => ({ default: m.Setup })));
+const SourceDetail = lazy(() =>
+  import("./components/SourceDetail").then((m) => ({ default: m.SourceDetail })),
+);
 
 /** What the agent is doing right now, read off the tail of the transcript. */
 function statusOf(items: Item[], busy: boolean): string {
@@ -45,12 +55,10 @@ export default function App() {
     { name: string; view: boolean; members: number }[]
   >([]);
   const [fatal, setFatal] = useState<string | null>(null);
-  // Whether the first load has answered. Without it `source` being null on the first paint
-  // would flash the setup wizard over every configured install.
+  // Without it, `source` being null on first paint flashes the setup wizard.
   const [booted, setBooted] = useState(false);
 
-  // Which mode the rail is on. A hash rather than a router: four views do not justify
-  // one, and the hash is the only state — a mirrored React copy let the two disagree.
+  // The hash is the only state: a mirrored React copy disagrees with it after a back button.
   const hash = useHash();
   const view: Mode = hash.startsWith("#data")
     ? "data"
@@ -61,13 +69,9 @@ export default function App() {
         : hash.startsWith("#boards")
           ? "dashboards"
           : "chat";
-  // Which dashboard is open, read off the hash for the same reason the mode is: a mirrored
-  // React copy disagreed with the address bar after a back button.
   const openBoard = hash.startsWith("#boards/")
     ? decodeURIComponent(hash.slice("#boards/".length))
     : null;
-  // Which flow is open, read off the hash for the reason the board is: a mirrored React copy
-  // disagreed with the address bar after a back button.
   const openFlow = hash.startsWith("#flows/")
     ? decodeURIComponent(hash.slice("#flows/".length))
     : null;
@@ -75,18 +79,14 @@ export default function App() {
   const [dashboards, setDashboards] = useState<DashboardRow[]>([]);
   const [source, setSource] = useState<SourceRow | null>(null);
   const [job, setJob] = useState<JobState | null>(null);
-  // Whether the setup wizard is still building the model — reported by `BuildModel`, because the
-  // gap between one stage finishing and the next starting is invisible from here.
+  // Reported by `BuildModel`: the gap between stages is invisible from here.
   const [building, setBuilding] = useState(false);
-  // The connection drawer: "new" to connect one, "edit" to change its credentials.
   const [drawer, setDrawer] = useState<"new" | "edit" | null>(null);
 
   const abort = useRef<AbortController | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const composer = useRef<ComposerHandle>(null);
-  // Stop following the stream once the reader scrolls up to re-read something. A ref, because
-  // the scroll effect reads it on every token and state there would re-render the transcript
-  // on every scroll event; `tailing` mirrors it for the one thing that has to be drawn.
+  // A ref so scrolling doesn't re-render the transcript; `tailing` mirrors it for drawing.
   const pinned = useRef(true);
   const [tailing, setTailing] = useState(true);
 
@@ -110,7 +110,7 @@ export default function App() {
     try {
       setDashboards(await api.listDashboards());
     } catch {
-      /* The page itself reports why; an empty list is the honest fallback. */
+      /* The page reports why. */
     }
   }, []);
 
@@ -128,7 +128,7 @@ export default function App() {
     try {
       setFlows(await api.listFlows());
     } catch {
-      /* The page says why; an empty list is the honest fallback. */
+      /* The page reports why. */
     }
   }, []);
 
@@ -141,15 +141,12 @@ export default function App() {
   );
 
   const refreshSource = useCallback(async () => {
-    // Both concurrently: the connection body costs a health probe, and awaiting the job after
-    // it serialised the slowest call for no reason.
     const [connected, current] = await Promise.all([
       sourcesApi.connection(),
       sourcesApi.job(),
     ]);
     setSource(connected);
-    // The stream is the sole carrier of events; this only refreshes the header, so an
-    // in-flight job keeps the events it has already received.
+    // The stream carries events; this only refreshes the header, keeping events received.
     setJob((prev) =>
       current.id === null
         ? null
@@ -157,7 +154,6 @@ export default function App() {
           ? { ...prev, ...current }
           : current,
     );
-    // Returned as well as set, so boot can route on it without asking a second time.
     return connected;
   }, []);
 
@@ -173,34 +169,25 @@ export default function App() {
       } catch (err) {
         setFatal(String(err));
       }
-      // Not in the block above, and not fatal: it answers 503 until a deployment
-      // is configured, which is the state every install starts in. Failing it here took the
-      // whole portal down with the "cannot reach the server" page — including the data panel
-      // that is the only way to configure one.
+      // Not fatal: it answers 503 until a deployment is configured.
       try {
         const served = await api.modelSummary();
         setCubeUrl(served.cube_url ?? "");
         setEntities(served.entities ?? []);
       } catch {
-        /* No model to suggest from. `Welcome` renders without suggestions. */
+        /* `Welcome` renders without suggestions. */
       }
-      // The data page is independent of the chat: a broken Cube must not hide the panel
-      // that is how you fix it.
       try {
         await refreshSource();
       } catch {
-        /* The connection body carries the reason; the panel says so itself. */
+        /* The panel reports why. */
       } finally {
-        // In `finally`: a failure here must still let the app render. Otherwise a portal that
-        // could not reach one of these calls would sit on a blank screen forever, since the
-        // setup wizard is gated on this having happened.
+        // Even on failure, or the app sits on a blank screen.
         setBooted(true);
       }
     })();
   }, [open, refreshSource, refreshDashboards, refreshFlows]);
 
-  // Follow a running job, and re-attach to one already in flight after a refresh — the
-  // server replays its buffer before going live, so both are the same code path.
   useEffect(() => {
     if (!job || job.done) return;
     return sourcesApi.watchJob((event) => {
@@ -216,8 +203,6 @@ export default function App() {
         }
         return next;
       });
-      // `job_end` always follows the last `step_end`; refreshing on both ran every
-      // docker call twice back to back.
       if (event.type === "job_end") void refreshSource();
     });
   }, [job?.id, job?.done, refreshSource]);
@@ -227,8 +212,7 @@ export default function App() {
     void refreshSource();
   }, [refreshSource]);
 
-  // Set scrollTop directly rather than scrollIntoView: a smooth scroll retriggered on
-  // every token fights itself and the transcript judders.
+  // Not scrollIntoView: a smooth scroll retriggered on every token judders.
   useEffect(() => {
     const el = scroller.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
@@ -278,7 +262,6 @@ export default function App() {
     } finally {
       setBusy(false);
       setTurnStart(undefined);
-      // The first question renames the chat server-side; pick that up.
       setChats(await api.listChats());
     }
   };
@@ -317,32 +300,24 @@ export default function App() {
     );
   }
 
-  // Setup owns the whole screen until it finishes, rail included: until then there is no model,
-  // so chat cannot answer and a board cannot refresh, and offering three dead modes beside the
-  // one live one is an invitation to click them.
-  //
-  // `booted` is what keeps this from flashing over an install that *is* configured — `source`
-  // is null for the first paint of every session, and a wizard that appears for 200ms every
-  // time you open the portal is worse than one that appears a moment late.
-  // `building` is what keeps the wizard up through the whole pipeline. `onboarded` goes true the
-  // moment cubes land, which is mid-sequence — and unmounting there would take the queue of
-  // remaining stages with it, so descriptions and views would never run.
+  // Setup owns the whole screen, rail included, since no other mode works without a model.
+  // `building`: `onboarded` turns true mid-pipeline, and unmounting would drop the stage queue.
   if (booted && (!source?.onboarded || building)) {
     return (
-      <Setup
-        source={source}
-        job={job}
-        onJob={setJob}
-        onBuilding={setBuilding}
-        onChanged={() => {
-          void refreshSource();
-        }}
-      />
+      <Suspense fallback={null}>
+        <Setup
+          source={source}
+          job={job}
+          onJob={setJob}
+          onBuilding={setBuilding}
+          onChanged={() => {
+            void refreshSource();
+          }}
+        />
+      </Suspense>
     );
   }
 
-  // Data and agents have no list beside their page — one connection, one endpoint — so the
-  // middle column is absent there rather than empty.
   return (
     <div
       className={`app ${view === "data" || view === "agents" ? "no-nav" : ""}`}
@@ -396,127 +371,125 @@ export default function App() {
         />
       ) : null}
 
-      {drawer && (
-        <AddSource
-          editing={drawer === "edit" && source ? source : undefined}
-          onCancel={() => setDrawer(null)}
-          onConnect={async (body) => {
-            await sourcesApi.connect(body);
-            setDrawer(null);
-            // Onto the data page, where the pipeline is. POST /api/onboarding/connection has already made
-            // the connection usable — there is no Connect action to fire after it.
-            showData();
-            await refreshSource();
-          }}
-          onSave={async (body) => {
-            await sourcesApi.edit(body);
-            setDrawer(null);
-            await refreshSource();
-          }}
-        />
-      )}
-
-      {view === "dashboards" ? (
-        <main className="main">
-          {openBoard ? (
-            <Dashboard
-              id={openBoard}
-              onRenamed={() => void refreshDashboards()}
-              onDeleted={() => {
-                void refreshDashboards();
-                showBoards();
-              }}
-            />
-          ) : (
-            <div className="dash-fail muted">
-              {dashboards.length
-                ? "Pick a dashboard on the left."
-                : "No dashboards yet. Create one, then ask in chat to add tiles to it."}
-            </div>
-          )}
-        </main>
-      ) : view === "flows" ? (
-        <main className="main">
-          {openFlow ? (
-            <FlowPage key={openFlow} flow={openFlow} />
-          ) : (
-            <div className="dash-fail muted">
-              {flows.length
-                ? "Pick a flow on the left."
-                : "No flows yet. A flow is a folder of numbered steps you run again and again, reviewing each one."}
-            </div>
-          )}
-        </main>
-      ) : view === "agents" ? (
-        <main className="main">
-          <McpPage />
-        </main>
-      ) : view === "data" ? (
-        // `source` is non-null here by construction: setup owns the whole screen until it is
-        // finished, and finishing it requires a connection. There is no "nothing connected yet"
-        // state on this page any more, which is what the wizard replaced.
-        <main className="main">
-          {source && (
-            <SourceDetail
-              source={source}
-              job={job}
-              onJob={setJob}
-              onRefresh={() => void refreshSource()}
-              onEdit={() => setDrawer("edit")}
-            />
-          )}
-        </main>
-      ) : (
-        <main className="main chat-main">
-          <ChatHeader source={source} cubeUrl={cubeUrl} onShowData={showData} />
-
-          <div
-            className="transcript"
-            ref={scroller}
-            onScroll={(e) => {
-              const el = e.currentTarget;
-              const near =
-                el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-              if (near !== pinned.current) {
-                pinned.current = near;
-                setTailing(near);
-              }
+      <Suspense fallback={null}>
+        {drawer && (
+          <AddSource
+            editing={drawer === "edit" && source ? source : undefined}
+            onCancel={() => setDrawer(null)}
+            onConnect={async (body) => {
+              await sourcesApi.connect(body);
+              setDrawer(null);
+              showData();
+              await refreshSource();
             }}
-          >
-            {items.length === 0 && (
-              <Welcome
-                entities={entities}
-                onPick={(q) => {
-                  if (!activeId)
-                    void create().then(() => composer.current?.fill(q));
-                  else composer.current?.fill(q);
+            onSave={async (body) => {
+              await sourcesApi.edit(body);
+              setDrawer(null);
+              await refreshSource();
+            }}
+          />
+        )}
+      </Suspense>
+
+      <Suspense fallback={<main className="main" />}>
+        {view === "dashboards" ? (
+          <main className="main">
+            {openBoard ? (
+              <Dashboard
+                id={openBoard}
+                onRenamed={() => void refreshDashboards()}
+                onDeleted={() => {
+                  void refreshDashboards();
+                  showBoards();
                 }}
               />
+            ) : (
+              <div className="dash-fail muted">
+                {dashboards.length
+                  ? "Pick a dashboard on the left."
+                  : "No dashboards yet. Create one, then ask in chat to add tiles to it."}
+              </div>
+            )}
+          </main>
+        ) : view === "flows" ? (
+          <main className="main">
+            {openFlow ? (
+              <FlowPage key={openFlow} flow={openFlow} />
+            ) : (
+              <div className="dash-fail muted">
+                {flows.length
+                  ? "Pick a flow on the left."
+                  : "No flows yet. A flow is a folder of numbered steps you run again and again, reviewing each one."}
+              </div>
+            )}
+          </main>
+        ) : view === "agents" ? (
+          <main className="main">
+            <McpPage />
+          </main>
+        ) : view === "data" ? (
+          // `source` is non-null here: setup owns the screen until a connection exists.
+          <main className="main">
+            {source && (
+              <SourceDetail
+                source={source}
+                job={job}
+                onJob={setJob}
+                onRefresh={() => void refreshSource()}
+                onEdit={() => setDrawer("edit")}
+              />
+            )}
+          </main>
+        ) : (
+          <main className="main chat-main">
+            <ChatHeader source={source} cubeUrl={cubeUrl} onShowData={showData} />
+
+            <div
+              className="transcript"
+              ref={scroller}
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                const near =
+                  el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+                if (near !== pinned.current) {
+                  pinned.current = near;
+                  setTailing(near);
+                }
+              }}
+            >
+              {items.length === 0 && (
+                <Welcome
+                  entities={entities}
+                  onPick={(q) => {
+                    if (!activeId)
+                      void create().then(() => composer.current?.fill(q));
+                    else composer.current?.fill(q);
+                  }}
+                />
+              )}
+
+              <Transcript items={items} chatId={activeId ?? ""} />
+            </div>
+
+            {!tailing && items.length > 0 && (
+              <Button className="jump" onClick={follow}>
+                ↓ {busy ? "Jump to what it is writing" : "Jump to the end"}
+              </Button>
             )}
 
-            <Transcript items={items} chatId={activeId ?? ""} />
-          </div>
-
-          {/* Scrolling up to re-read something stops the transcript following the stream, and
-            without this nothing says so — an answer arriving off-screen looks like no answer. */}
-          {!tailing && items.length > 0 && (
-            <Button className="jump" onClick={follow}>
-              ↓ {busy ? "Jump to what it is writing" : "Jump to the end"}
-            </Button>
-          )}
-
-          <Composer
-            ref={composer}
-            chatId={activeId}
-            busy={busy}
-            disabled={!activeId}
-            startedAt={turnStart}
-            status={statusOf(items, busy)}
-            onSend={(q, files) => void send(q, files)}
-            onStop={() => void stop()}
-          />
-        </main>
-      )}
+            <Composer
+              ref={composer}
+              chatId={activeId}
+              busy={busy}
+              disabled={!activeId}
+              startedAt={turnStart}
+              status={statusOf(items, busy)}
+              onSend={(q, files) => void send(q, files)}
+              onStop={() => void stop()}
+            />
+          </main>
+        )}
+      </Suspense>
     </div>
   );
 }

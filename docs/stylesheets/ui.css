@@ -256,12 +256,6 @@
   color: var(--on-fill);
 }
 
-.ui-btn.danger {
-  border-color: var(--bad);
-  background: var(--bad);
-  color: var(--on-fill);
-}
-
 .ui-btn.link {
   border-color: transparent;
   background: none;

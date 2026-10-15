@@ -6,16 +6,8 @@ import { Button } from "./Button";
 import { Empty } from "./Empty";
 
 /**
- * The flows list: the column beside the page, like the chat list and the dashboard list.
- *
- * Each row says how many phases a flow has and whether it currently runs. That second marker is
- * the useful one and it is *not* derived here — the server sends `ok`, because "is this a flow
- * that could run" is `contract.load`'s answer and a second implementation in the browser would
- * eventually disagree with the one the run uses.
- *
- * Creating a flow asks for a name and nothing else. A folder name is the flow's identity, so it
- * is the one field that cannot be changed later by editing a file, which is why it is the one
- * field asked for here — the title and the phases are the authoring conversation's job.
+ * The flows list. Whether a flow runs is the server's `ok`, never derived here. Creating asks only
+ * for a name: the folder name is the one thing editing a file can't change later.
  */
 export function FlowNav({
   flows,
@@ -37,8 +29,6 @@ export function FlowNav({
     if (!slug) return;
     setFailed("");
     try {
-      // The title starts as the words that were typed, since that is what they meant; the flow
-      // agent renames it once the conversation knows what the flow is actually for.
       await onCreate(slug, name.trim());
       setNaming(false);
       setName("");
@@ -85,9 +75,6 @@ export function FlowNav({
       <ul className="nav-list">
         {flows.map((flow) => (
           <li key={flow.name}>
-            {/* `.nav-*` is the shared sidebar vocabulary, reused rather than paralleled — the
-                stylesheet says outright that a second set of near-identical row rules is how the
-                two start to drift. */}
             <button
               className={`nav-row ${selected === flow.name ? "active" : ""}`}
               onClick={() => onOpen(flow.name)}
@@ -95,9 +82,7 @@ export function FlowNav({
             >
               <span className="nav-row-name">{flow.title || flow.name}</span>
               <span className="nav-row-count">{flow.phases.length}</span>
-              {/* A flow being built is not runnable yet, which is normal — so this is a note and
-                  not an alarm. It earns its place because the alternative is pressing Run and
-                  reading the refusal. */}
+              {/* A note, not an alarm: a flow being built is normally not runnable yet. */}
               <span className="nav-row-sub" title={flow.errors.join("\n")}>
                 {flow.phases.length === 1 ? "1 phase" : `${flow.phases.length} phases`}
                 {flow.ok ? "" : " · needs work"}

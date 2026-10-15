@@ -1,27 +1,20 @@
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 
 import * as api from "../api";
 import type { FlowDetail } from "../types";
 
 import { Badge } from "./Badge";
 import { Button } from "./Button";
-import { CodeEditor } from "./CodeEditor";
 import { Empty } from "./Empty";
 import { FlowChat } from "./FlowChat";
 import { FlowFiles } from "./FlowFiles";
 import { FlowRuns } from "./FlowRuns";
 
+const CodeEditor = lazy(() => import("./CodeEditor"));
+
 /**
- * One flow, in the two shapes it has: something you build, and something you run.
- *
- * Two tabs rather than one screen, on the argument the rail already makes about chat and data:
- * authoring is an unbounded editing session and running is a stateful object with consequential
- * buttons. On one screen the run controls stay live while you are halfway through rewriting the
- * prompt they will use.
- *
- * **Whether the flow runs is shown here and computed nowhere.** `contract.load` decides, the
- * server ships the answer, and the header repeats its words. Anything else would be a second
- * validator that eventually disagrees with the one a run actually uses.
+ * One flow, as Edit and Runs tabs. Whether it runs comes from the server (`contract.load`) and
+ * is never recomputed here.
  */
 export function FlowPage({ flow }: { flow: string }) {
   const [detail, setDetail] = useState<FlowDetail | null>(null);
@@ -62,8 +55,7 @@ export function FlowPage({ flow }: { flow: string }) {
     try {
       const written = await api.writeFlowFile(flow, openPath, text);
       setSavedText(text);
-      // The write always lands; what may have changed is whether the flow runs, and that comes
-      // back from the same call rather than from a second one.
+      // The write always lands; `ok` says whether the flow still runs.
       setError(written.ok ? "" : written.errors.join("\n"));
       await reload();
     } catch (e) {
@@ -92,8 +84,6 @@ export function FlowPage({ flow }: { flow: string }) {
           )}
         </div>
         {detail.description && <p className="flow-desc">{detail.description}</p>}
-        {/* The model editor's control, not a pair of buttons: Edit and Runs are two views of one
-            Flow, the same choice as Files and Served model are of one model. */}
         <div className="segmented flow-tabs" role="group" aria-label="What to show">
           <button className={tab === "edit" ? "on" : ""} onClick={() => setTab("edit")}>
             Edit
@@ -104,8 +94,7 @@ export function FlowPage({ flow }: { flow: string }) {
         </div>
       </header>
 
-      {/* Errors and warnings from the server's own check, verbatim. The flow agent is given these
-          same lines, so a person and the agent are reading one answer. */}
+      {/* Verbatim from the server; the flow agent sees the same lines. */}
       {detail.errors.length > 0 && (
         <ul className="flow-problems">
           {detail.errors.map((line) => (
@@ -145,14 +134,16 @@ export function FlowPage({ flow }: { flow: string }) {
                     {text === savedText ? "Saved" : "Save"}
                   </Button>
                 </div>
-                <CodeEditor
-                  path={openPath}
-                  value={text}
-                  original={null}
-                  readOnly={false}
-                  onChange={setText}
-                  onReviewed={() => {}}
-                />
+                <Suspense fallback={<p className="muted editor-blank">Loading the editor…</p>}>
+                  <CodeEditor
+                    path={openPath}
+                    value={text}
+                    original={null}
+                    readOnly={false}
+                    onChange={setText}
+                    onReviewed={() => {}}
+                  />
+                </Suspense>
               </>
             ) : (
               <Empty>

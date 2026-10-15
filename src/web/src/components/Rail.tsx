@@ -3,22 +3,8 @@ import type { ReactNode } from "react";
 import { type Theme, useTheme } from "../theme";
 
 /**
- * The mode switch, and the only thing on screen in every mode.
- *
- * Chat and data are two products with opposite shapes — one is an unbounded list of
- * ephemeral conversations, the other one heavily stateful object with destructive controls.
- * They shared a sidebar, which meant the chat list stayed live and clickable while you were
- * administering a database. Splitting the mode out here lets the column beside it belong
- * entirely to whichever one you are in.
- *
- * Dashboards sit between them: made in chat, read against the model, so the rail is in the
- * order the work happens. Flows follows, because a flow is the same work as a chat with the
- * steps written down. Agents is last and separate from data, because it is not about what
- * this install is connected to — it is about handing these tools to something that is not
- * this app.
- *
- * **Agents is the MCP page, not Flows.** The two are easy to confuse and are opposites: Agents
- * hands this portal's tools *out*, and Flows is this portal's own work with its steps on disk.
+ * The mode switch, the only thing on screen in every mode. Agents is the MCP page (handing these
+ * tools out), not Flows.
  */
 
 const CHAT = (
@@ -44,11 +30,8 @@ const BOARD = (
   </svg>
 );
 
-/** The modes, defined beside the switch that owns them so App reads one list rather than
- *  repeating the union at every callback. */
 export type Mode = "chat" | "dashboards" | "data" | "flows" | "agents";
 
-/** Numbered steps, in order: what a flow is. */
 const FLOWS = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
     <rect x="3.4" y="3.6" width="17.2" height="4.6" rx="1.5" />
@@ -57,7 +40,6 @@ const FLOWS = (
   </svg>
 );
 
-/** A plug: this is the socket other agents connect into. */
 const AGENTS = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
     <path d="M9 2.8v5.4M15 2.8v5.4" />
@@ -66,7 +48,7 @@ const AGENTS = (
   </svg>
 );
 
-/** The theme switch's three faces: what is in force now, not what a press would change to. */
+/** Each face shows the theme in force now, not what a press would change to. */
 const THEMES: Record<Theme, { icon: ReactNode; label: string; next: Theme }> = {
   auto: {
     label: "Auto",
@@ -105,7 +87,6 @@ export function Rail({
   onSelect,
 }: {
   view: Mode;
-  /** Dotted onto the data icon, so a three-minute describe is visible from a chat. */
   jobRunning: boolean;
   onSelect: (view: Mode) => void;
 }) {

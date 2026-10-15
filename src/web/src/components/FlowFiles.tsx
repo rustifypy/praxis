@@ -1,19 +1,7 @@
 import { Badge } from "./Badge";
 import { Empty } from "./Empty";
 
-/**
- * A flow's files, grouped by the thing they belong to: the flow itself, its shared reference
- * material, and one group per phase.
- *
- * Grouped by phase and not rendered as a generic tree, for the reason `FileTree` groups the model
- * by `cubes/` and `views/`: the folder *is* the meaning. A phase is the unit someone thinks in —
- * "what does 02 do" is answered by two files sitting together — and a recursive tree would show
- * `phases/` as one node you have to open before the question can even be asked.
- *
- * The grouping is derived from the path rather than shipped alongside it. The route already
- * filters to what may be opened, and the prefix is the group; a `group` field beside each path
- * would be a second way to say the same thing, free to disagree.
- */
+/** A flow's files, grouped by phase rather than as a generic tree: a phase is the unit. */
 
 const ROOT = { head: "Flow", blurb: "What it is for, and its title." };
 const CONFIG = { head: "Reference", blurb: "Rules every run shares." };
@@ -31,16 +19,13 @@ export function FlowFiles({
   onOpen,
 }: {
   files: string[];
-  /** The path showing in the editor, or "". */
   open: string;
-  /** Paths typed into and not yet saved. */
   unsaved: Set<string>;
   onOpen: (path: string) => void;
 }) {
   const root = files.filter((path) => !path.includes("/"));
   const config = files.filter((path) => path.startsWith("_config/"));
-  // Insertion order of a Set, and `files` arrives sorted — so the phases come out in execution
-  // order without this having to know that the number is the order.
+  // `files` arrives sorted, so Set order is execution order.
   const phases = [...new Set(files.map(phaseOf).filter(Boolean))];
 
   const row = (path: string, label: string) => (

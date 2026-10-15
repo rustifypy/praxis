@@ -5,12 +5,7 @@ import type { Chat } from "../types";
 import { Button } from "./Button";
 import { Empty } from "./Empty";
 
-/**
- * Renaming and deleting happen in place.
- *
- * `window.prompt` and `window.confirm` freeze the page, cannot be styled, and look
- * like a browser error — the wrong feel for a two-word rename.
- */
+/** Renames and deletes in place rather than through `window.prompt`/`confirm`. */
 function Row({
   chat,
   active,
@@ -121,12 +116,6 @@ function Row({
   );
 }
 
-/**
- * The chat mode's whole sidebar.
- *
- * Grouped by day and searchable, because the list only grows: `chats.map` is fine at ten and
- * unusable at two hundred, where the only way to find an old conversation is its title.
- */
 export function ChatNav({
   chats,
   activeId,
@@ -144,8 +133,7 @@ export function ChatNav({
 }) {
   const [filter, setFilter] = useState("");
 
-  // Grouped in the order the server sent, which is newest first — so the buckets come
-  // out chronological without a second sort.
+  // The server sends newest first, so the buckets need no second sort.
   const groups = useMemo(() => {
     const needle = filter.trim().toLowerCase();
     const matching = needle

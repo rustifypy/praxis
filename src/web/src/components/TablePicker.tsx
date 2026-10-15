@@ -6,14 +6,8 @@ import { Button } from "./Button";
 import { Empty } from "./Empty";
 
 /**
- * Choose a schema and the tables to model.
- *
- * The catalog was read once by a throwaway container and cached, so this is instant and
- * touches no database — re-picking never starts anything.
- *
- * The closure is computed server-side rather than here. Ticking `invoice_line` models
- * `invoice`, `track` and `customer` too, and that rule also decides what the job builds;
- * a picker that disagreed with the pipeline would be worse than none.
+ * Choose a schema and the tables to model. The closure (tables pulled in by references) comes
+ * from the server, so the picker can't disagree with what the job builds.
  */
 export function TablePicker({
   catalog,
@@ -26,13 +20,9 @@ export function TablePicker({
 }: {
   catalog: TableCache;
   busy: boolean;
-  /** What the run is called. Building for the first time and rebuilding are the same picker and
-   *  the same job, and the only honest difference is the word on the button. */
   label: string;
-  /** Asked before the run, or "" for no question. Empty during onboarding, where there is no
-   *  model to lose; set for a rebuild, which rewrites every file in main. */
+  /** Asked before the run, or "" for no question. */
   confirm: string;
-  /** Rendered beside the count, for a caller with one more decision to offer. */
   extra?: React.ReactNode;
   onRun: (schema: string, tables: string[] | null) => void;
   onReread: () => void;
@@ -48,8 +38,7 @@ export function TablePicker({
   const [closure, setClosure] = useState<Closure | null>(null);
   const [filter, setFilter] = useState("");
 
-  // Everything, when there is little enough that choosing is busywork. Above that the
-  // user picks, because describing is one model call per table.
+  // Seed with everything when small; else facts only, since describing costs a call per table.
   useEffect(() => {
     const previous = catalog.selection.tables;
     const seed =
@@ -61,8 +50,7 @@ export function TablePicker({
     setPicked(new Set(seed));
   }, [schema, tables.length]);
 
-  // What the selection really means, from the same code the job will use. Debounced:
-  // ticking thirty tables should be one request, not thirty.
+  // Debounced: ticking thirty tables should be one request.
   useEffect(() => {
     if (!schema || picked.size === 0) {
       setClosure(null);
@@ -203,8 +191,6 @@ export function TablePicker({
           variant="primary"
           disabled={busy || modelled === 0}
           onClick={() => {
-            // A rebuild replaces every model file in one commit. Recoverable from the store's
-            // history, which is not the same as intended — so it is still worth asking.
             if (confirm && !window.confirm(confirm)) return;
             onRun(schema, everything ? null : [...picked]);
           }}

@@ -4,17 +4,8 @@ import type { Impact, RefDiff } from "../sources";
 import { Button } from "./Button";
 
 /**
- * Landing a branch on main: the patch, what it would break, and the two decisions.
- *
- * A dialog rather than a third editor mode. Merging is the one action here that changes what
- * every chat and every dashboard reads, and it is worth a screen that stops and asks — the old
- * version put it behind a Review button that swapped the editor pane, so the diff and the
- * consequence competed for the same space as the file you were editing.
- *
- * **Breakage refuses the merge by default**, server-side, and the override is a differently
- * worded button rather than a checkbox — a destructive action should not be reachable by missing
- * a tick. Deleting the branch afterwards *is* a checkbox, because it is reversible in the only
- * sense that matters: the commits are on main by then.
+ * Landing a branch on main. The server refuses a merge that breaks saved queries; overriding is a
+ * differently worded button, never a checkbox someone could miss.
  */
 export function MergeDialog({
   branch,
@@ -26,7 +17,7 @@ export function MergeDialog({
 }: {
   branch: string;
   main: string;
-  /** Null while it is still being fetched. */
+  /** Null while loading. */
   diff: RefDiff | null;
   busy: boolean;
   onCancel: () => void;
@@ -36,9 +27,6 @@ export function MergeDialog({
   const breaks = diff?.impact?.broken.length ?? 0;
   const nothing = diff !== null && diff.changed.length === 0;
 
-  // `.modal-scrim` and `.modal` are the dialog chrome every other dialog here uses — the
-  // placement, the scrim, the footer row. Only the width and the scrolling body are this
-  // dialog's own, because a patch is taller than a confirmation.
   return (
     <div className="modal-scrim">
       <div className="modal merge-modal" role="dialog" aria-modal="true">
@@ -108,13 +96,9 @@ export function MergeDialog({
 }
 
 /**
- * What a merge would break, with the nearest surviving name so a fix is one edit.
- *
- * "No saved query breaks" is worth saying out loud rather than showing nothing: the absence of a
- * warning reads as "not checked", and this check is the whole reason the merge can be trusted.
+ * What a merge would break, with the nearest surviving names. A clean result is stated, since
+ * silence reads as "not checked".
  */
-/** Not exported any more: the editor renders its own copy of this inside `Problems`, where it is
- *  one of four kinds of thing wrong with a draft rather than a panel of its own. */
 function Breakage({ impact }: { impact: Impact }) {
   if (!impact.broken.length) {
     return (

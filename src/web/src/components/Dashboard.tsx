@@ -8,17 +8,8 @@ import { Empty } from "./Empty";
 import { Tile } from "./Tile";
 
 /**
- * One dashboard: the grid, the summary paragraph, and the only Refresh button.
- *
- * No per-tile progress, because the refresh is atomic — showing tiles land one by one would
- * display the partial state a refusal exists to prevent. A refusal is one banner, and the
- * tiles keep the numbers they already had rather than blanking.
- *
- * Two banners kept separate because they fail separately: tiles that no longer compile, and a
- * container that is down (which says nothing about the first).
- *
- * Rearranging goes through `POST /layout`, the same validator the agent's `set_layout` uses,
- * and each drop is its own version — `layouts` is append-only, so the history is the undo.
+ * No per-tile progress: the refresh is atomic, so a refusal is one banner and tiles keep their
+ * old numbers. Each layout change is its own version, so the append-only history is the undo.
  */
 
 export function Dashboard({
@@ -38,12 +29,9 @@ export function Dashboard({
   const [columns, setColumns] = useState(2);
   const [refused, setRefused] = useState("");
   const [undo, setUndo] = useState<{ columns: number; items: LayoutItem[] } | null>(null);
-  /** The tile whose grip is held. A cell is draggable only while it is armed, so a chart
-   *  keeps its hover targets and the text in a tile stays selectable. */
+  // Draggable only while armed, so charts keep hover targets and text stays selectable.
   const [armed, setArmed] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
-  // A display preference, so it belongs neither on the board row nor in the hash — one is
-  // shared state and the other is navigation.
 
   const load = useCallback(async () => {
     setFailed("");
@@ -60,9 +48,7 @@ export function Dashboard({
     void load();
   }, [load]);
 
-  // The server's layout is the truth; the local copy exists so a drop lands before the round
-  // trip. A tile deleted since the layout was written is dropped, since naming it would be
-  // rejected by the validator.
+  // A local copy so a drop lands before the round trip; deleted tiles would fail validation.
   useEffect(() => {
     if (!detail) return;
     const live = new Set(detail.tiles.map((t) => t.id));
@@ -76,8 +62,7 @@ export function Dashboard({
     try {
       const result = await api.refreshDashboard(id);
       setOutcome(result);
-      // Reload either way: a refused run wrote nothing, but the checks and the last run's
-      // numbers are still what should be on screen afterwards.
+      // Reload even if refused: the checks may have changed.
       await load();
     } catch (err) {
       setFailed(String(err));
@@ -109,8 +94,6 @@ export function Dashboard({
   }
 
 
-  /** Dragging down lands after the target, dragging up lands before it — the asymmetry falls
-   *  out of splicing at an index taken before the removal, and is what a list reorder does. */
   function reorder(from: string, to: string) {
     const at = items.findIndex((i) => i.tile === from);
     const target = items.findIndex((i) => i.tile === to);
@@ -138,8 +121,7 @@ export function Dashboard({
   }
 
   function setWidth(width: number) {
-    // Clamped here rather than left to the server: a span wider than the board is the one
-    // rejection narrowing the grid would otherwise cause every time.
+    // Clamped here, or every narrowing would be rejected for a span wider than the board.
     void save(
       items.map((i) => ({ ...i, span: Math.min(i.span, width) })),
       width,
@@ -257,8 +239,7 @@ export function Dashboard({
         >
           {items.map((item) => {
             const tile = byId.get(item.tile);
-            // A layout version can name a tile deleted since. Skipped rather than treated as
-            // an error — the stored version was valid when it was written.
+            // A layout version can name a tile deleted since.
             if (!tile) return null;
             return (
               <div
@@ -269,8 +250,7 @@ export function Dashboard({
                 style={{ gridColumn: `span ${Math.min(item.span, columns)}` }}
                 draggable={armed === item.tile}
                 onDragStart={(e) => {
-                  // Firefox will not start a drag without payload, even though the tile being
-                  // dragged is already in `armed`.
+                  // Firefox will not start a drag without a payload.
                   e.dataTransfer.effectAllowed = "move";
                   e.dataTransfer.setData("text/plain", item.tile);
                 }}

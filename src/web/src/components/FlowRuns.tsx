@@ -9,22 +9,9 @@ import { Empty } from "./Empty";
 import { RunStory } from "./RunStory";
 
 /**
- * A flow's runs: starting one, stepping it through its gates, and reading what each phase made.
- *
- * **A run is not a request.** `advance` streams while phases execute and returns at the next gate,
- * so continuing is another call — which is why the button changes its own name rather than the
- * page having a separate "resume". Closing the tab loses the stream and never the run: every
- * status shown here comes from `run.json`.
- *
- * **What is on screen is read, not streamed.** The run's state is `run.json` and its history is
- * `events.jsonl`, and both are re-read every two seconds while a run is going. The live stream is
- * kept for the one thing that exists nowhere else — a script waiting for approval — and for
- * knowing when the advance has ended.
- *
- * **The gate is the point of the whole feature.** When a run is paused, exactly one phase's output
- * is editable — the one just finished — and the server decides which by sending `editable`. This
- * component does not compute it: "may I edit this" is a question about which phase has already
- * been read by a later one, and the browser is the wrong place to answer it.
+ * What is on screen is read from `run.json`/`events.jsonl`, polled while a run goes, not
+ * streamed. The stream is kept only for approvals, which are stored nowhere, and to know when
+ * the advance ended.
  */
 
 const POLL_MS = 2000;
@@ -82,8 +69,7 @@ export function FlowRuns({ flow, runnable }: { flow: string; runnable: boolean }
     void refreshRuns();
   }, [flow, refreshRuns]);
 
-  // One advance can run several phases back to back, and the stream does not say which phase an
-  // event belongs to. The files do, so they are re-read while it runs.
+  // The stream does not say which phase an event belongs to; the files do.
   useEffect(() => {
     if (!busy || !openId) return;
     const timer = setInterval(() => {
@@ -113,8 +99,7 @@ export function FlowRuns({ flow, runnable }: { flow: string; runnable: boolean }
     abort.current = controller;
     try {
       for await (const event of api.advanceRun(flow, openId, controller.signal)) {
-        // An approval is never stored, so this stream is the only place it is seen. The step it
-        // belongs to ending is what retires it.
+        // Approvals are never stored; the step ending retires one.
         if (event.type === "approval") setAsking({ script: String(event.data.script ?? "") });
         if (event.type === "tool_end" && event.data.tool === "run_python") setAsking(null);
       }
@@ -129,10 +114,7 @@ export function FlowRuns({ flow, runnable }: { flow: string; runnable: boolean }
     }
   };
 
-  // Asked of the server, and the stream is left to end by itself: the phase then records that it
-  // was stopped. Cutting the connection instead cancels the run mid-phase, and the only thing the
-  // server can say about that is "stopped before it finished". The connection is cut only when
-  // nothing on the server is listening for the stop.
+  // Ask the server so the phase records the stop; cut the connection only if nothing listened.
   const stop = async () => {
     const said = openId ? await api.stopRun(flow, openId) : { stopped: false };
     if (!said.stopped) {
@@ -167,8 +149,7 @@ export function FlowRuns({ flow, runnable }: { flow: string; runnable: boolean }
 
   const name = (dir: string) =>
     detail?.phases.find((phase) => phase.dir_name === dir)?.plan?.title || dir;
-  // "Continue" only past a Gate. A new run is paused too, before phase one, and a run whose
-  // stream died says running — both are started with "Run".
+  // "Continue" only past a Gate; a new run is paused too, and a dead stream says running.
   const action = !detail
     ? ""
     : detail.status === "paused" && detail.waiting === "gate"
@@ -182,8 +163,6 @@ export function FlowRuns({ flow, runnable }: { flow: string; runnable: boolean }
       <div className="flow-runs-side">
         <div className="flow-start">
           <label htmlFor="flow-brief">Brief</label>
-          {/* Free text, and the only thing that differs between two runs of one flow. A form of
-              typed parameters here would be a workflow builder's parameter list by another name. */}
           <textarea
             id="flow-brief"
             rows={3}

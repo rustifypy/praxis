@@ -4,14 +4,7 @@ import { useState } from "react";
 import { useDismiss } from "../hooks";
 import { Button } from "./Button";
 
-/**
- * Destructive confirmation that costs a moment's attention: type the word.
- *
- * `window.confirm` is rejected everywhere else in this app — it freezes the page, cannot
- * be styled, and reads as a browser error — and it was least defensible here, on the one
- * action that destroys a container and a model directory that takes an LLM call per table
- * to rebuild. A muscle-memory Enter dismisses a confirm; it does not type a word.
- */
+/** Destructive confirmation: type the word, which a muscle-memory Enter can't do. */
 export function Confirm({
   word,
   title,
@@ -20,7 +13,6 @@ export function Confirm({
   onCancel,
   onConfirm,
 }: {
-  /** What the user has to type. */
   word: string;
   title: string;
   children: ReactNode;
