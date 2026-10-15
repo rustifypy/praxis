@@ -4,17 +4,8 @@ import { formatCell, formatTick } from "../format";
 import type { ChartSpec, ResultColumn } from "../types";
 
 /**
- * The chart for a result, drawn as inline SVG.
- *
- * Hand-rolled rather than a charting library, for two reasons that both matter here. The
- * spec is decided in Python (`cube.visualize`), where there is a test runner and the query
- * that justifies the choice — so the browser's job is only to draw it, and drawing four
- * shapes is smaller than any library that could. And the marks then use the app's own
- * tokens, so a chart looks like the rest of the page in both themes instead of like an
- * embed.
- *
- * Every palette slot clears 3:1 unaided in both modes, so the table below is useful rather
- * than load-bearing — which is what lets a dashboard tile reuse the same eight tokens.
+ * The chart for a result, as hand-rolled SVG: the spec is decided in Python, so the browser only
+ * draws it, and the marks use the app's own series tokens in both themes.
  */
 
 /** Logical canvas. The SVG scales to its container, so these are ratios, not pixels. */
@@ -28,8 +19,7 @@ const BAR_MAX = 24;
 const CORNER = 4;
 /** Room for roughly this many x labels before they touch; above it, labels are thinned. */
 const MAX_TICKS = 9;
-/** Logical units one character of an 11px tick occupies, near enough to fit a label to a
- *  band without measuring text. */
+/** Approximate width of one 11px tick character, to fit labels without measuring text. */
 const CHAR_W = 6;
 /** Below this many characters a truncated label says nothing, so thin instead. */
 const MIN_CHARS = 5;
@@ -59,8 +49,7 @@ function niceTicks(min: number, max: number, count = 4) {
   const lo = Math.floor(low / step) * step;
   const hi = Math.max(Math.ceil(high / step) * step, lo + step);
   const steps = Math.round((hi - lo) / step);
-  // Built by index rather than by accumulation: adding 0.1 four times gives 0.4000000001
-  // and a tick label to match.
+  // By index, not accumulation: summing 0.1 four times gives 0.4000000001.
   return { lo, hi, ticks: Array.from({ length: steps + 1 }, (_, i) => lo + i * step) };
 }
 
@@ -70,7 +59,6 @@ function numeric(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-/** A bar with its data end rounded and its baseline end square. */
 function barPath(x: number, w: number, from: number, to: number): string {
   const up = to <= from;
   const height = Math.abs(to - from);
@@ -94,9 +82,8 @@ export function ResultChart({ spec, columns, rows }: ChartProps) {
   const model = useMemo(() => {
     if (!measure || !axis) return null;
 
-    // A line's x axis has to run in order or it doubles back on itself; ISO timestamps
-    // sort chronologically as strings. A bar keeps the row order, which is the order the
-    // query asked for — that is the whole point of a top-N.
+    // A line's x must be sorted (ISO strings sort chronologically); a bar keeps the query's
+    // row order, which is the point of a top-N.
     const seen: string[] = [];
     for (const row of rows) {
       const key = String(row[axis.id] ?? "");
@@ -136,8 +123,7 @@ export function ResultChart({ spec, columns, rows }: ChartProps) {
       series: keys.map((key, i) => ({
         key,
         label: formatCell(key, seriesColumn),
-        // Fixed slot order, never cycled: `chart_for` caps series at the palette's eight,
-        // so a ninth is impossible rather than a repeated hue.
+        // Never cycled: `chart_for` caps series at the palette's eight.
         slot: i + 1,
         points: xs.map((x) => ({ x, value: cell.get(`${x}\0${key}`) ?? null })),
       })) as Series[],
@@ -182,16 +168,8 @@ export function ResultChart({ spec, columns, rows }: ChartProps) {
 
   const baseline = y(Math.max(lo, Math.min(0, hi)));
 
-  /**
-   * Which x labels to draw, and how wide each may be.
-   *
-   * A time axis reads fine with every other tick dropped — the remaining ones still say
-   * where you are. A bar's label *names that bar*, so dropping alternate ones leaves half
-   * the chart unidentifiable: it was showing Rock, Alternative & Punk, Jazz… with no way to
-   * tell which bar was Metal. So bars keep every label and truncate it to its band instead,
-   * and the untruncated name is in the table directly below. Only when a band is too narrow
-   * for a useful prefix does thinning come back.
-   */
+  // A bar's label names that bar, so bars truncate every label to its band rather than thin
+  // them; a time axis thins. Bars thin too only when a band can't fit a useful prefix.
   const fit = Math.floor(band / CHAR_W);
   const truncate = bars && fit >= MIN_CHARS;
   const every = truncate ? 1 : Math.ceil(xs.length / MAX_TICKS);
@@ -285,8 +263,7 @@ export function ResultChart({ spec, columns, rows }: ChartProps) {
                 ? xs.map((label, i) => {
                     const value = series[0].points[i].value;
                     if (value === null) return null;
-                    // Capped, not fitted to the band: the leftover is the air between bars,
-                    // and it is what separates them without a stroke.
+                    // Capped, not fitted: the leftover air separates bars without a stroke.
                     const width = Math.min(BAR_MAX, Math.max(2, band - 2));
                     return (
                       <path
@@ -318,10 +295,8 @@ export function ResultChart({ spec, columns, rows }: ChartProps) {
                         d={stacks ? ridgePath(stacks[si], x, y) : linePath(s.points, x, y)}
                         style={{ stroke: `var(--series-${s.slot})` }}
                       />
-                      {/* Markers while the series is short: two points joined by a bare 2px
-                          line reads as a stray rule, and one point has no line at all. Past a
-                          dozen they crowd, and hover carries them instead. These are markers,
-                          not labels — a value beside every point is the thing to avoid. */}
+                      {/* Markers only while short: a bare two-point line reads as a stray
+                          rule, and past a dozen they crowd. */}
                       {!stacks &&
                         xs.length <= MAX_MARKERS &&
                         s.points.map((point, i) =>
@@ -365,8 +340,7 @@ export function ResultChart({ spec, columns, rows }: ChartProps) {
             </g>
           )}
 
-          {/* One hit target per band, the full height of the plot — a 2px line and an 8px
-              dot are both far under the 24px a pointer can reliably land on. */}
+          {/* Full-height hit target per band: a 2px line or 8px dot is too small to land on. */}
           {xs.map((label, i) => (
             <rect
               key={label}
@@ -919,16 +893,8 @@ function Gauge({ spec, columns, rows }: ChartProps) {
   );
 }
 
-/**
- * Measures with no grouping — one row, so each is a figure rather than a plot.
- *
- * Values are exact, not compacted, and `ResultBlock` drops the table when the chart is a
- * kpi. A tile is already the number as text, so a one-row table under it restates it; the
- * tile carrying the full value is what makes dropping that table lossless.
- *
- * Proportional figures deliberately: `tabular-nums` gives every digit the width of a zero,
- * which reads loose at this size. The table's columns are where tabular belongs.
- */
+/** Ungrouped measures as figures. Values are exact, not compacted: `ResultBlock` drops the
+ *  table for a kpi, so the tile must carry the full value. */
 function Kpi({
   spec,
   columns,

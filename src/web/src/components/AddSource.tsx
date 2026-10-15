@@ -4,19 +4,14 @@ import type { SourceRow } from "../sources";
 import { Button } from "./Button";
 import { Collapse } from "./Collapse";
 
-/** Values that cannot work from inside a container: the deployment would be dialling itself.
- *  The form offers the swap rather than refusing, because a database really can be there. */
+/** From inside a container these dial the deployment itself. Offered a swap, not refused. */
 const LOCAL_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0", "::1"];
 
-/** How a setting is asked for. `secret` masks with a reveal, `key` and `certificate` are
- *  multi-line pastes — nothing here reads a file off disk, so a service account key and a CA
- *  certificate are both text someone pastes in. */
+/** `key` and `certificate` are multi-line pastes: nothing here reads a file off disk. */
 type Kind = "text" | "number" | "secret" | "select" | "key" | "certificate";
 
 interface Field {
-  /** The environment variable the deployment is handed. **Never shown.** Someone connecting a
-   *  database recognises "Host", not the spelling an engine happens to read it under, and every
-   *  message on this screen is in the same words as the labels. */
+  /** The deployment's environment variable. Never shown: the screen speaks in `label`s. */
   env: string;
   label: string;
   kind: Kind;
@@ -25,32 +20,26 @@ interface Field {
   placeholder?: string;
   hint?: string;
   options?: { value: string; label: string }[];
-  /** Blocks the button while blank. This list is the same one the server refuses on — the point
-   *  of having it here is that the complaint arrives while the form is still on screen. */
+  /** Blocks while blank. Must match what the server refuses on. */
   required?: boolean;
   /** Folded away under "More settings" until asked for. */
   advanced?: boolean;
-  /** A shape complaint that blocks, or "" when the value is fine. Only ever called on a
-   *  non-blank value: whether blank is allowed is `required`'s question, not this one. */
+  /** A blocking complaint, or "". Only called on non-blank values; blank is `required`'s. */
   bad?: (value: string) => string;
-  /** A complaint that does **not** block: probably a mistake, and legitimately might not be.
-   *  A blank password is the reason this exists — trust authentication is real. */
+  /** A non-blocking complaint, e.g. a blank password (trust authentication is real). */
   iffy?: (value: string) => string;
   /** A hostname, so the swap for a database on this machine is offered on it. */
   host?: boolean;
   /** What the deployment reads is base64 of what was pasted. */
   base64?: boolean;
-  /** Which property of the pasted key on this same card carries this field's value, so it can
-   *  be offered rather than retyped — and so a value that disagrees with the key is noticed. */
+  /** The pasted key's property holding this value, so it is offered and a mismatch noticed. */
   from?: string;
 }
 
 interface Warehouse {
   key: string;
   label: string;
-  /** One line on the card, so the choice can be made without knowing the product. */
   blurb: string;
-  /** Which half of the picker it sits in. */
   group: "Databases" | "Warehouses and lakehouses";
   fields: Field[];
 }
@@ -63,9 +52,8 @@ const port = (value: string) =>
 const hostname = (value: string) =>
   /^[\w.-]+$/.test(value) ? "" : "just the host on its own — no https://, no port, no path";
 
-/** A pasted service account key. Checked for the two fields that actually sign the request, so
- *  the common mistake — pasting the OAuth client file, or one field of the key — is caught here
- *  rather than by a deployment that starts and then cannot authenticate. */
+/** Checks the two fields that sign requests, catching a pasted OAuth client file here rather
+ *  than in a deployment that starts and then cannot authenticate. */
 const keyfile = (value: string) => {
   let parsed: unknown;
   try {
@@ -86,9 +74,8 @@ const certificate = (value: string) =>
 
 const blank = (what: string) => (value: string) => (value ? "" : what);
 
-/** Host, port, database, user, password — the four products that are exactly that, differing
- *  only in which port they answer on. Written once because four warehouses use it, and because
- *  the three that block on blank have to stay the same three the server refuses on. */
+/** Host/port/database/user/password warehouses. Its required fields must stay the ones the
+ *  server refuses on. */
 const server = (defaultPort: string): Field[] => [
   {
     env: "CUBEJS_DB_HOST",
@@ -111,8 +98,7 @@ const server = (defaultPort: string): Field[] => [
   },
 ];
 
-/** Offered on everything that speaks TLS, and folded away: the default is what a managed
- *  database already accepts, and the certificate box is for the private authority case only. */
+/** Folded away: managed databases accept the default; the certificate is for a private CA. */
 const encrypted: Field[] = [
   {
     env: "CUBEJS_DB_SSL",
@@ -134,18 +120,8 @@ const encrypted: Field[] = [
   },
 ];
 
-/**
- * The picker, and the settings each choice asks for.
- *
- * All of it is here rather than on the server because none of it is a server rule: the server
- * checks that what arrives can open a connection and stores it. So this table is what makes the
- * form specific — only the fields a Snowflake connection has, in Snowflake's own words — and a
- * warehouse missing from it is still connectable through "Other settings" at the bottom.
- *
- * Every field's `label` is the product's word for the thing, taken from its own connection
- * dialog. What each one is called in the deployment's environment is in `env` and appears
- * nowhere on screen.
- */
+/** Each warehouse's fields, labelled in the product's own words. Not a server rule, so it lives
+ *  here; an unlisted warehouse still connects through "Other settings". */
 const WAREHOUSES: Warehouse[] = [
   {
     key: "postgres",
@@ -392,21 +368,17 @@ const WAREHOUSES: Warehouse[] = [
   },
 ];
 
-/** The picker's word for a connection someone already made, for the two screens that name one.
- *  Falls back to the stored key: an unlisted warehouse was connected through the free-form rows
- *  and that key is the only name anybody gave it. */
+/** Falls back to the stored key: an unlisted warehouse has no other name. */
 export const warehouseName = (driver: string) =>
   WAREHOUSES.find((w) => w.key === driver)?.label ?? driver;
 
-/** Rows rather than a map, for the settings the picker has no field for: order is what was
- *  typed, and a blank name is a row being filled in. */
+/** Rows, not a map: order is as typed, and a blank name is a row being filled in. */
 interface Extra {
   env: string;
   value: string;
 }
 
-/** What the deployment is handed for a pasted key: base64 of the bytes, not of the characters,
- *  so a key with a non-ASCII character in it survives — `btoa` alone throws on one. */
+/** Base64 of the UTF-8 bytes: `btoa` alone throws on a non-ASCII character. */
 const encoded = (text: string) => {
   const bytes = new TextEncoder().encode(text);
   let binary = "";
@@ -415,24 +387,9 @@ const encoded = (text: string) => {
 };
 
 /**
- * Connecting a database: which kind it is, then the settings that kind actually has.
- *
- * **The fields are per warehouse and the validation is in the browser**, because the alternative
- * is what this replaced: one list of name/value rows where every warehouse looked identical and
- * a typo in a variable name was discovered by a deployment that started cleanly and then failed
- * every query. Nothing is asked for that the chosen warehouse does not read.
- *
- * **Nothing is a file.** A service account key and a CA certificate are pasted as text, because
- * the deployment that reads them may not be on this machine and a path would name a file it
- * cannot see. The key is base64-encoded on the way out; the certificate goes as it was pasted.
- *
- * **The escape hatch stays.** "Other settings" is the same free-form rows this form used to be,
- * for a warehouse that is not on the list or a setting that is not on the card. Without it,
- * making the form specific would have made it a smaller form.
- *
- * Also the edit form. Passing `editing` switches it to patching the stored connection: the kind
- * is fixed, blanks keep what is stored — which is the only way a password is changed without
- * the browser ever being sent it — and nothing is required, since a blank takes nothing away.
+ * Connecting a database, or with `editing`, patching the stored one: the kind is fixed and a
+ * blank keeps what is stored, so the browser is never sent a password. Keys and certificates are
+ * pasted, since the deployment that reads them may not be on this machine.
  */
 export function ConnectionForm({
   editing,
@@ -465,35 +422,29 @@ export function ConnectionForm({
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // Undefined for a connection made through the free-form rows, and **not** substituted with
-  // the first card: showing Postgres's boxes for a warehouse someone typed in by hand is how an
-  // edit silently offers to overwrite settings that connection does not have.
+  // Undefined for a hand-made connection, never defaulted to a card: that would offer to
+  // overwrite settings the connection does not have.
   const warehouse = WAREHOUSES.find((w) => w.key === driver);
   const fields = warehouse?.fields ?? [];
   const stored = new Set(editing?.credential_keys ?? []);
 
-  // Editing starts every box empty, because blank is what the server reads as "unchanged" and
-  // the browser is never sent a stored value. Connecting starts from the card's own defaults.
+  // Editing starts blank: the server reads blank as "unchanged" and never sends stored values.
   useEffect(() => {
     setValues(Object.fromEntries(fields.map((f) => [f.env, editing ? "" : (f.value ?? "")])));
     setSeen({});
     setTried(false);
     setError("");
-    // A stored setting this card has no field for is not dropped on an edit — it is shown where
-    // it can be changed, which is the same place an unlisted one is added.
+    // Stored settings with no field here go to the free-form rows rather than being dropped.
     const covered = new Set(fields.map((f) => f.env));
     const rest = [...stored].filter((env) => env !== "CUBEJS_DB_TYPE" && !covered.has(env)).sort();
     setExtras(rest.map((env) => ({ env, value: "" })));
     setOther(rest.length > 0);
     setMore(false);
-    // `stored` and `fields` are rebuilt every render, so the two things they are derived from
-    // are the dependencies.
+    // `stored` and `fields` are rebuilt every render, so depend on their sources.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [warehouse, editing]);
 
-  /** Blank-or-broken, in the field's own words. Blank is only ever a complaint when connecting:
-   *  on an edit it means "leave what is stored alone", so requiring one would demand a password
-   *  be retyped to change a port. */
+  /** Blank only complains when connecting: on an edit it means "keep what is stored". */
   const complaint = (field: Field) => {
     const value = (values[field.env] ?? "").trim();
     if (!value) return !editing && field.required ? "still needed" : "";
@@ -506,8 +457,7 @@ export function ConnectionForm({
     (field) => field.host && LOCAL_HOSTS.includes((values[field.env] ?? "").trim().toLowerCase()),
   );
 
-  // A pasted key names the project it was minted in, so one field can be filled from another —
-  // and a value that disagrees with the key is a connection to somewhere nobody meant.
+  // A pasted key names its project, so that field can be filled from it and a mismatch caught.
   const pasted = fields.find((field) => field.base64 && !complaint(field));
   const filled = fields.find((field) => field.from);
   let inKey = "";
@@ -515,8 +465,7 @@ export function ConnectionForm({
     try {
       inKey = String(JSON.parse(values[pasted.env] || "{}")[filled.from!] ?? "");
     } catch {
-      // Unparseable JSON is already the field's own blocking complaint; there is nothing to
-      // offer to copy out of it.
+      // Bad JSON is already the field's own blocking complaint.
       inKey = "";
     }
   }
@@ -526,8 +475,7 @@ export function ConnectionForm({
   const submit = async () => {
     setTried(true);
     if (wrong.length) {
-      // Nothing is sent, and a complaint hidden inside a fold is why this opens it: the button
-      // going nowhere with no visible reason is indistinguishable from a broken button.
+      // Open the fold if a complaint is hidden in it, or the button looks broken.
       if (wrong.some((field) => field.advanced)) setMore(true);
       return;
     }
@@ -537,8 +485,7 @@ export function ConnectionForm({
       const sent: Record<string, string> = {};
       for (const field of fields) {
         const value = (values[field.env] ?? "").trim();
-        // A blank is left out rather than sent empty, which is what makes it mean "unchanged"
-        // on an edit and "not set" on a new connection.
+        // Omitted, not sent empty: "unchanged" on an edit, "not set" on a new connection.
         if (value) sent[field.env] = field.base64 ? encoded(value) : value;
       }
       for (const row of extras) {
@@ -553,8 +500,6 @@ export function ConnectionForm({
     }
   };
 
-  /** One setting. Rendered from the same function above and below the fold so the two cannot
-   *  drift into looking like different kinds of thing. */
   const setting = (field: Field) => {
     const value = values[field.env] ?? "";
     const show = tried || seen[field.env];
@@ -570,9 +515,7 @@ export function ConnectionForm({
           {field.label}
           {!editing && !field.required && <em>optional</em>}
           {keep && <em>stored</em>}
-          {/* In the label's row rather than floating over the box's right edge: the row below
-              the box is sometimes a hint, sometimes a complaint and sometimes nothing, so
-              anything positioned against it lands somewhere different per field. */}
+          {/* In the label's row: what sits below the box varies per field. */}
           {field.kind === "secret" && value && (
             <Button
               className="conn-reveal"
@@ -586,8 +529,7 @@ export function ConnectionForm({
 
         {field.kind === "select" ? (
           <select value={value} onChange={(e) => set(e.target.value)}>
-            {/* On an edit the stored choice is unknown here, so an unchanged option leads —
-                picking any other one is what changes it. */}
+            {/* The stored choice is unknown here, so "unchanged" leads on an edit. */}
             {keep && <option value="">Leave as it is</option>}
             {field.options?.map((option) => (
               <option key={option.value} value={option.value}>
@@ -636,10 +578,7 @@ export function ConnectionForm({
 
   const advanced = fields.filter((field) => field.advanced);
 
-  // One element rather than a fragment, and it owns the spacing between its own rows. The two
-  // places this renders lay their children out differently — the drawer is a flex column with a
-  // gap, the wizard's step is not — and a form whose rows only breathe in one of them is the
-  // "onboarding looks unfinished" bug in its entirety.
+  // One element owning its row spacing: the drawer and the wizard lay out children differently.
   return (
     <div className="conn-form">
       <p className="drawer-blurb">
@@ -684,8 +623,6 @@ export function ConnectionForm({
         <small>Shown on the data page. Not read by the agent.</small>
       </label>
 
-      {/* Empty for a connection made through the free-form rows, which is why this says so
-          rather than rendering an empty grid: the settings are all in the fold below. */}
       {warehouse ? (
         <div className="conn-fields">{fields.filter((field) => !field.advanced).map(setting)}</div>
       ) : (
@@ -832,12 +769,7 @@ export function ConnectionForm({
   );
 }
 
-/**
- * The same form as a drawer, which is how the data page opens it.
- *
- * The split exists so the wizard can render the fields inline without a second copy of them:
- * what a valid connection is lives in `ConnectionForm`, and this is only the chrome around it.
- */
+/** `ConnectionForm` as a drawer, for the data page; the wizard renders the form inline. */
 export function AddSource(
   props: React.ComponentProps<typeof ConnectionForm> & { onCancel: () => void },
 ) {

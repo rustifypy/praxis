@@ -7,14 +7,8 @@ import { Button } from "./Button";
 import { ResultChart } from "./ResultChart";
 
 /**
- * A query's data, as a block of the transcript rather than a fold inside the trace.
- *
- * It renders from the rows the event carried, so a reopened chat draws its tables with no
- * requests at all; `resultId` is only spent when someone asks for the rest. That split is
- * the whole reason the full result set is persisted separately from the event log.
- *
- * Sorting is over the loaded rows and says so. Sorting a hundred-row head and presenting
- * it as the top ten would be a wrong answer, so the control offers the full set first.
+ * A query's data. Renders from the rows the event carried; `resultId` fetches the rest only on
+ * request. Sorting covers loaded rows only, and says so.
  */
 
 type Sort = { id: string; dir: "asc" | "desc" };
@@ -66,8 +60,7 @@ export function ResultBlock({
   function toggle(id: string) {
     setSort((prev) => {
       if (prev?.id !== id) return { id, dir: "desc" };
-      // Third click clears it, so the query's own `order` is reachable again — that order
-      // is the one the agent asked for and the one its answer describes.
+      // Third click clears it, restoring the query's own order that the answer describes.
       return prev.dir === "desc" ? { id, dir: "asc" } : null;
     });
   }
@@ -94,15 +87,10 @@ export function ResultBlock({
 
       {failed && <p className="res-failed">{failed}</p>}
 
-      {/* Drawn from the rows the event carried, never from `loaded` — the server only
-          offered a chart it knew fits in those, and re-deriving it from a longer set after
-          "show all" would change the picture without changing the query. */}
+      {/* From the event's rows, never `loaded`: the server chose the chart to fit those. */}
       {chart && <ResultChart spec={chart} columns={columns} rows={rows} />}
 
-      {/* A kpi is one row rendered as figures, so the table under it would print the same
-          numbers again. Dropping it is lossless because the tiles carry exact values — see
-          `Kpi` in ResultChart. Every other chart keeps its table: that is where the
-          untruncated labels and the values a chart only positions are read. */}
+      {/* A kpi/gauge already shows exact values, so its table would repeat them. */}
       {chart?.type !== "kpi" && chart?.type !== "gauge" && (
         <div className="res-scroll">
           <table className="res-table">

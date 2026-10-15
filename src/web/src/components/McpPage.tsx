@@ -8,14 +8,8 @@ import { Copy } from "./Copy";
 import { Info } from "./Info";
 
 /**
- * Agent access: the MCP endpoint, whether it answers, and what to paste into a client.
- *
- * Its own mode rather than a panel on the data page, because the question it answers is not
- * "what am I connected to" — it is about handing this install's tools to something else.
- *
- * The two config blocks are the server's own strings, not assembled here: the endpoint and
- * the header have one definition in `web/mcp.client_config`, so a pasted block cannot quote
- * an address the server does not serve.
+ * Agent access: the MCP endpoint and what to paste into a client. The config blocks are the
+ * server's own strings (`web/mcp.client_config`), never assembled here.
  */
 export function McpPage() {
   const [access, setAccess] = useState<McpAccess | null>(null);
@@ -37,13 +31,7 @@ export function McpPage() {
     void load();
   }, [load]);
 
-  /**
-   * Hide the token wherever it appears, not just in its own field — it is quoted inside both
-   * config blocks, so masking one and printing it twice below was no masking at all.
-   *
-   * Display only: Copy is handed the real string, because a masked config pasted into a client
-   * is worse than a visible one.
-   */
+  // Masks the token everywhere it is quoted, for display only; Copy gets the real string.
   const mask = (text: string) =>
     shown || !access ? text : text.replaceAll(access.token, "•".repeat(access.token.length));
 
@@ -88,8 +76,7 @@ export function McpPage() {
                 disabled={busy}
                 onClick={() => {
                   const enabled = !access.enabled;
-                  // Optimistic, then corrected by the response: a switch that waits for a
-                  // round trip reads as broken.
+                  // Optimistic, then corrected by the response.
                   setAccess({ ...access, enabled });
                   void guard(async () => {
                     const out = await api.setMcpEnabled(enabled);

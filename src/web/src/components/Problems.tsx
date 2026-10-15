@@ -5,19 +5,8 @@ import { Badge } from "./Badge";
 import { Button } from "./Button";
 
 /**
- * Everything wrong with the draft, under the editor rather than above it.
- *
- * **Errors used to stack on top of the panes**, which meant the act of finding out what was wrong
- * shortened the thing you needed to read to fix it — a failed compile with four member errors
- * pushed CodeMirror down by a third of the screen. Below, the editor keeps its position and the
- * panel takes its own space.
- *
- * Four kinds, in the order they stop you, and they are genuinely different questions:
- * `errors` is the gate refusing before Cube is asked at all; `compile_error` is Cube refusing the
- * whole model; `member_errors` are members that compiled and will fail when queried; `impact` is
- * saved queries elsewhere in the app that this change would break. Only the first two block a
- * publish — the last two are reported and deliberately do not, because a model that compiles with
- * one bad measure still beats one that will not compile.
+ * Everything wrong with the draft, below the editor so it doesn't push it down. Only `errors`
+ * (the gate) and `compile_error` (Cube) block a publish; member errors and impact are reported.
  */
 export function Problems({ check }: { check: CheckResult }) {
   const [show, setShow] = useState(true);

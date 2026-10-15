@@ -7,25 +7,8 @@ import { JobProgress } from "./JobProgress";
 import { TablePicker } from "./TablePicker";
 
 /**
- * Building the data model: read the database, choose what to model, run the pipeline.
- *
- * **One component, two callers** — the last step of onboarding and the Rebuild action on the data
- * page — which is what earns it a file. They are the same screen because they are the same work;
- * the only difference is that a rebuild replaces a model that already exists, which is a sentence
- * in a confirmation rather than a different flow.
- *
- * **`read` runs on arrival, unasked.** It caches a catalog and writes no model file, so there is
- * nothing to confirm — and without it the picker has nothing to show.
- *
- * **The stages are chained through the job, not through one request.** Each `POST /pipeline/{stage}`
- * answers as soon as the job exists, and `steps.action` refuses a stage whose predecessor has not
- * succeeded — so they cannot be fired together. The queue below starts the next one when the last
- * one lands, which also means a cancel stops the rest.
- *
- * **Cubes are required and enrichment is not.** Without cubes there is no model and nothing can
- * answer a question, so onboarding cannot end here. Descriptions and views are one model call per
- * table, they are skippable, and the editor's assistant can write them later — which is why a
- * failure in those two reports itself and lets you through rather than blocking.
+ * Building the data model, for onboarding and the data page's Rebuild. Stages are queued here
+ * and started one per finished job, since the server refuses a stage before its predecessor.
  */
 export function BuildModel({
   job,
@@ -33,17 +16,12 @@ export function BuildModel({
   onJob,
   onRunning,
 }: {
-  /** The running job. The page owns the event stream; this only draws it and reacts to its end. */
   job: JobState | null;
-  /** True on the data page, where a model already exists and would be replaced. */
   rebuilding: boolean;
   onJob: (job: JobState) => void;
   /**
-   * Whether a sequence is in flight — a stage running, or one queued behind it.
-   *
-   * The wizard needs it because `onboarded` goes true the moment cubes land, which is *mid*
-   * sequence: without this the wizard would unmount between cubes and describe, taking the queue
-   * with it, and views would never run.
+   * Whether a stage is running or queued. `onboarded` goes true once cubes land, mid-sequence,
+   * so the wizard needs this to avoid unmounting the queue.
    */
   onRunning?: (running: boolean) => void;
 }) {
@@ -52,15 +30,12 @@ export function BuildModel({
   const [queue, setQueue] = useState<StageName[]>([]);
   const [error, setError] = useState("");
   const [failed, setFailed] = useState<{ stage: string; message: string } | null>(null);
-  // Which job's ending has already been handled, so the effect below fires once per job rather
-  // than on every render after one finishes.
+  // The job whose ending was already handled, so the effect fires once per job.
   const settled = useRef("");
   const asked = useRef(false);
 
   const running = Boolean(job && !job.done);
 
-  // Reported up rather than derived there: only this component knows about the queue, and the
-  // gap between one stage ending and the next starting is exactly when the wizard must not go.
   useEffect(() => {
     onRunning?.(running || queue.length > 0);
   }, [running, queue.length, onRunning]);
@@ -78,8 +53,7 @@ export function BuildModel({
     [onJob],
   );
 
-  // Read the database on arrival. `asked` rather than a check on `catalog`, because a database
-  // with no tables reads successfully and would otherwise be re-read forever.
+  // Read on arrival. `asked`, not `catalog`: an empty database would be re-read forever.
   useEffect(() => {
     if (asked.current || running) return;
     asked.current = true;
@@ -94,7 +68,6 @@ export function BuildModel({
     })();
   }, [running, run]);
 
-  // One job has ended: re-read the catalog, then start the next stage or record the failure.
   useEffect(() => {
     if (!job?.done || settled.current === job.id) return;
     settled.current = job.id ?? "";
@@ -103,8 +76,6 @@ export function BuildModel({
     void api.tables().then(setCatalog).catch(() => {});
 
     if (job.error) {
-      // Nothing queued after a failure. Cubes failing means there is no model; describe or views
-      // failing means there is one and it is missing its prose, which is a different sentence.
       setQueue([]);
       setFailed({ stage, message: job.error });
       return;
@@ -157,8 +128,7 @@ export function BuildModel({
       )}
 
       {!catalog?.read ? (
-        // A read that failed leaves nothing to pick from, and the picker's own Re-read is inside
-        // the picker — so without this the only way out of a failed first read is a reload.
+        // The picker's own Re-read is unreachable when the first read failed.
         <div className="stage-cta">
           <p className="stage-hint">
             {running ? "Reading the database…" : "The database has not been read yet."}
@@ -201,8 +171,6 @@ export function BuildModel({
             onRun={build}
             onReread={() => void run("read")}
           />
-          {/* Said where the decision is made, because "why is my model just tables" is otherwise
-              answered by reading the code. */}
           {!enrich && (
             <p className="stage-hint">
               Without this the model is cubes only: no descriptions, no views, and the agent

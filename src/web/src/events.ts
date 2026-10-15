@@ -1,12 +1,6 @@
 import type { AgentEvent, Item, ToolEnd } from "./types";
 
-/**
- * Close every open block and stop its animations.
- *
- * Returns new objects rather than mutating. Mutating an item in place left React with
- * the same object identity, so a collapsed reasoning panel stayed visually expanded and
- * a finished block kept its caret blinking — the transcript looked frozen.
- */
+/** Close every open block. Returns new objects: React won't re-render a mutated item. */
 function settle(items: Item[]): Item[] {
   return items.map((item) => {
     if (item.kind === "thinking" && (item.open || item.live)) {
@@ -23,26 +17,15 @@ function settle(items: Item[]): Item[] {
 }
 
 /**
- * Fold one event into the rendered transcript.
- *
- * The same reducer serves replay and live streaming, so what you see after a reload is
- * what you saw as it happened. The only difference is the payload key: a live delta
- * appends to the block already open, a replayed block starts a new one.
+ * Fold one event into the transcript. Serves both replay and live streaming: a live `delta`
+ * appends to the open block, a replayed `text` starts a new one.
  */
 export function applyEvent(items: Item[], event: AgentEvent): Item[] {
   const delta: string | undefined = event.data.delta;
   const whole: string | undefined = event.data.text;
   const streaming = delta !== undefined;
 
-  /**
-   * Append a delta to the open block of this kind, wherever it sits.
-   *
-   * Not `items[items.length - 1]`: an answer takes ownership of its turn's results, so the
-   * moment one is hoisted the open answer is no longer the last item and every further
-   * token started a *new* answer block — one word per line down the page. Only live
-   * streaming showed it, because `service.flush` coalesces deltas into one block before
-   * they are stored, so a replayed transcript looked correct.
-   */
+  // The open block of this kind may not be the last item (results land after it).
   function extend(kind: "thinking" | "answer"): Item[] | null {
     if (!streaming) return null;
     const open = items.findLastIndex((item) => item.kind === kind && item.live);
@@ -77,9 +60,7 @@ export function applyEvent(items: Item[], event: AgentEvent): Item[] {
     case "text": {
       const extended = extend("answer");
       if (extended) return extended;
-      // Everything stays in the order it happened, results included: with two queries in a
-      // turn, moving the data below the prose separates each table from the step that
-      // fetched it and leaves the reader matching them up by name.
+      // Results stay in order, beside the step that fetched them, not hoisted below the prose.
       return [...settle(items), { kind: "answer", text: delta ?? whole ?? "", live: streaming }];
     }
 
@@ -95,9 +76,7 @@ export function applyEvent(items: Item[], event: AgentEvent): Item[] {
         },
       ];
 
-    // Onto the step that is asking, not a block of its own. A separate card sat *below* the
-    // run, which put a script's output above the script that printed it, and once answered it
-    // was a dead card carrying a copy of a file the step already shows.
+    // Folds onto the step that is asking, so the script sits above its own output.
     case "approval": {
       const i = items.findLastIndex((item) => item.kind === "tool" && !item.end);
       if (i === -1) return items;
@@ -107,9 +86,7 @@ export function applyEvent(items: Item[], event: AgentEvent): Item[] {
       return next;
     }
 
-    // Its own block, unlike `approval`, which folds onto the step that is asking. A proposal
-    // outlives the step that made it — it is still waiting for a click after the turn has ended,
-    // and after a reload it is the only record that the change was ever offered.
+    // Its own block: a proposal outlives its step and still awaits a click after the turn ends.
     case "proposal":
       return [
         ...items,
@@ -131,7 +108,6 @@ export function applyEvent(items: Item[], event: AgentEvent): Item[] {
     }
 
     case "tool_end": {
-      // Attach to the most recent tool still waiting for its result.
       const i = items.findLastIndex((item) => item.kind === "tool" && !item.end);
       if (i === -1) return items;
       const tool = items[i] as Extract<Item, { kind: "tool" }>;
@@ -140,12 +116,9 @@ export function applyEvent(items: Item[], event: AgentEvent): Item[] {
       next[i] = {
         ...tool,
         end,
-        // The server times the query; this times the whole call including the model's
-        // wait. Only shown when the server has nothing more precise.
+        // Fallback timing; the server's own query time is preferred when present.
         ms: tool.startedAt ? Date.now() - tool.startedAt : undefined,
       };
-      // Data earns its own block. The label is the server's sentence for the query, so it
-      // says what this table is without the trace step above it being open.
       if (tool.tool === "run_query" && end.ok && end.columns?.length && end.preview?.length) {
         next.push({
           kind: "result",
@@ -157,14 +130,10 @@ export function applyEvent(items: Item[], event: AgentEvent): Item[] {
           chart: end.chart ?? null,
         });
       }
-      // A file a script wrote earns a block too — otherwise a chart it drew is a file nobody
-      // knows exists. `wrote` is paths; the block fetches each one from the workspace.
       if (tool.tool === "run_python" && end.wrote?.length) {
         next.push({ kind: "files", label: tool.label, paths: end.wrote });
       }
-      // The agent overriding the chart it was given. It authors its own tool events like
-      // everything else, so this needs no new event type — and it lands on the newest
-      // result because that is the one `set_chart` validated itself against.
+      // The newest result is the one `set_chart` validated against.
       if (tool.tool === "set_chart" && end.ok && end.chart) {
         const target = next.findLastIndex((item) => item.kind === "result");
         if (target !== -1) {

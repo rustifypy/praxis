@@ -5,17 +5,8 @@ import type { Service, SourceRow } from "../sources";
 import { Button } from "./Button";
 
 /**
- * The hand-over: the compose file each deployment is run with, and the box its address comes
- * back in.
- *
- * This portal does not run anything. It holds the credentials, mints the secrets, and renders
- * them into a compose file — so this panel is the entire interface between "a database is
- * configured" and "a deployment is answering", and it has to be readable enough to follow on a
- * machine that is not this one.
- *
- * The file is **downloaded and never shown**. It carries the warehouse password and all four
- * secrets, the only thing to do with it is run it, and putting it on screen would render those
- * values into the DOM for nothing. Editing it afterwards is the owner's business.
+ * The hand-over: each deployment's compose file, and where its address comes back. The file is
+ * downloaded, never shown, so its credentials never enter the DOM.
  */
 export function Deploy({
   source,
@@ -30,8 +21,7 @@ export function Deploy({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  // Following the row rather than mirroring it once: a URL edited from the connection form has
-  // to show up here too, and these inputs are the only place it is displayed.
+  // Follow the row: the connection form can edit these URLs too.
   useEffect(() => {
     setStoreUrl(source.store_url);
     setSandboxUrl(source.sandbox_url);
@@ -41,8 +31,6 @@ export function Deploy({
     setSaving(true);
     setError("");
     try {
-      // Checked before it is stored, so an address that does not answer is reported rather
-      // than saved — the same call the wizard makes.
       const body = await api.deployed({
         store_url: storeUrl.trim(),
         sandbox_url: sandboxUrl.trim(),
@@ -95,8 +83,6 @@ export function Deploy({
               />
             </li>
             <li>
-              {/* Its own deployment, not a fourth service beside the others: it shares no
-                  network, volume or secret with them. */}
               <Download
                 service="sandbox"
                 title="The sandbox"
@@ -157,12 +143,7 @@ export function Deploy({
   );
 }
 
-/**
- * One service's file.
- *
- * A plain link and not a fetch: the route answers with `Content-Disposition: attachment`, so the
- * browser saves it without the page ever holding the credentials it contains.
- */
+/** A plain link, not a fetch, so the page never holds the credentials the file contains. */
 function Download({
   service,
   title,

@@ -29,7 +29,6 @@ wheels/
 
 # Frontend
 src/web/node_modules/
-src/web/tsconfig.tsbuildinfo
 src/analyst_agent/api/static/
 
 /cube/

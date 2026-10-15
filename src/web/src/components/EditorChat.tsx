@@ -16,22 +16,8 @@ const EXAMPLES = [
 ];
 
 /**
- * The model editor's chat: the third pane, beside the tree and the file.
- *
- * The same reducer and the same blocks as the question chat, because it is the same event stream
- * — this had its own four-type reducer once, so the editor's reasoning was emitted and never
- * shown. Only the frame is local: one branch, no uploads, no chat list.
- *
- * **It sends the unsaved buffer with every message.** Staging is the browser's, so the server has
- * no idea what the model currently looks like; an agent reading only the committed branch would
- * propose a change that silently reverts whatever was accepted a minute ago.
- *
- * **Nothing it says is saved.** The agent proposes; each proposal arrives as a card, and clicking
- * it opens the diff in the editor pane where hunks are accepted one at a time. This component
- * never writes to the buffer itself — it hands the proposal up to the editor, which owns it.
- *
- * The pane starts empty each session and creates a chat on the first message. Every turn is still
- * stored and replayable, but a history list would be a fourth column in a three-column layout.
+ * The model editor's chat. It never writes the buffer: proposals go up to the editor, which owns
+ * it. Starts empty each session; a chat is created on the first message.
  */
 export function EditorChat({
   modelRef,
@@ -39,11 +25,9 @@ export function EditorChat({
   reviewed,
   onReview,
 }: {
-  /** The branch this conversation edits. Not `ref` — React reserves that prop name. */
+  /** The branch being edited. Not `ref`, which React reserves. */
   modelRef: string;
-  /** What the editor currently holds for a path, so a proposal card can size its own diff. */
   textOf: (path: string) => string;
-  /** Paths already opened for review, so a settled card says so. */
   reviewed: Set<string>;
   onReview: (path: string, text: string | null) => void;
 }) {
@@ -55,7 +39,7 @@ export function EditorChat({
   const abort = useRef<AbortController | null>(null);
   const tail = useRef<HTMLDivElement>(null);
 
-  // A branch switch is a different model, so it is a different conversation.
+  // A branch switch starts a new conversation.
   useEffect(() => {
     setChat(null);
     setItems([]);
@@ -80,7 +64,6 @@ export function EditorChat({
         setItems((prev) => applyEvent(prev, event));
       }
     } catch (e) {
-      // An aborted fetch is the stop button working, not a failure.
       if (!controller.signal.aborted) setError((e as Error).message);
     } finally {
       setBusy(false);

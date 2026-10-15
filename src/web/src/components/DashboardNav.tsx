@@ -3,7 +3,6 @@ import type { DashboardRow } from "../types";
 import { Button } from "./Button";
 import { Empty } from "./Empty";
 
-/** The dashboard list column. */
 export function DashboardNav({
   dashboards,
   selected,

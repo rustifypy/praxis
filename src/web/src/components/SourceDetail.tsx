@@ -13,22 +13,7 @@ import { Menu } from "./Menu";
 import { ModelEditor } from "./ModelEditor";
 import { SystemBanners } from "./SystemBanners";
 
-/**
- * The data page: the connected database, and its model.
- *
- * **There is no pipeline on this screen.** Building the model is the last step of onboarding, so
- * by the time anyone arrives here it exists — and a four-stage stepper offering to re-run
- * individual steps was an admin surface for something that happens once. What is left is
- * Rebuild: the same picker, behind a typed confirmation, running every stage in order.
- *
- * **There is no deployment panel either.** The addresses are pasted during onboarding and the
- * portal starts nothing, so there is nothing here to start, stop, re-point or rotate. Editing the
- * credentials stays, because a wrong warehouse password is fixed by editing them and re-running
- * the compose file — which the form says, since a container's environment cannot be changed in
- * place.
- *
- * So the page is two things: what you are connected to, and the model on top of it.
- */
+/** The data page: the connected database, and its model. */
 export function SourceDetail({
   source,
   job,
@@ -67,10 +52,7 @@ export function SourceDetail({
 
   return (
     <div className="detail">
-      {/* Everything about the *connection* scrolls; the model below fills what is left. The
-          editor is an IDE and an IDE cannot be a section of a scrolling page — a pane that grows
-          with its content has no height to give CodeMirror, which is what pinned the old editor
-          to 560px. */}
+      {/* Only the connection scrolls: the editor needs a fixed height to give CodeMirror. */}
       <div className="detail-scroll">
       <header className="detail-head">
         <span className={`health-dot ${health.tone}`} title={source.health.status} />
@@ -86,11 +68,7 @@ export function SourceDetail({
             {checking ? "Testing…" : "Test connection"}
           </Button>
 
-          {/* No link to Cube. Its port is not published — every call goes through the store,
-              which is what makes that the one authenticated door — so a link would be a browser
-              error page rather than an answer. */}
-          {/* No lifecycle verbs. Every service runs wherever its owner put it, so starting and
-              stopping belongs to them, and everything here works through an address. */}
+          {/* No link to Cube: its port is not published, only the store's. */}
           <Menu
             items={[
               {
@@ -130,8 +108,6 @@ export function SourceDetail({
         </p>
       )}
 
-      {/* Open only while a rebuild is being set up or is running. It is the pipeline, and the
-          pipeline is not what this page is about. */}
       {(rebuilding || busy) && (
         <section className="detail-panel">
           <div className="panel-head">
@@ -154,9 +130,6 @@ export function SourceDetail({
 
       </div>
 
-      {/* No heading and no rule above it. The editor carries its own bar, and a "Model" title
-          over a full-height IDE reads as a section of something larger — which is exactly what
-          this stopped being. What the heading used to explain is now the bar's own Info. */}
       <ModelEditor deployed={source.deployed} onChanged={onRefresh} />
 
       {confirmRebuild && (

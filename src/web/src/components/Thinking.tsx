@@ -3,11 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { duration, useElapsed } from "../hooks";
 import { Collapse } from "./Collapse";
 
-/**
- * The model writes its reasoning as `**Heading**` followed by prose, often several
- * sections deep. Rendered raw those asterisks are just noise, so they become real
- * headings — this is the difference between a reasoning panel and a text dump.
- */
+/** Splits reasoning on the model's `**Heading**` markers into real headings. */
 function sections(text: string): { head?: string; body: string }[] {
   const out: { head?: string; body: string }[] = [];
   const pattern = /\*\*(.+?)\*\*/g;
@@ -44,8 +40,7 @@ export function Thinking({
   const body = useRef<HTMLDivElement>(null);
   const elapsed = useElapsed(startedAt, live);
 
-  // Follow the agent while it reasons, but never yank a panel shut that the reader
-  // deliberately opened.
+  // Follow the agent, but never close a panel the reader opened.
   useEffect(() => {
     if (!pinnedOpen) setExpanded(open);
   }, [open, pinnedOpen]);

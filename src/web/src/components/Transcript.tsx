@@ -8,27 +8,14 @@ import { ResultBlock } from "./ResultBlock";
 import { Thinking } from "./Thinking";
 import { ToolCall } from "./ToolCall";
 
-/**
- * How a proposed file becomes reviewable. Supplied only by the model editor.
- *
- * The card needs two things this renderer cannot know, because both are properties of the
- * editor's buffer and staging lives there: what the file currently holds, and what to do when
- * someone wants to review it. Absent — a question chat — a proposal renders as a card that says
- * what was offered and does nothing, which is correct: only the editor agent emits one.
- */
+/** How a proposal becomes reviewable; supplied only by the model editor, which owns the buffer. */
 interface Proposals {
   textOf: (path: string) => string;
   reviewed: Set<string>;
   onReview: (path: string, text: string | null) => void;
 }
 
-/**
- * One event stream, rendered. Both agents' chats use this — the reducer that builds `items`
- * is already shared, and a second renderer over the same shape is what left the model
- * editor with no reasoning panel and no compaction notice.
- *
- * Rows only: the scroller, the empty state and the composer belong to whoever is placing it.
- */
+/** One event stream's rows, shared by every agent's chat. The caller owns scroller and composer. */
 export function Transcript({
   items,
   chatId,
@@ -37,7 +24,7 @@ export function Transcript({
 }: {
   items: Item[];
   chatId: string;
-  /** Threaded to the approval buttons. A Run answers on its own route; a chat omits it. */
+  /** Where approval answers go; a Run passes its own route, a chat omits it. */
   approve?: (choice: "yes" | "always" | "no") => Promise<unknown>;
   proposals?: Proposals;
 }) {

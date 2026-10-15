@@ -4,18 +4,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useDismiss } from "../hooks";
 
 /**
- * An explanation, one click away instead of in the reading path.
- *
- * Everything this project knows about a screen, set at body weight directly under the
- * heading, puts three paragraphs between the user and the controls. The words are worth
- * keeping; that position is not.
- *
- * Positioned `fixed` and measured, not absolute. These icons sit inside the sources
- * list column (about 200px wide) and inside the chat header's popover, which scrolls —
- * and `overflow-y: auto` computes `overflow-x` to `auto` too, so an absolute panel wider
- * than its container does not simply spill, it makes that container scroll sideways. A
- * fixed layer has no clipping ancestor, and clamping to the viewport is then enough to
- * be correct everywhere it is used.
+ * An explanation one click away. Positioned `fixed`, not absolute: inside a scroller,
+ * `overflow-y: auto` forces `overflow-x: auto`, so a wide absolute panel scrolls it sideways.
  */
 export function Info({ label, children }: { label: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -32,13 +22,11 @@ export function Info({ label, children }: { label: string; children: ReactNode }
     const anchor = button.current?.getBoundingClientRect();
     const box = panel.current?.getBoundingClientRect();
     if (!anchor || !box) return;
-    // Prefer left-aligned with the icon; slide back inside when that would overflow.
     const left = Math.max(8, Math.min(anchor.left - 8, window.innerWidth - box.width - 8));
     setAt({ top: anchor.bottom + 6, left });
   }, [open]);
 
-  // A fixed panel does not travel with its anchor, so close rather than let it detach.
-  // Capture phase: the scroller is usually an inner element, not the window.
+  // A fixed panel doesn't follow its anchor, so close on scroll (captured: inner scrollers).
   useEffect(() => {
     if (!open) return;
     const close = () => setOpen(false);
@@ -66,8 +54,7 @@ export function Info({ label, children }: { label: string; children: ReactNode }
         <span
           className="info-panel"
           ref={panel}
-          // Hidden for the one frame between mounting and being measured, so it is never
-          // painted at the top-left of the screen first.
+          // Hidden until measured, so it never flashes at the top-left.
           style={at ? { top: at.top, left: at.left } : { visibility: "hidden" }}
         >
           {children}

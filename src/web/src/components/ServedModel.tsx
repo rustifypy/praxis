@@ -5,18 +5,7 @@ import { Button } from "./Button";
 import { Empty } from "./Empty";
 import { Section } from "./Section";
 
-/**
- * What Cube compiled, for one branch. Not a YAML viewer — the files on disk are what was
- * authored, this is what survived compilation.
- *
- * Master–detail rather than accordions: expanding a cube in place pushed every row below
- * it down the page, so comparing two meant losing your position twice. Views and cubes
- * are separate sections because a view is the curated surface a question should reach and
- * a cube is the table underneath.
- *
- * A model failure is a banner over empty Views and Cubes, never an early return over the
- * list: Cube not serving is a thing to say, not a blank page.
- */
+/** What Cube compiled for one branch — what survived compilation, not the YAML. */
 
 type Picked = { type: "entity"; id: string };
 
@@ -44,11 +33,9 @@ export function ServedModel({
   model: Model | null;
   loading: boolean;
   onRefresh: () => void;
-  /** Why the model cannot be read at all — a stopped container. Distinct from a Cube that
-   *  answered badly. */
+  /** Why the model cannot be read at all, as distinct from a Cube that answered badly. */
   unavailable?: string;
-  /** Open the file that defines this entity. Absent on main, where the model is generated
-   *  and the panel is a reader. */
+  /** Absent on main, which is generated and read-only. */
   onEdit?: (file: string) => void;
 }) {
   const [filter, setFilter] = useState("");
@@ -56,8 +43,6 @@ export function ServedModel({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const needle = filter.trim().toLowerCase();
 
-  // An entity whose every member is filtered out goes too, or a search reads as "found
-  // in 13 places" when it was found in one.
   const shown = useMemo(() => {
     const entities = model?.entities ?? [];
     const ordered = [...entities].sort((a, b) => a.name.localeCompare(b.name));
@@ -71,14 +56,8 @@ export function ServedModel({
 
   const listed = useMemo(() => [...shown.views, ...shown.cubes], [shown]);
 
-  /**
-   * What the box opens on under a filter, and only under a filter — volunteering the
-   * first view on arrival would make Views the one section that is never collapsed.
-   * A search does have to land on the strongest match: searching "revenue" and opening
-   * the one view that does not mention it is a worse answer than the list already gave.
-   * The *list* stays in name order regardless — re-ranking rows while someone types moves
-   * the thing they are reaching for.
-   */
+  // Under a filter only, open the strongest match. The list stays in name order: re-ranking
+  // rows while someone types moves the thing they are reaching for.
   const fallback: Picked | null = useMemo(() => {
     if (!needle) return null;
     if (listed.length) {
@@ -95,12 +74,7 @@ export function ServedModel({
   const selected = picked && alive(picked) ? picked : fallback;
   const entity = selected?.type === "entity" ? listed.find((e) => e.name === selected.id) : null;
 
-  /**
-   * Shut until asked for, with one exception that is not a preference: a filter must
-   * reveal what it matched, or typing into a column of shut headers appears to do
-   * nothing. Nothing else forces one open — collapsing a section while its row is in the
-   * detail box is allowed, and leaves the detail alone.
-   */
+  // A filter must reveal what it matched, or typing into shut sections appears to do nothing.
   const isOpen = (section: string) => Boolean(needle) || expanded.has(section);
 
   const toggle = (section: string) =>
@@ -111,26 +85,17 @@ export function ServedModel({
       return next;
     });
 
-  // A filter that excludes the open row would otherwise leave the box showing something
-  // the list no longer offers.
   useEffect(() => {
     if (picked && !alive(picked)) setPicked(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [picked, listed]);
 
-  // Model size comes from the server: "over cubes only, because a view's members are the
-  // cube's re-exported" is a fact about the model, and it is tested there.
   const totals = useMemo(
     () => model?.counts ?? { views: 0, cubes: 0, members: 0, exposed: 0, described: 0 },
     [model],
   );
 
-  /**
-   * Why Views and Cubes are empty, or null when they are not.
-   *
-   * These were four early returns. Now they are the sections' empty copy, so the list
-   * always renders and the reason is beside it.
-   */
+  // Why Views and Cubes are empty, or null when they are not.
   const modelNote =
     unavailable ??
     (loading && !model
@@ -172,9 +137,7 @@ export function ServedModel({
         </Button>
       </div>
 
-      {/* Above the split, not instead of it. A compile failure leaves /v1/meta empty while
-          the container stays perfectly healthy, which is why the dot above can be green —
-          and why this needs saying rather than showing an empty list. */}
+      {/* A compile failure empties /v1/meta while the health dot stays green. */}
       {model && !model.serving && !unavailable && (
         <p className="banner bad">
           Cube did not answer <code>/v1/meta</code>: {model.error || "no response"}. Either
@@ -248,7 +211,6 @@ export function ServedModel({
   );
 }
 
-/** One line in the list. Never grows — that is the point of the split. */
 function Row({
   entity,
   on,
@@ -291,8 +253,7 @@ function Detail({
 }) {
   const members = needle ? entity.members.filter((m) => matches(m, needle)) : entity.members;
   const hidden = entity.members.length - members.length;
-  // Only meaningful once some view reaches this cube: marking every member of a cube no
-  // view touches repeats what the row already says, on every line.
+  // A cube no view touches is already flagged on its row.
   const partial = !entity.is_view && entity.exposed_by.length > 0;
 
   return (
@@ -303,7 +264,6 @@ function Detail({
         </span>
         <h4>{entity.title || entity.name}</h4>
         <code className="served-detail-id">{entity.name}</code>
-        {/* In the header rather than a bar of its own: it acts on the thing named beside it. */}
         {onEdit && entity.file && (
           <Button className="served-detail-edit" onClick={() => onEdit(entity.file)}>
             Edit
@@ -379,12 +339,8 @@ function Member({ member, flagUnexposed }: { member: ServedMember; flagUnexposed
         {member.granularities.length > 0 && (
           <span className="served-grains">{member.granularities.join(" · ")}</span>
         )}
-        {/* A view member is a rename of a cube member. Saying which one is the difference
-            between reading the view as a new model and reading it as a projection. */}
         {member.alias && <span className="served-alias">← {member.alias}</span>}
-        {/* Neutral, not amber. In practice these are the surrogate keys a view omits on
-            purpose, so styling it as a warning would report a healthy model as a dozen
-            problems. A cube no view reaches at all is flagged on the row instead. */}
+        {/* Neutral, not amber: usually surrogate keys a view omits on purpose. */}
         {flagUnexposed && member.exposed_by.length === 0 && (
           <span className="served-alias" title="No view re-exports this member">
             not in a view

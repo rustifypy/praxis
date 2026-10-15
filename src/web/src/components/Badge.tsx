@@ -1,16 +1,8 @@
 import type { ReactNode } from "react";
 
 /**
- * A count or a label attached to something else.
- *
- * Nine of these existed under seven names, and the names belonged to whichever feature happened
- * to need one first — which is how `Changes` and `Problems` both came to render `.tree-count`, a
- * class owned by the file tree, for a number that has nothing to do with files.
- *
- * Three shapes, because there really are three: a `count` is bare tabular text beside a heading,
- * a `chip` is a filled label sitting inside a row, and a `pill` is a bordered tag that floats at
- * the end of one. `tone` is semantic and separate from shape — a pill and a chip can both be
- * saying the same thing went wrong.
+ * A count or label attached to something. `count` is bare text beside a heading, `chip` a filled
+ * label in a row, `pill` a bordered tag at its end; `tone` is independent of shape.
  */
 export function Badge({
   variant = "count",

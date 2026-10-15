@@ -10,14 +10,8 @@ export interface ComposerHandle {
   fill: (text: string) => void;
 }
 
-/**
- * The question, and anything it arrives with.
- *
- * A file is uploaded the moment it is dropped rather than when Send is pressed: the server
- * profiles it in the sandbox, and the chip is where the shape it found is reported — so an
- * unreadable CSV is visible before a turn is spent on it. The paths ride along with the question,
- * which is what puts them in the transcript.
- */
+/** Files upload on drop, not on Send, so an unreadable CSV shows on its chip before a turn
+ *  is spent on it. */
 export function Composer({
   chatId,
   busy,
@@ -53,14 +47,12 @@ export function Composer({
     },
   }));
 
-  // Attachments belong to the chat they were uploaded into, so switching chats drops them.
   useEffect(() => {
     setAttached([]);
     setSending([]);
     setFailed("");
   }, [chatId]);
 
-  // Grow with the question rather than scrolling a three-line box.
   useEffect(() => {
     const el = box.current;
     if (!el) return;
@@ -68,7 +60,6 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }, [value]);
 
-  // The composer is where attention already is, so focus it when a turn ends.
   useEffect(() => {
     if (!busy && !disabled) box.current?.focus();
   }, [busy, disabled]);
@@ -92,9 +83,7 @@ export function Composer({
     [chatId],
   );
 
-  // On the window and not on the composer: a file dropped anywhere else would be *navigated
-  // to*, which replaces the page and takes the turn in flight with it. This component only
-  // exists in the chat view, so the window is exactly the right scope for it.
+  // On the window: a file dropped elsewhere would be navigated to, losing the turn in flight.
   useEffect(() => {
     const dragging = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
     const over = (e: DragEvent) => {
@@ -127,7 +116,6 @@ export function Composer({
       question,
       attached.map((f) => f.path),
     );
-    // The files are the workspace's from here on; the chips belong to the message just sent.
     setAttached([]);
   };
 
@@ -159,7 +147,6 @@ export function Composer({
                   title="Remove this file"
                   onClick={() => {
                     setAttached((prev) => prev.filter((f) => f.path !== file.path));
-                    // Off the workspace too, or the agent is still told it has it.
                     void api.deleteChatFile(chatId!, file.path).catch(() => {});
                   }}
                 >
@@ -184,7 +171,6 @@ export function Composer({
           placeholder={disabled ? "Create a chat to start" : "Ask about your data…"}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
-            // Enter sends, Shift-Enter writes a newline — the convention everywhere else.
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               submit();

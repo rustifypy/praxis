@@ -1,4 +1,3 @@
-/* Light and dark both, driven by the OS. An analytics tool gets stared at for hours. */
 :root {
   --bg: #fbfbfa;
   --panel: #f4f3f0;
@@ -13,19 +12,11 @@
   --bad: #b3402f;
   --warn: #9a6b12;
   --code-bg: #edebe6;
-  /* Exists for the UI kit alone. The kit ships a `$radius: 6px` of its own which lands on
-     `body` and would win over `:root` for the whole page; `main.tsx` points it back here so the
-     kit's components take the app's corner. Nothing in this file should use it — reach for
-     `--radius-lg`, which is what it is. */
+  /* Only for the UI kit, whose own `$radius` lands on `body`; main.tsx points it here.
+     Use `--radius-lg` in this file. */
   --app-radius: var(--radius-lg);
-  /* One height for every control that shares a row. Buttons inherit the body's 1.6
-     line-height and inputs do not, so identical padding produced a 32px button beside a
-     27px input beside a 27px icon button — visible wherever two of them sat together. */
+  /* Buttons inherit body line-height and inputs do not, so equal padding gives unequal heights. */
   --control: var(--control-md);
-  /* The scale. Every value below is the weighted centre of what the file already used —
-     twenty-one font sizes, eighteen corners and roughly forty padding pairs, each arrived at by
-     nudging one component until it looked right next to the one beside it. There was no token to
-     reach for, which is the whole reason they diverged. */
   --space-05: 2px;
   --space-1: 4px;
   --space-2: 6px;
@@ -45,9 +36,7 @@
   --text-xl: 20px;
   --text-2xl: 26px;
 
-  /* Radius is a role, not a size: a mark, a control, a surface, a dialog. It stopped meaning
-     anything when every integer from 2 to 10 was in use — `.stage-panel` at 10 held buttons at
-     6 while `.job` at 8 held buttons at 5, the same relationship drawn two ways. */
+  /* Radius is a role: a mark, a control, a surface, a dialog. */
   --radius-xs: 2px;
   --radius-sm: 5px;
   --radius-md: 7px;
@@ -65,37 +54,26 @@
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --ease: cubic-bezier(0.22, 0.8, 0.3, 1);
 
-  /* Elevation is a token because it is the one thing that cannot be inverted by swapping
-     colours: black at 12% is a shadow on `#fbfbfa` and nothing at all on `#151519`. Every
-     shadow in this file used to be a literal, so dark mode lost the modal, both popovers and
-     the tooltip to flat rectangles held apart by their 1px border alone. */
+  /* A token because swapping colours cannot invert it: 12% black vanishes on the dark ground. */
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 5%);
   --shadow-md: 0 6px 20px rgb(0 0 0 / 14%);
   --shadow-lg: 0 24px 60px rgb(0 0 0 / 26%);
 
-  /* One ring, drawn as an outline rather than a box-shadow so it follows each control's own
-     corner and cannot collide with an elevation the element already carries. */
+  /* An outline, not a box-shadow: follows each control's corner and leaves elevation alone. */
   --focus-ring: 2px solid var(--accent);
   --focus-offset: 1px;
-  /* A soft glow, not a focus ring: "your next action lands here" — the composer while typing,
-     and either drop target under a dragged file. It rides `--accent-soft`, so it inverts with
-     the theme on its own. */
+  /* A glow, not a focus ring: where the next action lands (composer, drop targets). */
   --ring-soft: 0 0 0 3px var(--accent-soft);
 
   --disabled-opacity: 0.45;
 
-  /* Text on any of the semantic fills — accent, ok, bad. White works on the light theme's
-     fills and fails badly on the dark theme's, which are light colours: white on `#8ea6ff`
-     is 2.3:1, under even the 3:1 floor for UI text. Every filled control read as disabled in
-     dark mode because of it. */
+  /* Dark-theme fills are light, so white text on them fails contrast (2.3:1 on `#8ea6ff`). */
   --on-fill: #fff;
   color-scheme: light;
 }
 
-/* Dark is an attribute, not a media query, so the rail's switch can override the system. index.html
-   resolves "auto" against `prefers-color-scheme` before first paint and theme.ts keeps it current;
-   the tokens themselves live here once. `data-schema` is the UI kit's name for it, and the kit
-   follows the media query unless it is set, so one attribute switches both. */
+/* An attribute, not a media query, so the rail's switch can override the system; index.html
+   resolves "auto" before first paint. `data-schema` is the UI kit's name for the same switch. */
 :root[data-schema="dark"] {
   color-scheme: dark;
   --bg: #151519;
@@ -111,8 +89,7 @@
   --bad: #e08b7c;
   --warn: #d9ad5e;
   --code-bg: #26262d;
-  /* Roughly 3× the alpha: the ground is already dark, so the same shadow has far less to
-     darken. Tuned so a popover reads as floating without a visible black halo. */
+  /* About 3x the alpha: the dark ground has far less left to darken. */
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
   --shadow-md: 0 6px 20px rgb(0 0 0 / 55%);
   --shadow-lg: 0 24px 60px rgb(0 0 0 / 70%);
@@ -120,7 +97,6 @@
   --on-fill: #151519;
 }
 
-/* Motion here is feedback, not decoration — so it all goes when asked. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -146,9 +122,18 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--sans);
-  font-size: var(--text-lg);
-  line-height: 1.6;
+  font-size: 14px;
+  line-height: 20px;
   -webkit-font-smoothing: antialiased;
+}
+
+b,
+strong {
+  font-weight: 600;
+}
+
+code {
+  font-family: var(--mono);
 }
 
 button,
@@ -158,30 +143,20 @@ textarea {
   font: inherit;
 }
 
-/* Keyboard focus, once, for everything that takes it.
-   The ARIA was already right — the branch picker sets `aria-haspopup`/`aria-expanded`, menus
-   set `role="menu"`/`menuitem` — and there was no visible ring on any of the thirty-six
-   buttons to go with it. `:where()` keeps this at zero specificity, so a component that has a
-   reason to draw its own focus (the composer shows it on the wrapper, CodeMirror draws its
-   own caret) still wins by being more specific. `:focus-visible` and not `:focus`: a mouse
-   click on a button should not ring it. */
+/* `:where()` keeps this at zero specificity so components drawing their own focus win.
+   `:focus-visible`, not `:focus`: a mouse click should not ring a button. */
 :where(button, a, input, select, textarea, summary):focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-offset);
 }
 
-/* One disabled state. This used to be seven opacities and two cursors across sixteen rules,
-   and twenty more buttons had none at all — including `.changes-undo` and `.branch-button`,
-   which are handed `disabled={busy}` and so sat looking live for the length of a request. */
 :where(button, a, input, select, textarea):disabled,
 :where(a)[aria-disabled="true"] {
   opacity: var(--disabled-opacity);
   cursor: not-allowed;
 }
 
-/* One empty state — see `Empty.tsx`. Six of these were written independently and five looked
-   different; `.dash-empty`'s shape (a heading, a sentence, room around them) is the one that
-   was right, so it is the one they all take. */
+/* One empty state — see `Empty.tsx`. */
 .empty {
   display: flex;
   flex-direction: column;
@@ -205,8 +180,7 @@ textarea {
   text-wrap: pretty;
 }
 
-/* Where there is no room for that: a tile that has to keep its grid shape, and a list row
-   standing in for a file. */
+/* Compact: a tile that must keep its grid shape, and a list row standing in for a file. */
 .empty-tight {
   padding: var(--space-2) var(--space-4);
   color: var(--faint);
@@ -216,11 +190,7 @@ textarea {
   font-size: var(--text-sm);
 }
 
-/* One text field — see the audit's fifth finding. These were five rules that agreed on
-   nothing but the border: three paddings, two font sizes and two backgrounds, so a field in a
-   dialog read as a different kind of control from a field in a drawer. Anything below keeps
-   only its own layout. `.field` is for new markup; the rest are named because their inputs are
-   bare and their wrapper is what identifies them. */
+/* One text field. `.field` is for new markup; the rest are named because their inputs are bare. */
 .field,
 .nav-filter,
 .chat-row.editing input,
@@ -247,19 +217,14 @@ textarea {
 }
 
 /* ============================ controls ============================
-   `.btn` and `.badge` are the shared vocabulary — see `Button.tsx` and `Badge.tsx`. Nothing
-   here is styled by its container, which is the whole point: a control used to take its size
-   from whichever panel it sat in, so the same secondary action came out at six different
-   heights and a container that gained a button gained a restyle it never asked for. */
+   `.btn` and `.badge` — see `Button.tsx`, `Badge.tsx`. Never sized by their container. */
 
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  /* Height is set, not left to padding — that is why the old rules diverged. Every one of them
-     had a padding pair and only some had `min-height`, so the pair won and one button came out
-     33px beside a 30px one in the same header. */
+  /* Height is set, not left to padding, so buttons on one row match. */
   height: var(--control-md);
   padding: 0 var(--space-4);
   border: 1px solid var(--line);
@@ -333,7 +298,7 @@ textarea {
   background: color-mix(in srgb, var(--bad) 8%, transparent);
 }
 
-/* Inline text, not a control on a row — so it keeps the surrounding size and takes no height. */
+/* Inline text, not a row control: keeps the surrounding size and takes no height. */
 .btn-link {
   height: auto;
   padding: 0;
@@ -356,9 +321,7 @@ textarea {
   white-space: nowrap;
 }
 
-/* Bare tabular text beside a heading. Nine of these lived under seven feature-owned names —
-   `Changes` and `Problems` both rendered the file tree's `.tree-count` for a number that has
-   nothing to do with files. */
+/* Bare tabular text beside a heading. */
 .badge-count {
   color: var(--faint);
   font-weight: 400;
@@ -405,9 +368,8 @@ textarea {
   color: var(--warn);
 }
 
-/* Controls that sit on a row together: one height, one line-height, label centred.
-   Applied by selector rather than a utility class because these lists already exist —
-   see `--control`. Inputs get the height but not the flex, which breaks the caret. */
+/* Selector lists rather than a utility class, since the markup already exists — see `--control`.
+   Inputs get the height but not the flex, which breaks the caret. */
 
 
 .app {
@@ -552,8 +514,6 @@ textarea {
   text-transform: uppercase;
 }
 
-/* The theme switch sits apart from the modes, at the foot of the rail: it changes how every mode
-   looks rather than which one you are in. */
 .rail-theme {
   margin-top: auto;
 }
@@ -649,8 +609,6 @@ textarea {
   margin-top: var(--space-05);
 }
 
-/* A sidebar row (a dashboard, a flow, a run). Two lines: its name with an optional count, then
-   where it is up to. */
 .nav-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -686,13 +644,6 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.nav-row-tag {
-  color: var(--accent);
-  font-size: var(--text-2xs);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
 }
 
 .nav-row-count {
@@ -828,8 +779,8 @@ textarea {
   min-height: 0;
 }
 
-/* The positioning context for the jump pill, on the chat's `.main` only — the sources page
-   has an absolutely positioned drawer that resolves against something else. */
+/* Positioning context for the jump pill, on the chat's `.main` only — the sources page's
+   drawer resolves against something else. */
 .chat-main {
   position: relative;
 }
@@ -851,7 +802,7 @@ textarea {
   border-color: var(--accent);
 }
 
-/* ---------- the chat header: which source this conversation queries ---------- */
+/* ---------- the chat header ---------- */
 
 .chat-head {
   display: flex;
@@ -859,10 +810,6 @@ textarea {
   gap: var(--space-3);
   padding: var(--space-3) var(--space-6);
   border-bottom: 1px solid var(--line);
-}
-
-.src-chip-wrap {
-  position: relative;
 }
 
 .src-chip {
@@ -900,82 +847,6 @@ textarea {
   white-space: nowrap;
 }
 
-.src-chip-caret {
-  color: var(--faint);
-  font-size: var(--text-2xs);
-}
-
-.src-panel {
-  position: absolute;
-  z-index: 40;
-  top: calc(100% + 6px);
-  left: 0;
-  /* A source switcher, so it is sized to the longest row in it — a name, a summary and
-     a CUBE_URL. It was 880px wide when it carried the model browser; hanging a panel
-     that size over a transcript to answer "which database am I on" was the whole
-     problem. The model is on the source page now. */
-  width: min(460px, calc(100vw - 340px));
-  max-height: min(60vh, 520px);
-  overflow-y: auto;
-  padding: var(--space-4);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--raised);
-  box-shadow: var(--shadow-lg);
-  animation: rise var(--motion-fast) var(--ease);
-}
-
-.src-panel h4 {
-  margin: 0 0 var(--space-3);
-  font-size: var(--text-2xs);
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--faint);
-}
-
-.src-switch-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
-  font-size: var(--text-md);
-}
-
-.src-switch-row.on {
-  background: var(--accent-soft);
-}
-
-.src-switch-name {
-  font-weight: 600;
-}
-
-.src-switch-meta {
-  color: var(--muted);
-  font-size: var(--text-sm);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The switch is not built yet. Said in text rather than as a tooltip on a disabled
-   button, which several browsers never show at all. */
-.src-switch-how {
-  margin-left: auto;
-  flex: none;
-  color: var(--faint);
-  font-size: var(--text-xs);
-}
-
-.src-switch-how code {
-  font-size: var(--text-2xs);
-}
-
-.src-panel .link {
-  margin-top: var(--space-2);
-}
-
 .transcript {
   flex: 1;
   overflow-y: auto;
@@ -989,8 +860,7 @@ textarea {
   animation: rise var(--motion-slow) var(--ease);
 }
 
-/* The right margin is `.row`'s own gutter rather than a flat 24px, so the bubble ends on the
-   column edge every other row starts and ends on instead of out in the transcript's margin. */
+/* `.row`'s gutter rather than a flat 24px, so the bubble ends on the column edge. */
 .row.user {
   width: fit-content;
   max-width: min(600px, calc(100% - 48px));
@@ -1092,7 +962,6 @@ textarea {
   margin-bottom: 0;
 }
 
-/* The caret rides the end of the last paragraph while tokens arrive. */
 .answer.streaming > :last-child::after {
   content: "";
   display: inline-block;
@@ -1146,8 +1015,6 @@ textarea {
   background: none;
 }
 
-/* A fenced block is a unit someone copies, so it gets its own head and its own button — the
-   answer's Copy takes all three paragraphs and the SQL in the middle of them. */
 .answer .fence {
   margin: var(--space-4) 0;
   border: 1px solid var(--line);
@@ -1245,7 +1112,6 @@ textarea {
   color: var(--accent);
 }
 
-/* Three dots that fill in and reset — the classic "still going" tell. */
 .dots::after {
   content: "";
   animation: dots 1.4s steps(4, end) infinite;
@@ -1332,8 +1198,6 @@ textarea {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
 }
 
-/* A light sweeping across the row: the one honest way to say "still waiting" when
-   there is no progress figure to report. */
 .tool.running::after {
   content: "";
   position: absolute;
@@ -1370,8 +1234,7 @@ textarea {
 }
 
 .tool-head:disabled {
-  /* `disabled` here means "nothing to open", not "you may not" — so no dimming and no refusal
-     cursor. Named explicitly because the global disabled rule would otherwise grey it out. */
+  /* `disabled` means "nothing to open" here: opt out of the global disabled dimming and cursor. */
   opacity: 1;
   cursor: default;
 }
@@ -1416,8 +1279,7 @@ textarea {
   color: var(--bad);
 }
 
-/* A running script's output, followed as it arrives. Capped and scrolling: a chatty script
-   would otherwise push the composer off the screen while it worked. */
+/* Capped so a chatty script cannot push the composer off the screen. */
 .tool-stream {
   border-top: 1px solid var(--line);
   margin: 0;
@@ -1485,10 +1347,8 @@ textarea {
   color: var(--warn);
 }
 
-/* ---------- a query's data, below the answer it supports ----------
-   `res-`, not `rows-`: `.rows` was the preview table inside the trace fold and its
-   descendant selectors restyled any nested table, and `.row` — one letter away — is the
-   transcript's own wrapper. This block owns its table outright. */
+/* ---------- a query's data, below the answer ----------
+   `res-` prefix: `.row`, one letter away, is the transcript's own wrapper. */
 
 .res {
   border: 1px solid var(--line);
@@ -1497,11 +1357,8 @@ textarea {
   overflow: hidden;
 }
 
-/* A script waiting on a click. Bordered in the accent rather than a warning colour: this is a
-   thing to read, not a thing to be alarmed by — the sandbox is what makes it safe. */
-/* ---------- the script a run ran, and the click that let it ----------
-   Both inside the step, because the script is what the step did — as its own card it sat
-   below the run and put a script's output above the script that printed it. */
+/* Accent, not a warning colour: something to read, not be alarmed by. */
+/* ---------- the script a run ran, and its approval ---------- */
 
 .script {
   border: 1px solid var(--line);
@@ -1545,8 +1402,7 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-/* The peek fades into the button rather than stopping on a hard edge, which is what says
-   there is more of it without a row of dots pretending to be code. */
+/* Fades into the button rather than cutting off, to say there is more. */
 .script-body.peek {
   padding-bottom: var(--space-1);
   mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent);
@@ -1578,8 +1434,6 @@ textarea {
   background: var(--accent-soft);
 }
 
-/* Answered: a line of text, because the buttons are gone and the step above already says
-   what happened. */
 .ask-done {
   padding: var(--space-05) var(--space-05) var(--space-1);
   color: var(--muted);
@@ -1605,8 +1459,7 @@ textarea {
   border-color: var(--accent);
 }
 
-/* Outlined rather than filled: the accent is dark in one theme and light in the other, so a
-   solid fill would need a text colour that works on both and there is no token for one. */
+/* Outlined: the accent flips between themes and no text token works on a solid fill in both. */
 .ask-yes {
   border-color: var(--accent);
   background: var(--accent-soft);
@@ -1634,8 +1487,7 @@ textarea {
 .res-label {
   color: var(--ink);
   font-weight: 500;
-  /* The server's sentence for the query. Long ones truncate rather than wrap, so the row
-     height stays predictable and the count and buttons keep their place. */
+  /* Truncates rather than wraps, so row height and the buttons stay put. */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1671,9 +1523,8 @@ textarea {
   font-size: var(--text-sm);
 }
 
-/* Its own scroll container. `.row` is capped at 760px, so a wide result has to scroll
-   inside the block — letting it push the column wider would scroll the whole transcript
-   sideways. */
+/* Scrolls inside the block: `.row` is capped at 760px, and a wide result would otherwise
+   scroll the whole transcript sideways. */
 .res-scroll {
   overflow: auto;
   max-height: 420px;
@@ -1714,8 +1565,6 @@ textarea {
   background: var(--accent-soft);
 }
 
-/* Numbers are tabular so digits line up down the column, which is most of what makes a
-   right-aligned measure readable. */
 .res-table td.res-num {
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -1752,10 +1601,7 @@ textarea {
   font-size: var(--text-sm);
 }
 
-/* ---------- what a script wrote, below the answer ----------
-   `wrote-`, not `file-` or `artifact-`: "artefact" reads as something authored on the
-   sources page, and one word for two things is how the `.dot` trap was sprung. Same frame as
-   `.res` because it plays the same part — evidence sitting under the claim. */
+/* ---------- what a script wrote, below the answer ---------- */
 
 .wrote {
   border: 1px solid var(--line);
@@ -1805,9 +1651,6 @@ textarea {
   font-size: var(--text-xs);
 }
 
-/* One non-image file: a head that is always there and a body that is open by default. Same
-   frame as `.res` one level in, because it holds the same thing — a table you read rather
-   than a link you follow. */
 .wrote-file + .wrote-file,
 .wrote-figure + .wrote-file {
   border-top: 1px solid var(--line);
@@ -1841,8 +1684,7 @@ textarea {
 }
 
 .wrote-toggle:disabled {
-  /* `disabled` here means "nothing to open", not "you may not" — so no dimming and no refusal
-     cursor. Named explicitly because the global disabled rule would otherwise grey it out. */
+  /* `disabled` means "nothing to open" here: opt out of the global disabled dimming and cursor. */
   opacity: 1;
   cursor: default;
 }
@@ -1919,25 +1761,9 @@ textarea {
 }
 
 /* ---------- the categorical palette ----------
-   Eight slots, assigned in fixed order and never cycled — `visualize.MAX_SERIES` caps
-   series at eight so a ninth is refused rather than repeated. The order is the
-   colourblind-safety mechanism and does not change; only a slot's lightness ever moves.
-   Both columns are validated against this app's own surfaces (--raised, the lightest in
-   each mode and so the worst case) for the lightness band, the chroma floor, adjacent-pair
-   separation under protanopia and deuteranopia, and contrast.
-
-   **Every slot clears 3:1 unaided, in both modes.** It did not always: aqua, yellow and
-   magenta sat at 2.82, 2.17 and 2.69 against white, and were legal only because a table
-   sits directly below every chart in the transcript supplying the relief. That made the
-   table load-bearing — and a dashboard tile has no table under it, so the three hues were
-   re-stepped down the lightness axis (hue and slot order held, chroma kept above the 0.10
-   floor) until they passed alone. One palette rather than a second one for tiles: two sets
-   of eight tokens would drift, and the stricter set is correct everywhere.
-
-   The cost, so it is not rediscovered as a bug: those three are slightly darker and less
-   saturated than the reference palette they came from, and adjacent tritan separation went
-   from 5.8 to 4.3. Tritan is reported but not gated — the standard measures protan and
-   deuteranopia, where the worst adjacent pair improved from 9.1 to 9.7. */
+   Eight slots in fixed order, never cycled (`visualize.MAX_SERIES` caps at eight): the order is
+   the colourblind-safety mechanism. Every slot clears 3:1 against --raised in both modes, since a
+   dashboard tile has no table below it to supply relief. */
 
 :root {
   --series-1: #2a78d6;
@@ -1952,8 +1778,7 @@ textarea {
 }
 
 :root[data-schema="dark"] {
-  /* The same eight hues stepped for the dark surface, not an automatic flip. These
-     already cleared 3:1 against --raised unaided, so nothing here was re-stepped. */
+  /* Stepped separately for the dark surface, not an automatic flip. */
   --series-1: #3987e5;
   --series-2: #d95926;
   --series-3: #199e70;
@@ -1987,8 +1812,7 @@ textarea {
   gap: var(--space-2);
 }
 
-/* Identity rides a coloured mark beside the text, never the text itself — a light hue is
-   illegible as type on either surface. */
+/* Identity rides a coloured mark, never the text: a light hue is illegible as type. */
 .res-key {
   width: 10px;
   height: 10px;
@@ -2006,7 +1830,7 @@ textarea {
   height: auto;
 }
 
-/* Hairline and solid. Dashed reads as a threshold when it is only a grid. */
+/* Solid, not dashed: dashed reads as a threshold. */
 .res-grid {
   stroke: var(--grid);
   stroke-width: 1;
@@ -2039,8 +1863,7 @@ textarea {
   stroke-linejoin: round;
 }
 
-/* The ring is the surface colour, so a dot stays legible where it crosses a line or
-   another dot. Not a border — a stroke in any other colour would add ink that is not data. */
+/* The ring is the surface colour, so overlapping dots stay legible without adding ink. */
 .res-dot {
   stroke: var(--raised);
   stroke-width: 2;
@@ -2313,7 +2136,6 @@ textarea {
   vector-effect: non-scaling-stroke;
 }
 
-/* One row with no grouping: each measure is a figure, not a plot. */
 .res-kpis {
   display: flex;
   flex-wrap: wrap;
@@ -2333,8 +2155,7 @@ textarea {
   font-size: var(--text-sm);
 }
 
-/* Proportional figures, not tabular: equal-width digits read loose at this size, and
-   nothing here has to line up vertically. */
+/* Proportional figures: tabular digits read loose at this size and nothing aligns vertically. */
 .res-kpi-value {
   color: var(--ink);
   font-size: var(--text-2xl);
@@ -2417,8 +2238,7 @@ textarea {
 
 .composer {
   display: flex;
-  /* Wraps so the attachment row takes a line of its own above the textarea rather than
-     sitting beside it — see `.attached`. */
+  /* Wraps so the attachment row sits on its own line above the textarea — see `.attached`. */
   flex-wrap: wrap;
   gap: var(--space-3);
   align-items: flex-end;
@@ -2431,8 +2251,6 @@ textarea {
     box-shadow var(--motion-slow);
 }
 
-/* A file dragged anywhere over the composer. The same accent as focus, because it is the
-   same statement: this is what your next action lands in. */
 .composer.over {
   border-color: var(--accent);
   box-shadow: var(--ring-soft);
@@ -2483,8 +2301,7 @@ textarea {
 }
 
 /* ---------- attachments ----------
-   One row of chips, in the composer while a file is pending and under the question once it
-   has been sent. `.attach` is a chip in both places: the same object, before and after. */
+   `.attach` is the same chip in the composer and under the sent question. */
 
 .attached {
   flex: 1 0 100%;
@@ -2553,7 +2370,6 @@ textarea {
   background: var(--panel);
 }
 
-/* Beside Send, at the same height as the other controls on that row. */
 .composer .attach-add {
   width: var(--control);
   height: var(--control);
@@ -2573,58 +2389,6 @@ textarea {
   height: 8px;
   border-radius: var(--radius-xs);
   background: #fff;
-}
-
-/* ============================ sources ============================
-   Same vocabulary as the transcript: one accent, --ok/--warn/--bad for status, the
-   grid-row Collapse for disclosure. No new colours. */
-
-/* A job outlives the page it was started from, and a *failed* one stays until it is
-   looked at — gating this on "still running" made a failure vanish from every screen but
-   the one source page it happened on. */
-.job-pill {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--raised);
-  color: var(--ink);
-  font: inherit;
-  font-size: var(--text-sm);
-  text-align: left;
-  cursor: pointer;
-}
-
-.job-pill-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.job-pill-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--accent);
-  flex: none;
-}
-
-.job-pill.live .job-pill-dot {
-  animation: pulse 1.4s ease-in-out infinite;
-}
-
-.job-pill.failed {
-  border-color: var(--bad);
-}
-
-.job-pill.failed .job-pill-dot {
-  background: var(--bad);
-}
-
-.job-pill.done .job-pill-dot {
-  background: var(--ok);
 }
 
 @keyframes pulse {
@@ -2667,9 +2431,8 @@ textarea {
   color: var(--accent);
 }
 
-/* Fixed, and placed by measurement in Info.tsx — an absolute panel is clipped by the
-   scrolling ancestors these icons live in, which makes those containers scroll sideways
-   rather than letting the panel spill. */
+/* Fixed and placed by measurement in Info.tsx: an absolute panel is clipped by the
+   scrolling ancestors these icons live in. */
 .info-panel {
   position: fixed;
   z-index: 60;
@@ -2741,8 +2504,7 @@ textarea {
   color: var(--faint);
 }
 
-/* Ruled off from the routine actions above it, so Remove cannot be hit by momentum on
-   the way to Edit. The typed-name confirm is the real guard; this is the warning. */
+/* Ruled off so Remove is not hit by momentum on the way to Edit. */
 .menu-panel button.danger {
   margin-top: var(--space-1);
   padding-top: var(--space-3);
@@ -2811,8 +2573,7 @@ textarea {
   font-size: var(--text-sm);
 }
 
-/* The word to type. Italic and in ink, because it is the one thing on the dialog that has to
-   be transcribed exactly, and at 12.5px it inherited the label's muted grey. */
+/* Italic and in ink: the one thing on the dialog to transcribe exactly. */
 .modal label code {
   font-family: var(--mono);
   font-style: italic;
@@ -2929,26 +2690,6 @@ textarea {
   border-color: var(--muted);
 }
 
-/* Cube's own UI for this container, between the primary action and the overflow. Styled
-   as a control rather than as body-text link so the row keeps one baseline. */
-.cube-link {
-  padding: var(--space-2) var(--space-4);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--panel);
-  color: var(--muted);
-  font-size: var(--text-sm);
-  text-decoration: none;
-  transition:
-    border-color var(--motion-fast),
-    color var(--motion-fast);
-}
-
-.cube-link:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
 .detail-desc {
   margin: var(--space-4) 0 0;
   color: var(--muted);
@@ -2971,9 +2712,6 @@ textarea {
 
 /* ---------- the four stages ---------- */
 
-/* The pipeline is a sequence with a position, not four independent accordions. A
-   stepper shows where the source is up to without expanding anything, and exactly one
-   panel is open — the one for the stage you selected. */
 .stepper {
   display: flex;
   align-items: stretch;
@@ -3010,86 +2748,19 @@ textarea {
   color: var(--ink);
 }
 
-.step-tick {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 19px;
-  height: 19px;
-  border: 1px solid var(--line);
-  border-radius: 50%;
-  background: var(--bg);
-  font-size: var(--text-2xs);
-  font-variant-numeric: tabular-nums;
-  color: var(--faint);
-}
-
-.step-tick.done {
-  border-color: transparent;
-  background: var(--ok);
-  color: var(--on-fill);
-}
-
-.step-tick.error {
-  border-color: transparent;
-  background: var(--bad);
-  color: var(--on-fill);
-}
-
 .step-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* "9 of 11 described". `margin-left: auto` rather than a gap: the tick and the name stay put
-   whether or not a stage has one, so a rail where only Describe carries a count does not
-   shift the other three. */
+/* `margin-left: auto` rather than a gap, so stages without a count do not shift. */
 .step-note {
   margin-left: auto;
   flex: 0 0 auto;
   font-size: var(--text-xs);
   color: var(--muted);
   white-space: nowrap;
-}
-
-/* Closed until a stage is clicked. The accent edge is the same one marking the selected
-   step, which is what ties the panel to it — there is a gap between them, so a square
-   "attached" top edge would only look like a mistake. */
-.stage-panel {
-  padding: var(--space-4) var(--space-5) var(--space-5);
-  border: 1px solid var(--line);
-  border-left: 2px solid var(--accent);
-  border-radius: var(--radius-lg);
-  background: var(--raised);
-  animation: rise var(--motion-fast) var(--ease);
-}
-
-.stage-panel-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin-bottom: var(--space-3);
-}
-
-/* The title takes the slack so the timestamp, the ⓘ and the close cluster on the right
-   as one group — two `margin-left: auto` siblings would split the gap between them. */
-.stage-panel-head h4 {
-  margin: 0 auto 0 0;
-  font-size: var(--text-md);
-  font-weight: 600;
-}
-
-.stage-when {
-  color: var(--faint);
-  font-size: var(--text-xs);
-  white-space: nowrap;
-}
-
-.stage-says {
-  margin: 0 0 var(--space-4);
-  color: var(--muted);
-  font-size: var(--text-sm);
 }
 
 .stage-cta {
@@ -3110,21 +2781,6 @@ textarea {
 .picker-says .cut {
   color: var(--warn);
   font-size: var(--text-sm);
-}
-
-.stage-notes {
-  margin: var(--space-4) 0 0;
-  padding-left: var(--space-5);
-  color: var(--muted);
-  font-size: var(--text-sm);
-}
-
-.stage-notes.bad {
-  color: var(--bad);
-}
-
-.stage-notes li {
-  margin-bottom: var(--space-1);
 }
 
 /* ---------- the table picker ---------- */
@@ -3336,12 +2992,6 @@ textarea {
   animation: fade var(--motion-fast) var(--ease);
 }
 
-@keyframes fade {
-  from {
-    opacity: 0;
-  }
-}
-
 .drawer {
   position: absolute;
   top: 0;
@@ -3426,19 +3076,15 @@ textarea {
 
 
 /* ---------- connecting a database ---------- */
-/* Its own rules rather than the drawer's, because this form renders in two places: the
-   drawer on the data page and inline in the first-run wizard. Nothing here may assume a
-   drawer's width — the wizard's column is wider, and the field grid uses what it is given. */
+/* Its own rules, not the drawer's: this form also renders inline in the wider first-run wizard. */
 
-/* Wider than the drawer's default, because the picker is cards and a pasted service account
-   key is six rows of JSON. */
+/* Wider than the drawer's default: picker cards and a pasted service-account key. */
 .drawer.wide {
   width: min(560px, 100%);
 }
 
-/* The form's own spacing, so it reads the same in the drawer and in the wizard's step — one
-   lays its children out with a flex gap and the other does not. `flex: 1` keeps the footer's
-   `margin-top: auto` working now that the footer is inside this rather than in the drawer. */
+/* Own spacing, so it reads the same in drawer and wizard. `flex: 1` keeps the footer's
+   `margin-top: auto` working. */
 .conn-form {
   flex: 1;
   display: flex;
@@ -3447,9 +3093,7 @@ textarea {
   min-width: 0;
 }
 
-/* The gap above is the only spacing between rows, so the paragraphs keep no margin of their
-   own. Written specifically enough to beat `.setup-body p`, which the wizard applies to
-   everything inside a step and which would otherwise double the space around these two. */
+/* The gap is the only row spacing; specific enough to beat the wizard's `.setup-body p`. */
 .conn-form p.drawer-blurb,
 .conn-form p.drawer-error {
   margin: 0;
@@ -3483,9 +3127,7 @@ textarea {
   text-transform: uppercase;
 }
 
-/* auto-fill rather than a fixed column count: the same grid has to look deliberate in the
-   drawer and in the wizard's wider column, and a warehouse added to the list must not force
-   the number to be picked again. */
+/* auto-fill so one grid suits both the drawer and the wider wizard. */
 .conn-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -3528,8 +3170,7 @@ textarea {
   line-height: 1.35;
 }
 
-/* Two columns where there is room: host and port, user and password read as pairs, and a
-   one-per-row form of eight fields reads as longer than it is. The pastes below break out. */
+/* Two columns: host and port, user and password read as pairs. */
 .conn-fields {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -3544,8 +3185,7 @@ textarea {
   min-width: 0;
 }
 
-/* A paste is the full width whatever the grid is doing: a certificate wrapped into a 200px
-   column is unreadable, and a key is JSON whose indentation is the only structure it has. */
+/* Pastes span the full width: a certificate or JSON key is unreadable in a narrow column. */
 .conn-field:has(textarea) {
   grid-column: 1 / -1;
 }
@@ -3598,13 +3238,11 @@ textarea {
   color: var(--bad) !important;
 }
 
-/* The colour of a warning and not of an error, because it does not stop the button: a blank
-   password is right whenever the database lets that user in without one. */
+/* Warning, not error: a blank password is valid when the database allows it. */
 .conn-iffy {
   color: var(--warn) !important;
 }
 
-/* At the end of the label's own row, and only rendered once there is something to reveal. */
 .conn-reveal {
   margin-left: auto;
   border: none;
@@ -3636,8 +3274,6 @@ textarea {
   cursor: pointer;
 }
 
-/* The summary is what makes a shut fold honest: it says which settings are inside it, so
-   nothing is hidden behind a word as vague as "more". */
 .conn-fold-head small {
   color: var(--faint);
   font-size: var(--text-xs);
@@ -3691,7 +3327,7 @@ textarea {
   min-width: 0;
 }
 
-/* The name is the shorter of the two: a value can be a JDBC URL or a base64 key. */
+/* The name column is the narrower: a value can be a JDBC URL or a base64 key. */
 .env-name {
   flex: 0 1 42%;
   font-family: var(--mono);
@@ -3739,18 +3375,13 @@ textarea {
   padding-top: var(--space-4);
 }
 
-/* A local single-user tool on a desktop, so this only keeps the three-column shell from
-   crushing the content — it is not a phone layout. */
+/* Desktop tool: this only keeps the three-column shell from crushing content. */
 @media (max-width: 980px) {
   .app {
     grid-template-columns: 52px 204px minmax(0, 1fr);
   }
-  .src-panel {
-    width: min(460px, calc(100vw - 300px));
-  }
 
-  /* Below this the detail box would be narrower than a member row, so the split stacks
-     and the list goes back to sitting above what it opens. */
+  /* Below this the detail box is narrower than a member row, so the split stacks. */
   .served-split {
     grid-template-columns: 1fr;
   }
@@ -3773,85 +3404,10 @@ textarea {
   }
 }
 
-/* ============================ one source per page ============================ */
-
-.src-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin-bottom: var(--space-5);
-}
-
-.src-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  width: 100%;
-  padding: var(--space-4) var(--space-4);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--raised);
-  color: var(--ink);
-  text-align: left;
-  cursor: pointer;
-  animation: rise var(--motion-slow) var(--ease);
-  transition:
-    border-color var(--motion-fast) var(--ease),
-    transform var(--motion-fast) var(--ease);
-}
-
-.src-row:hover {
-  border-color: var(--accent);
-}
-
-.src-row:active {
-  transform: scale(0.995);
-}
-
-.src-row.active {
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
-}
-
-.src-row-name {
-  font-weight: 600;
-  font-size: var(--text-md);
-}
-
-.src-row-what,
-.src-row-model,
-.src-row-next {
-  color: var(--faint);
-  font-size: var(--text-sm);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.src-row-what {
-  font-family: var(--mono);
-}
-
-.src-row-model {
-  flex: 1;
-  min-width: 0;
-  color: var(--muted);
-}
-
-.src-row-go {
-  color: var(--faint);
-  transition: transform var(--motion-fast) var(--ease);
-}
-
-.src-row:hover .src-row-go {
-  transform: translateX(3px);
-  color: var(--accent);
-}
-
 /* ---------- the page ---------- */
 
-/* Two zones, not one scroller: the connection above scrolls, the model below fills. The page
-   itself cannot scroll — an IDE that is one long page has no height of its own to hand to
-   CodeMirror, which is what made the old editor a 560px letterbox two thirds of the way down. */
+/* Two zones: the connection scrolls, the model fills. The page itself cannot scroll, or
+   CodeMirror would have no height to fill. */
 .detail {
   display: flex;
   flex-direction: column;
@@ -3861,11 +3417,7 @@ textarea {
   width: 100%;
 }
 
-/* The 1000px reading column this page used to be centred in is gone, and deliberately: it is
-   what the header and the editor no longer agree on. Centred prose above a full-bleed IDE puts
-   the connection's name a third of the way across the window while the branch bar under it
-   starts at the margin — two left edges on one screen. The measure mattered when the page was
-   prose; it is now a header over an editor, so both take the same 28px instead. */
+/* No centred column: the header and the full-bleed editor share one left edge. */
 .detail-scroll {
   flex: none;
   max-height: 55%;
@@ -3874,43 +3426,14 @@ textarea {
   width: 100%;
 }
 
-/* `.detail` is a shell with no padding of its own: SourceDetail puts an IDE inside it that has
-   to fill the height, so that page's inset lives on `.detail-scroll` instead. A `.detail` page
-   with no such child has to say so — otherwise it inherits a shell built for someone else's
-   layout and renders flush against the window edge, which is what happened to the agents page.
-
-   It keeps the centred measure that `.detail-scroll` gives up. The argument there was that a
-   centred header above a full-bleed editor shows two left edges on one screen; this page is
-   prose the whole way down, so the measure still earns its place. */
+/* `.detail` has no padding (SourceDetail's inset lives on `.detail-scroll`), so a prose page
+   adds its own, and keeps the centred measure. */
 .detail-page {
   overflow-y: auto;
   width: 100%;
   max-width: 1000px;
   margin: 0 auto;
   padding: var(--space-6) var(--space-7) var(--space-8);
-}
-
-.crumbs {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin-bottom: var(--space-4);
-  color: var(--faint);
-  font-size: var(--text-sm);
-}
-
-.crumbs button {
-  border: 0;
-  background: none;
-  padding: 0;
-  color: var(--muted);
-  font: inherit;
-  cursor: pointer;
-  transition: color var(--motion-fast);
-}
-
-.crumbs button:hover {
-  color: var(--accent);
 }
 
 .detail-head {
@@ -3980,14 +3503,11 @@ textarea {
 
 
 
-/* Views and cubes are two sections, not one list with a pill on each row. The pill made
-   them read as two flavours of one thing; they are a surface and its implementation. */
 .group {
   margin-bottom: var(--space-5);
 }
 
-/* Two rows: the label and its count, then what the section is for. A narrow list column
-   cannot fit "Views · the tables underneath · ⓘ · 11" on one line. */
+/* Two rows: a narrow list column cannot fit label, hint and count on one line. */
 .group-head {
   display: grid;
   grid-template-columns: auto auto 1fr;
@@ -4027,9 +3547,7 @@ textarea {
   justify-self: end;
 }
 
-/* Master–detail. The list column is fixed and never reflows; opening an entity fills the
-   box beside it. Expanding in place pushed every row below down the page, which made
-   comparing two cubes a matter of finding your place again each time. */
+/* Master–detail: the list column never reflows; an entity opens beside it. */
 .served-split {
   display: grid;
   grid-template-columns: minmax(190px, 260px) 1fr;
@@ -4147,8 +3665,6 @@ textarea {
   color: var(--accent);
 }
 
-/* Which cubes a view projects over, or which views reach a cube — the relationship that
-   makes the two sections one model instead of two lists. */
 .served-rel {
   margin: 0 0 var(--space-3);
   color: var(--muted);
@@ -4171,7 +3687,7 @@ textarea {
   font-size: var(--text-md);
 }
 
-/* Marked rather than folded into the description: this is the text steering the agent. */
+/* Marked separately: this is the text steering the agent. */
 .served-ai,
 .served-member-ai {
   display: block;
@@ -4271,7 +3787,7 @@ textarea {
 }
 
 .group-toggle:hover .group-caret {
-  color: var(--text);
+  color: var(--ink);
 }
 
 .group-caret {
@@ -4287,8 +3803,7 @@ textarea {
   transform: rotate(90deg);
 }
 
-/* A shut section is a header and nothing else, so its bottom margin would leave it
-   floating above a gap the width of the content it is hiding. */
+/* A shut section's bottom margin would leave it floating above an empty gap. */
 .group:not(.open) {
   margin-bottom: var(--space-2);
 }
@@ -4300,11 +3815,7 @@ textarea {
 
 /* ================================ dashboards ================================ */
 
-/* ---------- dashboards ----------
-   All new names, all prefixed. `.nav*` above is deliberately *reused* by DashboardNav —
-   that vocabulary is the shared sidebar chrome, and a `.nav-row-meta` beside the existing
-   `.nav-row-sub` is how two near-identical rules start to drift. Everything below has no
-   counterpart, so it gets its own prefix rather than borrowing `.panel` or `.res`. */
+/* `.nav*` above is reused by DashboardNav as sidebar chrome; the rest is `dash-` prefixed. */
 
 .dash {
   flex: 1;
@@ -4350,8 +3861,7 @@ textarea {
   gap: var(--space-3);
 }
 
-/* `>` so a control rendered by a child component is not restyled by this row. That is the
-   `.detail-primary button` trap, which turned an overflow menu into bordered grey boxes. */
+/* `>` so a control rendered by a child component is not restyled by this row. */
 
 
 .dash-actions > button.primary {
@@ -4364,8 +3874,7 @@ textarea {
   color: var(--bad);
 }
 
-/* Outranks `.dash-actions > button` above, which would otherwise paint this as one more
-   bordered grey box beside Refresh. */
+/* Outranks `.dash-actions > button` above, which would paint this as a bordered grey box. */
 .dash-actions > button.dash-undo {
   border-color: transparent;
   background: none;
@@ -4404,8 +3913,7 @@ textarea {
   color: var(--faint);
 }
 
-/* Board-level and indeterminate on purpose: the refresh is atomic, so a bar per tile would
-   show the partial state a refusal exists to prevent. */
+/* Board-level and indeterminate: the refresh is atomic; per-tile bars would show partial state. */
 .dash-progress {
   overflow: hidden;
   height: 2px;
@@ -4458,8 +3966,7 @@ textarea {
   opacity: 0.45;
 }
 
-/* On the tile rather than the cell: the cell is the grid track and an outline on it would
-   sit outside the gap. */
+/* On the tile, not the cell: an outline on the grid track would sit outside the gap. */
 .dash-cell.over > .dash-tile {
   border-color: var(--accent);
   box-shadow: var(--ring-soft);
@@ -4517,8 +4024,7 @@ textarea {
   white-space: nowrap;
 }
 
-/* Arrange chrome. Dimmed rather than hidden until hover: a control that only exists under
-   the pointer is one nobody finds, and the keyboard path needs it visible on focus. */
+/* Dimmed, not hidden, until hover: hover-only controls go unfound, and focus must show them. */
 .dash-grip,
 .dash-span {
   flex-shrink: 0;
@@ -4561,8 +4067,7 @@ textarea {
   opacity: 1;
 }
 
-/* The window Cube actually resolved. On every tile that filters by time, because it is the
-   only thing that says whether this tile's numbers moved with the refresh. */
+/* The window Cube actually resolved: the only sign of whether this tile's numbers moved. */
 .dash-tile-window {
   flex-shrink: 0;
   padding: var(--space-05) var(--space-2);
@@ -4577,8 +4082,7 @@ textarea {
   padding: var(--space-3) var(--space-3) var(--space-4);
 }
 
-/* A tile that has never been refreshed keeps the shape it will have, so the grid does not
-   reflow under the first Refresh and the sentence is not the whole tile. */
+/* An unrefreshed tile keeps its final shape, so the grid does not reflow on first Refresh. */
 .dash-skeleton {
   display: flex;
   align-items: flex-end;
@@ -4639,8 +4143,7 @@ textarea {
   font-size: var(--text-xs);
 }
 
-/* Wide content scrolls inside its own box. The page body must never scroll sideways, and a
-   tile is the narrowest thing on it. */
+/* Scrolls inside its box: the page body must never scroll sideways. */
 .dash-tile-table {
   overflow-x: auto;
 }
@@ -4651,8 +4154,7 @@ textarea {
   font-size: var(--text-sm);
 }
 
-/* `text-align` explicitly: a bare `th` centres, so every non-numeric column had a centred
-   header over a left-aligned body. `.right` below still wins for the numeric ones. */
+/* Explicit, because a bare `th` centres. `.right` below still wins for numeric columns. */
 .dash-tile-table th,
 .dash-tile-table td {
   padding: var(--space-2) var(--space-4);
@@ -4707,8 +4209,6 @@ textarea {
   line-height: 1.1;
 }
 
-/* The micro-label idiom: small, spaced and set apart from the figure it names, so the
-   number is the thing read first. */
 .dash-kpi-label {
   color: var(--muted);
   font-size: var(--text-2xs);
@@ -4717,8 +4217,7 @@ textarea {
   text-transform: uppercase;
 }
 
-/* An arrow and a sign both carry direction, so colour is never the only cue — the same rule
-   the chart palette follows, for the same reason. The tint is emphasis on top of that. */
+/* Arrow and sign carry direction, so colour is never the only cue. */
 .dash-delta {
   display: inline-flex;
   align-items: center;
@@ -4747,12 +4246,9 @@ textarea {
 }
 
 /* ============ the ide — the model, its branches and what changed ============
-   Not contiguous: agent access and the deployment hand-over sit in the middle of it,
-   and the editor's own layout picks up again at `.editor`. Ordering here is accretion,
-   not intent — but source order decides ties at equal specificity, so it stays put. */
+   Not contiguous, but source order decides ties at equal specificity, so it stays put. */
 
 /* ---------- the model editor ---------- */
-/* `.editor*` was free: nothing in the markup or the stylesheet had claimed it. */
 
 .editor-bar {
   display: flex;
@@ -4762,8 +4258,7 @@ textarea {
   margin-bottom: var(--space-3);
 }
 
-/* Inputs do not inherit body line-height and buttons do, so every control sharing this
-   row is sized the same way rather than by padding alone. */
+/* Inputs do not inherit body line-height and buttons do, so height is set, not padded. */
 .editor-bar button,
 .editor-bar input,
 .editor-actions button {
@@ -4777,8 +4272,7 @@ textarea {
   gap: var(--space-2);
 }
 
-/* "from <branch>" reads as one phrase, so the label and its select sit together rather than as
-   two controls with the form's gap between them. */
+/* Label and select sit together: "from <branch>" reads as one phrase. */
 .editor-from {
   display: flex;
   align-items: center;
@@ -4822,9 +4316,8 @@ textarea {
   font-size: var(--text-sm);
 }
 
-/* One segmented control, two uses. These were `.pipeline` and `.editor-view` — two rules that
-   tokenising revealed to be identical containers differing only in what "on" means. The inner
-   corner is one step down from the container's, which is what makes the track read as a track. */
+/* One segmented control, two uses. The inner corner is one step below the container's, so
+   the track reads as a track. */
 .segmented {
   display: flex;
   align-items: center;
@@ -4851,8 +4344,7 @@ textarea {
   color: var(--ink);
 }
 
-/* A path, not a choice: the live step is filled because it is the one to press, and the others
-   are ahead of it rather than merely unselected. */
+/* A path, not a choice: later steps are ahead, not merely unselected. */
 .pipeline button {
   color: var(--faint);
   cursor: default;
@@ -4897,7 +4389,7 @@ textarea {
   color: var(--bad);
 }
 
-/* No flex-basis: it lives in a column now, where that would set its height. */
+/* No flex-basis: in a column it would set the height. */
 .editor-diff {
   margin: 0;
   padding: var(--space-3);
@@ -4921,9 +4413,7 @@ textarea {
 
 /* ---------- the editor chat ---------- */
 
-/* A resizable side panel now rather than a grid cell, so it takes the panel's full height itself
-   — the column it sits in no longer stretches it. Still a column with the ask pinned to the
-   bottom and the log taking what is left. */
+/* Takes the panel's full height; the ask is pinned to the bottom and the log fills the rest. */
 .edchat {
   display: flex;
   flex-direction: column;
@@ -4946,8 +4436,7 @@ textarea {
   border-radius: var(--radius-full);
 }
 
-/* The log scrolls, not the whole pane — the composer below it must stay put. `min-height: 0` is
-   what makes `flex: 1` shrink inside a grid cell rather than growing the cell. */
+/* `min-height: 0` lets `flex: 1` shrink, so the log scrolls and the composer stays put. */
 .edchat-log {
   flex: 1;
   min-height: 0;
@@ -4955,9 +4444,7 @@ textarea {
   padding-right: var(--space-1);
 }
 
-/* The chat page's rows are laid out for a 760px column and centre themselves in it. In a
-   panel this narrow that gutter is most of the width, so it goes — the rows are the same
-   blocks either way, only the column they sit in differs. */
+/* Chat rows centre in a 760px column; in a panel this narrow that gutter goes. */
 .edchat-log .row {
   width: auto;
   margin-left: 0;
@@ -4990,23 +4477,15 @@ textarea {
   line-height: 1.2;
 }
 
-/* In the detail header, not on a bar of its own — it acts on the entity named beside it,
-   and a bar there would be the third row of controls in this panel. */
-/* No `margin-left: auto` — `.served-detail-id` already carries one, so this just sits after
-   it at the right-hand end. */
+/* In the detail header: it acts on the entity named beside it. */
+/* No `margin-left: auto`: `.served-detail-id` already carries one. */
 
 
 /* =============================== agents (mcp) =============================== */
 
-/* ---------- agent access (MCP) ---------- */
-/* The page reuses `.detail` and `.detail-panel`, so padding, width and section rules are the
-   data page's. Only the rows below are new, and the buttons are styled by adding
-   `.mcp-actions button` to the shared control lists rather than by a private look — which is
-   also why Copy needs no exception here: it is a button in that row like the others. */
+/* Reuses `.detail`/`.detail-panel`; buttons come from `.mcp-actions button` in the shared lists. */
 
-/* `.detail-panel` draws a divider above itself to separate it from the panel before. The
-   first one on a page has nothing to separate from. Scoped to a direct first child, so the
-   data page — whose first child is its header — is untouched. */
+/* The first panel has nothing to divide from; direct-child scope spares the data page's header. */
 .detail > .detail-panel:first-child {
   margin-top: 0;
   padding-top: 0;
@@ -5021,10 +4500,7 @@ textarea {
   flex-wrap: wrap;
 }
 
-/* A switch rather than a checkbox: the browser default is the one control on the page the
-   platform draws, so it read as foreign next to everything else. The on state borrows the
-   stage rail's language — accent border over `--accent-soft` — so "this is on" looks the same
-   here as it does there. */
+/* A switch, not the platform checkbox, which looked foreign. On state matches the stage rail. */
 .mcp-toggle {
   display: inline-flex;
   align-items: center;
@@ -5104,8 +4580,7 @@ textarea {
   color: var(--muted);
 }
 
-/* The config is wide, and it must scroll in its own box
-   rather than widen the page. */
+/* Wide config scrolls in its own box rather than widening the page. */
 .mcp-field pre,
 .mcp-field code {
   display: block;
@@ -5126,9 +4601,7 @@ textarea {
 /* ============= onboarding — connecting, handing over, first run ============= */
 
 /* ---------- the deployment hand-over ----------
-   New class names throughout: `.panel-head` and `.stage-hint` are shared with the pipeline
-   panel deliberately, so the two read as the same kind of section, and nothing else here
-   reuses a name markup has already claimed. */
+   `.panel-head` and `.stage-hint` are shared with the pipeline panel on purpose. */
 .deploy-lead {
   margin: var(--space-3) 0 0;
   color: var(--ink);
@@ -5153,8 +4626,7 @@ textarea {
   margin-top: var(--space-2);
 }
 
-/* One service's file. The contents are never rendered — it holds the warehouse password and all
-   four secrets, and the only thing to do with it is run it somewhere. */
+/* Contents never rendered: it holds the warehouse password and all four secrets. */
 .deploy-get {
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
@@ -5170,8 +4642,8 @@ textarea {
   font-size: var(--text-md);
 }
 
-/* An anchor and not a button, because `Content-Disposition` is what saves the file — so the
-   button styling has to be restated here: `button.primary` is scoped to the element. */
+/* An anchor so `Content-Disposition` saves the file; `button.primary` is scoped to the
+   element, so the button styling is restated. */
 .deploy-download {
   min-height: var(--control);
   display: inline-flex;
@@ -5235,8 +4707,7 @@ textarea {
 }
 
 /* ---------- first-run setup ---------- */
-/* The whole screen, rail included: until it finishes there is no model, so chat cannot answer
-   and a board cannot refresh. See Setup.tsx. */
+/* The whole screen, rail included: with no model yet, chat and boards cannot work. */
 .setup {
   height: 100%;
   overflow-y: auto;
@@ -5276,8 +4747,7 @@ textarea {
   border-top: 1px solid var(--line);
 }
 
-/* Steps ahead of the current one stay visible but inert, so the shape of what is left is
-   legible from the first screen rather than appearing one surprise at a time. */
+/* Later steps stay visible but inert, so the shape of what is left is legible. */
 .setup-step.later {
   opacity: 0.45;
 }
@@ -5345,20 +4815,13 @@ textarea {
   line-height: 1.2;
 }
 
-/* `>` because this container holds the connection form, which renders its own footer button —
-   without it that button would be restyled by a rule meant for the step's own action. */
+/* `>`: the connection form inside renders its own footer button. */
 .setup-body > button.primary {
   margin-top: var(--space-05);
 }
 
-/* ---------- The model editor ----------
-   Three panes under one bar. The layout is a grid rather than flex because the middle pane holds
-   CodeMirror, which grows to whatever height it is given: `1fr` on the row and `min-height: 0`
-   on the panes are what keeps a 400-line cube file from pushing the branch bar off the screen.
-
-   Every class here is new. `.tree`, `.proposal`, `.cm-host` and the `.editor-*` additions were
-   checked against the whole stylesheet first — `.dot` and `.panel` are both names this codebase
-   has had claimed by markup rather than by CSS, so grepping the stylesheet alone is not enough. */
+/* A grid: `1fr` on the row and `min-height: 0` on the panes stop CodeMirror pushing the branch
+   bar off screen. Check markup too before naming: `.dot`/`.panel` are claimed there. */
 
 /* ---------- the branch picker ---------- */
 
@@ -5386,8 +4849,7 @@ textarea {
   font-size: var(--text-sm);
 }
 
-/* What the `<select>` could not say: that this branch refuses edits, or that it is carrying
-   work. Never both — on main the count is zero by construction. */
+/* What a `<select>` cannot say: the branch refuses edits, or carries work (never both). */
 .branch-panel {
   position: absolute;
   top: calc(100% + 4px);
@@ -5406,15 +4868,11 @@ textarea {
   border: none;
   background: none;
   text-align: left;
-  /* `.btn` is a centred flex row, so `text-align` here was never doing anything — every item
-     with one child sat centred while `main`, which has two, only looked aligned because they
-     filled the row. A menu reads down its left edge. */
+  /* `.btn` is a centred flex row, so `text-align` alone does nothing. */
   justify-content: flex-start;
 }
 
-/* Two controls per branch — switch to it, drop it — so the row lays them out and the name takes
-   whatever is left. The delete is opted out of the full-width rule above rather than the rule
-   being narrowed: every other button in this panel does want the whole row. */
+/* The delete opts out of the full-width rule above; every other button here wants the row. */
 .branch-row {
   display: flex;
   align-items: center;
@@ -5426,8 +4884,7 @@ textarea {
   min-width: 0;
 }
 
-/* Faint until pointed at: a column of red bins reads as a list of problems, and these are
-   just branches. */
+/* Faint until pointed at: a column of red bins reads as a list of problems. */
 .branch-panel .branch-delete {
   flex: 0 0 auto;
   width: var(--control-sm);
@@ -5464,25 +4921,15 @@ textarea {
 
 /* ---------- the publish path ---------- */
 
-/* Three steps rather than one button that renames itself. The step you are up to is filled; the
-   ones ahead are dimmed rather than absent, so the shape of the thing is legible before you have
-   done any of it. */
+/* Later steps dimmed, not absent, so the whole path is legible up front. */
 .pipeline > span {
   color: var(--faint);
   font-size: var(--text-xs);
 }
 
-/* A segmented control in the bar, not underlined tabs above the editor. It was the latter, in
-   the slot the open files now use, and reading as a file tab bar is exactly what made it
-   confusing: it never switched documents, it switched what the whole screen was showing. */
-.editor-view button:hover {
-  color: var(--ink);
-}
-
 /* ---------- the open files ---------- */
 
-/* The strip only. Its panels are empty by construction — one CodeMirror is reconfigured per
-   file rather than one mounted per tab — so it must not try to take the height a panel would. */
+/* The strip only: one CodeMirror serves every tab, so the panels are empty and take no height. */
 .editor-filetabs {
   flex: none;
   min-height: 0;
@@ -5499,9 +4946,8 @@ textarea {
 
 /* ============================ the ide, continued ============================ */
 
-/* The editor fills what the connection above it left. `min-height: 0` is the load-bearing half:
-   without it a flex child refuses to shrink below its content, CodeMirror grows without bound,
-   and the branch bar leaves the top of the screen. */
+/* `min-height: 0` is load-bearing: without it CodeMirror grows unbounded and the branch bar
+   leaves the screen. */
 .editor {
   display: flex;
   flex-direction: column;
@@ -5510,10 +4956,8 @@ textarea {
   padding-top: var(--space-4);
 }
 
-/* The bar and everything it reports keep the page's margin; the panes below go to the window
-   edge, because horizontal room is the thing a three-pane editor is always short of. Margin
-   rather than padding on `.editor`, so the notes' own borders still wrap their text — and after
-   every rule above, since two of these set `margin` in full and would otherwise reset it. */
+/* The bar keeps the page margin; panes go edge to edge. Margin, not padding, so the notes'
+   borders wrap their text; after every rule above, two of which set `margin` in full. */
 .editor > .editor-bar,
 .editor > .editor-note,
 .editor > .editor-notice {
@@ -5521,11 +4965,7 @@ textarea {
   margin-right: var(--space-7);
 }
 
-/* No `grid-template-columns` and no height. Both are the panel's business now: `Layout` places
-   each side pane and insets the middle by whatever it has been dragged to, and the height comes
-   from `.editor` filling the page. The old `:has(> :nth-child(2):last-child)` rule that dropped
-   to two columns on main went with them — a pane that is not rendered now takes no space by
-   construction rather than by a selector that had to be kept in step with the markup. */
+/* No columns or height: `Layout` places the panes and `.editor` supplies the height. */
 .editor-panes {
   flex: 1;
   min-height: 0;
@@ -5541,8 +4981,7 @@ textarea {
   padding: var(--space-4) var(--space-7) var(--space-6);
 }
 
-/* A flex child of the layout's inner column now rather than a grid cell, so it has to claim its
-   own height — the cell used to give it one. */
+/* A flex child, not a grid cell, so it claims its own height. */
 .editor-file {
   display: flex;
   flex-direction: column;
@@ -5559,8 +4998,7 @@ textarea {
 
 /* ---------- the file tree ---------- */
 
-/* Changes is fixed at the top and the tree takes the rest, so a long model does not push the
-   list of what you have changed off the bottom of the pane. */
+/* Changes is fixed on top so a long tree cannot push it off the pane. */
 .pane-left {
   display: flex;
   flex-direction: column;
@@ -5617,8 +5055,7 @@ textarea {
   gap: var(--space-1);
 }
 
-/* The file name takes the room and the undo stays put, so a column of them lines up rather than
-   landing wherever each name happens to end. */
+/* The name takes the room, so the undo buttons line up. */
 .changes li > .tree-file {
   flex: 1;
   min-width: 0;
@@ -5661,8 +5098,7 @@ textarea {
   list-style: none;
 }
 
-/* `>` is not needed here — a tree row holds no component of its own — but the button is styled
-   by name rather than by container so that adding one later cannot inherit this. */
+/* Styled by name, not container, so a button added to a tree row later does not inherit it. */
 .tree-file {
   display: flex;
   align-items: center;
@@ -5692,8 +5128,7 @@ textarea {
   color: var(--ink);
 }
 
-/* Filled means unsaved, hollow means saved-but-uncommitted. On the file and not only in the bar,
-   because "what have I changed" is a question about the tree and the bar can only count. */
+/* Filled means unsaved, hollow means saved but uncommitted. */
 .tree-mark {
   flex: none;
   width: 6px;
@@ -5722,8 +5157,7 @@ textarea {
 }
 
 /* ---------- Problems ----------
-   Under the editor, in its column. `flex: none` with the body's own scroll, so a model with
-   thirty member errors takes a fixed slice of the screen instead of squeezing CodeMirror out. */
+   `flex: none` with its own scroll, so many errors cannot squeeze CodeMirror out. */
 
 .problems {
   flex: none;
@@ -5768,8 +5202,7 @@ textarea {
 }
 
 /* ---------- CodeMirror ----------
-   The host fills what the pane gives it; everything inside is themed from `CodeEditor.tsx` so the
-   editor's colours come from the same tokens as the rest of the page. */
+   Themed from `CodeEditor.tsx` with the same tokens as the page. */
 
 .cm-host {
   flex: 1;
@@ -5819,9 +5252,8 @@ textarea {
 
 
 
-/* ---------- The merge dialog ----------
-   `.modal` gives it the scrim, the box and the footer row; only the width and the scrolling body
-   are its own, because a patch is taller than a confirmation. */
+/* ---------- the merge dialog ----------
+   `.modal` gives the scrim, box and footer; only the width and scrolling body are its own. */
 
 .merge-modal {
   width: min(760px, calc(100vw - 40px));
@@ -5868,8 +5300,7 @@ textarea {
   color: var(--bad);
 }
 
-/* In the footer beside the buttons, because it is a property of the merge rather than a setting.
-   `.editor-spacer` in the markup is what keeps the two buttons together at the right-hand end. */
+/* `.editor-spacer` in the markup keeps the two buttons together at the right-hand end. */
 .merge-drop {
   display: flex;
   align-items: center;
@@ -5892,8 +5323,6 @@ textarea {
   gap: var(--space-3);
 }
 
-/* Inside the picker's footer, beside the count. A decision that belongs with the button that
-   acts on it rather than in a settings row somewhere above. */
 .build-enrich {
   display: flex;
   align-items: flex-start;
@@ -5915,11 +5344,7 @@ textarea {
 
 /* ================================== flows =================================== */
 
-/* ---------- flows ----------
-   `.nav*` above is reused by FlowNav, exactly as DashboardNav reuses it — that vocabulary is the
-   shared sidebar chrome. Everything below is prefixed `.flow-`, because none of it has a
-   counterpart elsewhere and borrowing `.editor-*` would tie a flow's layout to the model
-   editor's, which is a different three-pane shape that happens to look similar today. */
+/* `.nav*` is reused by FlowNav; the rest is `flow-` prefixed, not tied to `.editor-*`. */
 
 .flow-new {
   display: flex;
@@ -5991,8 +5416,6 @@ textarea {
   color: var(--bad);
 }
 
-/* Three panes: the files, the one open, and the agent that writes them. Same shape as the model
-   editor for the same reason — you read a file, change it, and ask about it without moving. */
 .flow-edit {
   flex: 1;
   min-height: 0;
@@ -6026,8 +5449,7 @@ textarea {
   font-size: var(--text-sm);
 }
 
-/* Two panes on the Runs tab: the runs, and the one open. Narrower list than the Edit tab's tree
-   because a run id is one line and a file list is a shape. */
+/* Narrower list than the Edit tab's tree: a run id is one line. */
 .flow-runs {
   flex: 1;
   min-height: 0;
@@ -6076,8 +5498,7 @@ textarea {
   padding: var(--space-5) var(--space-6) var(--space-8);
 }
 
-/* One Run, told phase by phase (`RunStory.tsx`). Prefixed `story-`, `phase-`, `step-` and
-   `output-`: a Run is read like a report, top to bottom, and none of this is chat chrome. */
+/* One Run, told phase by phase (`RunStory.tsx`). */
 
 .story {
   display: flex;

@@ -5,20 +5,8 @@ import type { FilePreview } from "../api";
 import { Collapse } from "./Collapse";
 
 /**
- * What a script wrote, below the answer that used it.
- *
- * Built on the model of `ResultBlock`: the transcript's job is to put the evidence next to the
- * claim, and a chart the agent drew is evidence. The files themselves are never in the event —
- * they are on disk in the workspace, so this renders from it and the browser fetches an image
- * the same way it fetches any other.
- *
- * A CSV is evidence in the same sense, and a download link is not a preview: the numbers are
- * the half that gets checked, and a click that leaves the page to check them is a click nobody
- * makes. So anything readable opens as a table or a head of text right here, `/preview` decides
- * which, and the download stays for the rest of it.
- *
- * Which extensions render inline is the server's rule (`web/files.INLINE` for images,
- * `TABULAR`/`READABLE` for the rest); this list is the same question asked of the same names.
+ * What a script wrote. The event carries only paths; each file is fetched from the workspace.
+ * `IMAGES` must match the server's `web/files.INLINE`.
  */
 
 const IMAGES = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
@@ -58,16 +46,8 @@ export function FileBlock({
 }
 
 /**
- * One non-image file, open on arrival.
- *
- * Open rather than folded because the complaint this answers is that the data was one click
- * away and therefore unread. The cost is a request per file when a chat is reopened — which is
- * what `files` has always cost, since the paths are all the event carries and an image already
- * fetches itself. The body is bounded instead, so a long file does not push the transcript.
- *
- * It reads what is on disk *now*, so a script that overwrites `data.csv` changes what an older
- * block shows. True of the images above it for the same reason, and the run that wrote each
- * version is still in the trace above.
+ * One non-image file, open on arrival (folded data goes unread). It reads what is on disk now,
+ * so an overwritten file changes what an older block shows.
  */
 function Wrote({ chatId, path }: { chatId: string; path: string }) {
   const [open, setOpen] = useState(true);
@@ -123,7 +103,6 @@ function Wrote({ chatId, path }: { chatId: string; path: string }) {
   );
 }
 
-/** The header's summary: enough to know whether what is below is the whole file. */
 function shape(preview: FilePreview): string {
   const size =
     preview.bytes < 1024
@@ -138,12 +117,8 @@ function shape(preview: FilePreview): string {
 }
 
 /**
- * The head of a CSV as a table.
- *
- * Not `ResultBlock`'s: that one sorts, pages and formats against `ResultColumn` metadata Cube
- * supplied, and none of it exists for bytes a script wrote. Every cell here is the string that
- * is in the file — the only judgement made is which columns are numbers, and that is made from
- * the values rather than from a name.
+ * The head of a CSV. Not `ResultBlock`'s table, which needs Cube's column metadata; here
+ * numeric columns are inferred from the values.
  */
 function PreviewTable({ preview }: { preview: FilePreview }) {
   const numeric = preview.columns.map(

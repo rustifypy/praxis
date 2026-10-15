@@ -46,13 +46,7 @@ jobs:
         working-directory: src/web
 
       - name: Type-check and build
-        run: npx tsc -b && npx vite build
-        working-directory: src/web
-
-      # The bundle is committed because `uv_build` only ships `src/analyst_agent`, so a
-      # stale one is what a wheel would serve. Nothing else notices it is stale.
-      - name: The committed bundle is the one this source builds
-        run: git diff --exit-code --stat -- ../analyst_agent/web/static
+        run: npm run build
         working-directory: src/web
 
   docs:

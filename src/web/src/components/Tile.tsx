@@ -6,20 +6,14 @@ import { Empty } from "./Empty";
 import { ResultChart } from "./ResultChart";
 
 /**
- * One tile: a title, the window it read, and either its chart or its table.
- *
- * Reuses `ResultChart` with no table under it, which is only safe because every palette slot
- * clears 3:1 unaided — a light hue leaning on that table for contrast relief would not.
- *
- * The window label is `resolved_ranges`: the only thing distinguishing a tile whose window
- * moves on refresh from one pinned to a fixed period. Both are legal; a board where you
- * cannot tell them apart is not.
+ * One tile. The window label comes from `resolved_ranges`, the only way to tell a moving window
+ * from a fixed one.
  */
 
 function Delta({ change, percent }: { change: number; percent: number | null }) {
   if (change === 0) return <span className="dash-delta flat">no change</span>;
   const tone = change > 0 ? "up" : "down";
-  // The arrow and the sign both carry direction, so colour is never the only cue.
+  // Colour is never the only cue.
   const arrow = change > 0 ? "▲" : "▼";
   const shown =
     percent === null
@@ -76,8 +70,7 @@ export function Tile({
   return (
     <section className="dash-tile">
       <header className="dash-tile-head">
-        {/* The grip, not the tile, is what arms a drag — dragging the whole tile would take
-            the chart's hover targets and text selection with it. */}
+        {/* Only the grip arms a drag, so the chart keeps hover and text selection. */}
         <button
           className="dash-grip"
           aria-label={`Move ${tile.title}`}
