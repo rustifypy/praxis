@@ -1,12 +1,12 @@
 # Praxis by rustify
 
-[![Documentation](https://img.shields.io/badge/docs-rustify.tech-3355dd.svg)](https://rustify.tech)
+[![Documentation](https://img.shields.io/badge/docs-rustify.tech%2Fpraxis-3355dd.svg)](https://rustify.tech/praxis/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 Ask questions about your data in plain English, and run repeatable data work step by step.
 
-[![A one-minute tour of the portal: a question answered with a chart, the semantic layer, and a Flow Run](.github/assets/portal-tour.gif)](https://rustify.tech)
+[![A one-minute tour of the portal: a question answered with a chart, the semantic layer, and a Flow Run](.github/assets/portal-tour.gif)](https://rustify.tech/praxis/)
 
 Praxis sits on top of your SQL warehouse (Postgres, Snowflake, BigQuery, Databricks and
 more). It:
@@ -40,7 +40,7 @@ walks through it.
 
 ## Documentation
 
-**[rustify.tech](https://rustify.tech)** — or read it here in [`docs/`](docs/index.md):
+**[rustify.tech/praxis](https://rustify.tech/praxis/)** — or read it here in [`docs/`](docs/index.md):
 
 | | |
 |---|---|

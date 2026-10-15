@@ -19,7 +19,7 @@ make web                  # build the browser app, then start the portal
 
 ```text
 Praxis portal is running at:
-    http://127.0.0.1:8420/?token=x2W_lbP79sgZBAxfrNbpdBpGefsgcuc2
+    http://127.0.0.1:8420/?token=<printed-at-each-start>
 Press Ctrl-C to stop.
 ```
 

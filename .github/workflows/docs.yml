@@ -1,7 +1,8 @@
 name: Docs
 
-# Publishes the documentation to GitHub Pages, served at rustify.tech (docs/CNAME). CI's `docs`
-# job is the strict check on every pull request; this only deploys what reached main.
+# Publishes the documentation to GitHub Pages, served at rustify.tech/praxis through the
+# organisation site's domain. CI's `docs` job is the strict check on every pull request; this only
+# deploys what reached main.
 on:
   push:
     branches: [main]
