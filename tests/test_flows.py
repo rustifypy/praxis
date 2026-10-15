@@ -12,7 +12,7 @@ import json
 import textwrap
 from pathlib import Path
 
-from analyst_agent.flows import contract, layout, state
+from praxis.flows import contract, layout, state
 
 
 def build(root: Path, phases: dict[str, str], *, flow_yml: str = "title: Weekly", **files) -> Path:
@@ -332,8 +332,8 @@ def test_stale_does_not_touch_a_phase_that_produced_nothing():
 
 
 async def test_a_runs_events_are_a_jsonl_file_and_not_a_row(tmp_path):
-    from analyst_agent.core.events import Event
-    from analyst_agent.flows import events as flow_events
+    from praxis.core.events import Event
+    from praxis.flows import events as flow_events
 
     append = flow_events.sink(tmp_path)
     await append("01_pull", Event(type="user", data={"text": "go"}))
@@ -348,8 +348,8 @@ async def test_a_runs_events_are_a_jsonl_file_and_not_a_row(tmp_path):
 async def test_a_half_written_line_does_not_lose_the_history_above_it(tmp_path):
     """A reader can arrive while a Phase is appending. The Run's history is worth more than
     strictness about its last byte."""
-    from analyst_agent.core.events import Event
-    from analyst_agent.flows import events as flow_events
+    from praxis.core.events import Event
+    from praxis.flows import events as flow_events
 
     await flow_events.sink(tmp_path)("01_pull", Event(type="user", data={"text": "go"}))
     with (tmp_path / layout.EVENTS_JSONL).open("a") as handle:
@@ -372,7 +372,7 @@ def flow_of() -> contract.Flow:
 
 
 def test_reference_material_is_inlined_and_tabular_working_material_is_not():
-    from analyst_agent.flows import prompt
+    from praxis.flows import prompt
 
     phase = phase_of("02_write", "kind: agent\noutputs: [summary.md]\n", "Write it up.")
     material = prompt.Material(
@@ -396,7 +396,7 @@ def test_reference_material_is_inlined_and_tabular_working_material_is_not():
 def test_an_empty_section_says_so_rather_than_being_omitted():
     """Absence is information: a Phase with no reference material has no rules to follow, which
     is different from rules that went missing on the way to the prompt."""
-    from analyst_agent.flows import prompt
+    from praxis.flows import prompt
 
     phase = phase_of("01_pull", "kind: agent\n", "Pull it.")
     built = prompt.build(flow_of(), phase, prompt.Material())
@@ -406,7 +406,7 @@ def test_an_empty_section_says_so_rather_than_being_omitted():
 
 
 def test_a_cut_reference_file_is_declared_in_the_prompt():
-    from analyst_agent.flows import prompt
+    from praxis.flows import prompt
 
     truncated: list[str] = []
     text = prompt.clip("x" * (prompt.INLINE_LIMIT + 500), "_config/huge.md", truncated)
@@ -428,8 +428,8 @@ def test_a_cut_reference_file_is_declared_in_the_prompt():
 async def test_write_output_refuses_a_filename_the_phase_did_not_declare(tmp_path):
     """The declaration is the contract the next Phase's inputs were written against. A near-miss
     filename would leave the Phase looking successful and the Phase after it reading nothing."""
-    from analyst_agent.agent.session import Session
-    from analyst_agent.flows import tools
+    from praxis.agent.session import Session
+    from praxis.flows import tools
 
     phase = phase_of("02_write", "kind: agent\noutputs: [summary.md]\n", "Write.")
     session = Session(catalog=None, client=None)
@@ -447,8 +447,8 @@ async def test_write_output_refuses_a_filename_the_phase_did_not_declare(tmp_pat
 
 
 def test_a_phase_gets_only_the_bundles_it_asked_for():
-    from analyst_agent.agent.session import Session
-    from analyst_agent.flows import tools
+    from praxis.agent.session import Session
+    from praxis.flows import tools
 
     session = Session(catalog=None, client=None)
     prose_only = phase_of("02_write", "kind: agent\noutputs: [a.md]\n", "Write.")
@@ -471,7 +471,7 @@ def test_a_phase_gets_only_the_bundles_it_asked_for():
 
 
 def test_a_second_run_of_one_flow_is_refused_while_the_first_holds_the_lock(tmp_path):
-    from analyst_agent.flows import runner
+    from praxis.flows import runner
 
     with runner.hold(tmp_path):
         try:
@@ -485,8 +485,8 @@ def test_a_second_run_of_one_flow_is_refused_while_the_first_holds_the_lock(tmp_
 
 
 def test_begin_refuses_a_broken_flow_before_making_a_run_folder(tmp_path, monkeypatch):
-    from analyst_agent.core.config import settings
-    from analyst_agent.flows import runner
+    from praxis.core.config import settings
+    from praxis.flows import runner
 
     monkeypatch.setattr(settings, "flows_dir", str(tmp_path))
     build(tmp_path, {"01_pull": AGENT})  # no CONTEXT.md, so the agent Phase cannot run
@@ -498,8 +498,8 @@ def test_begin_refuses_a_broken_flow_before_making_a_run_folder(tmp_path, monkey
 
 
 def test_begin_writes_the_brief_and_a_run_at_phase_one(tmp_path, monkeypatch):
-    from analyst_agent.core.config import settings
-    from analyst_agent.flows import runner
+    from praxis.core.config import settings
+    from praxis.flows import runner
 
     monkeypatch.setattr(settings, "flows_dir", str(tmp_path))
     build(
@@ -562,7 +562,7 @@ def gated(current: str, statuses: dict[str, str]) -> state.RunState:
 
 
 def test_only_the_phase_at_the_gate_may_be_edited():
-    from analyst_agent.api.flows import controller
+    from praxis.api.flows import controller
 
     run = gated("02_write", {"01_pull": "done", "02_write": "pending"})
     assert controller.editable_phase(run) == "01_pull"
@@ -579,7 +579,7 @@ def test_only_the_phase_at_the_gate_may_be_edited():
 def test_editing_an_artifact_is_refused_unless_the_run_is_paused_at_that_phase(tmp_path):
     from fastapi import HTTPException
 
-    from analyst_agent.api.flows import controller
+    from praxis.api.flows import controller
 
     run = gated("02_write", {"01_pull": "done", "02_write": "pending"})
     target = controller.artifact(tmp_path, run, "01_pull/output/summary.md", writing=True)
@@ -618,8 +618,8 @@ def test_editing_an_artifact_is_refused_unless_the_run_is_paused_at_that_phase(t
 def test_the_latest_symlink_does_not_make_a_run_appear_twice(tmp_path, monkeypatch):
     """`runs/latest` points at a real Run directory, so anything counting `is_dir()` folders finds
     the newest Run under both names. Found by a route test asserting a list of one."""
-    from analyst_agent.core.config import settings
-    from analyst_agent.flows import runner
+    from praxis.core.config import settings
+    from praxis.flows import runner
 
     monkeypatch.setattr(settings, "flows_dir", str(tmp_path))
     build(tmp_path, {"01_pull": AGENT}, **{"phases__01_pull__CONTEXT.md": "Pull."})
@@ -635,7 +635,7 @@ def test_a_phase_that_cannot_run_code_is_not_told_to_read_the_file():
     """Found on the first real run. A phase with a tabular working input and no `python` bundle
     was told to "read them with run_python" — an instruction it has no tool for, and a model given
     an impossible instruction works around it silently."""
-    from analyst_agent.flows import prompt
+    from praxis.flows import prompt
 
     material = prompt.Material(working_shapes=["### revenue.csv — 2,100 rows x 3 columns"])
     with_python = phase_of("02_x", "kind: agent\ntools: [python]\noutputs: [a.md]\n", "Do it.")
@@ -653,8 +653,8 @@ async def test_write_output_refuses_an_empty_declared_output(tmp_path):
     with an empty string instead of not calling it — and only the sandbox's copy overwriting the
     file kept the artifact correct. Refused here so that rescue is not what the design rests on.
     """
-    from analyst_agent.agent.session import Session
-    from analyst_agent.flows import tools
+    from praxis.agent.session import Session
+    from praxis.flows import tools
 
     phase = phase_of("01_pull", "kind: agent\noutputs: [revenue.csv]\n", "Pull.")
     built = tools.build_phase_tools(
@@ -674,7 +674,7 @@ async def test_write_output_refuses_an_empty_declared_output(tmp_path):
 
 def paged(cube, rows: list[dict]) -> None:
     """Make the fake answer `limit` and `offset` the way Cube does, over a fixed result."""
-    from analyst_agent.modelstore.client import LoadResult
+    from praxis.modelstore.client import LoadResult
 
     async def load(query):
         cube.loaded.append(query.to_payload())
@@ -720,7 +720,7 @@ class FakeSandbox:
 
 def with_sandbox(monkeypatch, module, fake: FakeSandbox | None):
     """`fake` stands in for the service; `None` is a sandbox that does not answer."""
-    from analyst_agent.sandbox import SandboxError
+    from praxis.sandbox import SandboxError
 
     async def opened(*args, **kwargs):
         if fake is None:
@@ -731,8 +731,8 @@ def with_sandbox(monkeypatch, module, fake: FakeSandbox | None):
 
 
 def extract_phase(catalog, cube, tmp_path, outputs="[orders.csv]"):
-    from analyst_agent.agent.session import Session
-    from analyst_agent.flows import tools
+    from praxis.agent.session import Session
+    from praxis.flows import tools
 
     phase = phase_of("01_pull", f"kind: agent\ntools: [query]\noutputs: {outputs}\n", "Pull.")
     pushed: set[str] = set()
@@ -749,7 +749,7 @@ def extract_phase(catalog, cube, tmp_path, outputs="[orders.csv]"):
 async def test_pages_read_by_offset_under_a_total_order_and_stop_at_a_short_page(catalog, cube):
     """Cube answers at most 50,000 rows to one request, so a larger result is read by offset —
     safe only if no row can move between pages. A measure can tie, so the dimensions follow it."""
-    from analyst_agent.modelstore import gate
+    from praxis.modelstore import gate
 
     paged(cube, STATUSES)
     asked = {**BY_STATUS, "order": {"orders.count": "desc"}}
@@ -762,7 +762,7 @@ async def test_pages_read_by_offset_under_a_total_order_and_stop_at_a_short_page
 
 
 async def test_pages_stop_at_the_most_asked_for(catalog, cube):
-    from analyst_agent.modelstore import gate
+    from praxis.modelstore import gate
 
     paged(cube, STATUSES)
     checked = await gate.check(BY_STATUS, catalog, cube, 10)
@@ -776,8 +776,8 @@ async def test_extract_writes_every_row_and_shows_the_model_only_the_shape(
 ):
     """The point of the tool: past the chat's 5,000-row cap, and with no rows in the reply
     beyond the few a shape shows."""
-    from analyst_agent.core.config import settings
-    from analyst_agent.flows import tools
+    from praxis.core.config import settings
+    from praxis.flows import tools
 
     monkeypatch.setattr(settings, "flow_page_rows", 10)
     with_sandbox(monkeypatch, tools, None)
@@ -798,8 +798,8 @@ async def test_extract_writes_every_row_and_shows_the_model_only_the_shape(
 async def test_extract_past_the_ceiling_writes_nothing(catalog, cube, tmp_path, monkeypatch):
     """A file cut at the ceiling looks finished, and the next Phase would read it as the whole
     result."""
-    from analyst_agent.core.config import settings
-    from analyst_agent.flows import tools
+    from praxis.core.config import settings
+    from praxis.flows import tools
 
     monkeypatch.setattr(settings, "flow_page_rows", 10)
     monkeypatch.setattr(settings, "flow_max_rows", 20)
@@ -813,7 +813,7 @@ async def test_extract_past_the_ceiling_writes_nothing(catalog, cube, tmp_path, 
 
 
 async def test_an_undeclared_extract_lands_in_scratch(catalog, cube, tmp_path, monkeypatch):
-    from analyst_agent.flows import tools
+    from praxis.flows import tools
 
     with_sandbox(monkeypatch, tools, None)
     paged(cube, STATUSES)
@@ -826,7 +826,7 @@ async def test_an_undeclared_extract_lands_in_scratch(catalog, cube, tmp_path, m
 
 
 async def test_extract_refuses_a_path_for_a_filename(catalog, cube, tmp_path, monkeypatch):
-    from analyst_agent.flows import tools
+    from praxis.flows import tools
 
     with_sandbox(monkeypatch, tools, None)
     built, _ = extract_phase(catalog, cube, tmp_path)
@@ -841,7 +841,7 @@ async def test_extract_hands_the_file_to_the_sandbox_and_records_the_path(
 ):
     """The sandbox's profile is the one a later Phase sees for the same file, so the model sees
     one shape for it throughout. The path goes in `pushed` so `_collect` does not copy it back."""
-    from analyst_agent.flows import tools
+    from praxis.flows import tools
 
     fake = FakeSandbox()
     fake.files.append("uploads/orders.csv")  # an earlier extract of the same name
@@ -858,8 +858,8 @@ async def test_extract_hands_the_file_to_the_sandbox_and_records_the_path(
 
 async def test_no_extract_event_carries_a_row(catalog, cube, tmp_path, monkeypatch):
     """The Run's log is not where data is read: no `preview`, so the browser draws no table."""
-    from analyst_agent.agent.tools import trace
-    from analyst_agent.flows import tools
+    from praxis.agent.tools import trace
+    from praxis.flows import tools
 
     captured: list[dict] = []
     monkeypatch.setattr(trace, "emit", lambda event: captured.append(event.model_dump()))
@@ -878,7 +878,7 @@ async def test_no_extract_event_carries_a_row(catalog, cube, tmp_path, monkeypat
 
 async def test_write_output_cannot_replace_an_extract(catalog, cube, tmp_path, monkeypatch):
     """The extract came through Cube. Nothing a model types may take its place."""
-    from analyst_agent.flows import tools
+    from praxis.flows import tools
 
     with_sandbox(monkeypatch, tools, None)
     paged(cube, STATUSES)
@@ -893,7 +893,7 @@ async def test_write_output_cannot_replace_an_extract(catalog, cube, tmp_path, m
 
 async def test_collect_does_not_copy_back_what_the_portal_sent(tmp_path, monkeypatch):
     """An extract is already in `output/`. Downloading it again moves a large file twice."""
-    from analyst_agent.flows import runner
+    from praxis.flows import runner
 
     fake = FakeSandbox()
     fake.files = ["uploads/orders.csv", "chart.png"]
@@ -910,8 +910,8 @@ async def test_collect_does_not_copy_back_what_the_portal_sent(tmp_path, monkeyp
 async def test_a_phase_whose_stream_is_closed_is_failed_not_left_running(tmp_path, monkeypatch):
     """A closed tab cancels the Run's generator from outside. Before this, `run.json` kept saying
     `running` for a Run nobody was running, and the page showed it as still going."""
-    from analyst_agent.core.events import Event
-    from analyst_agent.flows import runner
+    from praxis.core.events import Event
+    from praxis.flows import runner
 
     with_sandbox(monkeypatch, runner, None)
 
@@ -941,7 +941,7 @@ async def _ignore(turn_id, event):
 async def test_a_declared_csv_with_only_a_header_fails_the_phase(tmp_path, monkeypatch):
     """Seen live: an agent that could not find the routes wrote a header-only `routes.csv`, the
     Phase passed, and the next Phase would have read it as "there are no routes"."""
-    from analyst_agent.flows import runner
+    from praxis.flows import runner
 
     with_sandbox(monkeypatch, runner, None)
 
@@ -965,7 +965,7 @@ async def test_a_declared_csv_with_only_a_header_fails_the_phase(tmp_path, monke
 
 
 async def test_a_declared_csv_with_one_row_passes(tmp_path, monkeypatch):
-    from analyst_agent.flows import runner
+    from praxis.flows import runner
 
     with_sandbox(monkeypatch, runner, None)
 
@@ -994,7 +994,7 @@ def test_may_be_empty_names_only_declared_outputs(tmp_path):
 
 async def test_an_output_allowed_to_be_empty_passes_with_only_a_header(tmp_path, monkeypatch):
     """A transfer plan when no store is short: no rows is the right answer, declared as such."""
-    from analyst_agent.flows import runner
+    from praxis.flows import runner
 
     with_sandbox(monkeypatch, runner, None)
 
@@ -1078,7 +1078,7 @@ def test_a_prepared_query_is_a_writable_definition_file():
 
 
 def test_the_prompt_hands_over_the_prepared_work_whole():
-    from analyst_agent.flows import prompt
+    from praxis.flows import prompt
 
     phase = phase_of("01_pull", PREPARED, "Pull.")
     material = prompt.Material(
@@ -1094,8 +1094,8 @@ def test_the_prompt_hands_over_the_prepared_work_whole():
 async def test_extract_prepared_runs_the_stored_query_into_its_named_file(
     catalog, cube, tmp_path, monkeypatch
 ):
-    from analyst_agent.agent.session import Session
-    from analyst_agent.flows import prompt, tools
+    from praxis.agent.session import Session
+    from praxis.flows import prompt, tools
 
     with_sandbox(monkeypatch, tools, None)
     paged(cube, STATUSES)
@@ -1126,10 +1126,10 @@ async def test_a_prepared_script_runs_without_asking_and_an_edited_one_asks(
 ):
     """Reviewed when it was saved into the Flow, like a `kind: script` Phase. Matched on the whole
     text, so the agent changing one character makes it a new script that asks like any other."""
-    from analyst_agent.agent.session import Session
-    from analyst_agent.agent.tools import code, trace
-    from analyst_agent.flows import prompt, tools
-    from analyst_agent.sandbox import Run
+    from praxis.agent.session import Session
+    from praxis.agent.tools import code, trace
+    from praxis.flows import prompt, tools
+    from praxis.sandbox import Run
 
     class Sandbox:
         async def __aenter__(self):
@@ -1174,7 +1174,7 @@ async def test_a_prepared_script_runs_without_asking_and_an_edited_one_asks(
 async def test_check_query_returns_the_header_a_prepared_script_reads(
     catalog, cube, monkeypatch, opening
 ):
-    from analyst_agent.flows import authoring
+    from praxis.flows import authoring
 
     class Store:
         def at(self, ref="main"):
@@ -1194,7 +1194,7 @@ async def test_check_query_returns_the_header_a_prepared_script_reads(
 async def test_validate_flow_checks_prepared_queries_against_the_model(
     tmp_path, catalog, cube, monkeypatch, opening
 ):
-    from analyst_agent.flows import authoring
+    from praxis.flows import authoring
 
     class Store:
         def at(self, ref="main"):
@@ -1217,10 +1217,10 @@ async def test_write_output_refuses_a_file_a_script_already_wrote(
 ):
     """Seen live: a prepared script wrote demand_forecast.csv, and the agent printed it and
     re-typed it with write_output — reading every row to do so. The script's file is the output."""
-    from analyst_agent.agent.session import Session
-    from analyst_agent.agent.tools import code
-    from analyst_agent.flows import prompt, tools
-    from analyst_agent.sandbox import Run
+    from praxis.agent.session import Session
+    from praxis.agent.tools import code
+    from praxis.flows import prompt, tools
+    from praxis.sandbox import Run
 
     class Sandbox:
         async def __aenter__(self):
@@ -1259,7 +1259,7 @@ async def test_write_output_refuses_a_file_a_script_already_wrote(
 
 def test_a_clock_relative_range_in_a_prepared_query_is_flagged():
     """'last 14 days' on data ending a week ago held eight days, and a digest reported +650%."""
-    from analyst_agent.flows.authoring import clock_relative
+    from praxis.flows.authoring import clock_relative
 
     relative = {"timeDimensions": [{"dimension": "s.day", "dateRange": "last 14 days"}]}
     fixed = {"timeDimensions": [{"dimension": "s.day", "dateRange": ["2026-01-01", "2026-01-31"]}]}

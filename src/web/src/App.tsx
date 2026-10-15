@@ -291,10 +291,10 @@ export default function App() {
   if (fatal) {
     return (
       <div className="fatal">
-        <h1>Cannot reach the analyst server</h1>
+        <h1>Cannot reach the Praxis server</h1>
         <p>{fatal}</p>
         <p>
-          Open the URL printed by <code>analyst</code>, token included.
+          Open the URL printed by <code>praxis</code>, token included.
         </p>
       </div>
     );

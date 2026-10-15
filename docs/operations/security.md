@@ -4,19 +4,19 @@
 
 | Secret | Lives in | Who uses it |
 |---|---|---|
-| Warehouse credentials | `analyst.db` (`deployment` row), and the semantic compose file | Cube only |
-| `CUBEJS_API_SECRET` | `analyst.db`, and the semantic compose file | the model store, to sign Cube JWTs. Never leaves that compose file at run time |
-| Model store token | `analyst.db`, and the semantic compose file | the portal, to call the store |
-| Sandbox token | `analyst.db`, and the sandbox compose file | the portal, to call the sandbox |
+| Warehouse credentials | `praxis.db` (`deployment` row), and the semantic compose file | Cube only |
+| `CUBEJS_API_SECRET` | `praxis.db`, and the semantic compose file | the model store, to sign Cube JWTs. Never leaves that compose file at run time |
+| Model store token | `praxis.db`, and the semantic compose file | the portal, to call the store |
+| Sandbox token | `praxis.db`, and the sandbox compose file | the portal, to call the sandbox |
 | Portal token | memory only, new each start | your browser |
-| MCP token | `analyst.db` | external agents calling `/mcp` |
+| MCP token | `praxis.db` | external agents calling `/mcp` |
 
 The three deployment secrets are minted with `secrets.token_urlsafe` when you first connect, and
 leave the portal only inside the compose files you download.
 
 ## The database file
 
-`~/.analyst/analyst.db` holds the warehouse credentials **as plaintext JSON**. The portal sets
+`~/.praxis/praxis.db` holds the warehouse credentials **as plaintext JSON**. The portal sets
 it to mode `600` (readable only by you) every time it starts. Keep `DATA_DIR` on a disk you
 trust, and treat a copy of the file as a copy of the password.
 

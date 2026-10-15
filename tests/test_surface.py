@@ -24,7 +24,7 @@ import re
 
 from fastapi.routing import APIRoute
 
-from analyst_agent.api import server
+from praxis.api import server
 
 SNAPSHOT = pathlib.Path(__file__).with_name("surface.json")
 

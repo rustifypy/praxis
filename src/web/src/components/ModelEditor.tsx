@@ -470,7 +470,7 @@ export function ModelEditor({
               minSize={170}
               maxSize={420}
               contentPadding="0"
-              sizeStorageKey="analyst.editor.tree"
+              sizeStorageKey="praxis.editor.tree"
             >
               <div className="pane-left">
                 <Changes
@@ -596,7 +596,7 @@ export function ModelEditor({
                 minSize={260}
                 maxSize={560}
                 contentPadding="0"
-                sizeStorageKey="analyst.editor.chat"
+                sizeStorageKey="praxis.editor.chat"
                 isOpen={chatOpen}
                 onOpenChange={setChatOpen}
               >

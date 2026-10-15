@@ -36,8 +36,8 @@ belong here.
 |---|---|---|
 | `WEB_HOST` | `127.0.0.1` | Address the portal listens on |
 | `WEB_PORT` | `8420` | Port the portal listens on |
-| `DATA_DIR` | `~/.analyst` | Holds `analyst.db`, `jobs.lock` and `drafts/`. A scratch `DATA_DIR` is a whole scratch install, connection included |
-| `FLOWS_DIR` | `flows` | Where Flows live. Relative paths resolve against the directory `analyst` was started from; set an absolute path to pin it |
+| `DATA_DIR` | `~/.praxis` | Holds `praxis.db`, `jobs.lock` and `drafts/`. A scratch `DATA_DIR` is a whole scratch install, connection included |
+| `FLOWS_DIR` | `flows` | Where Flows live. Relative paths resolve against the directory `praxis` was started from; set an absolute path to pin it |
 
 ## Behaviour
 

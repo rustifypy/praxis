@@ -1,7 +1,7 @@
 import pytest
 
-from analyst_agent.core import boards as dashboards
-from analyst_agent.core import db
+from praxis.core import boards as dashboards
+from praxis.core import db
 
 QUERY = {"measures": ["revenue.net_revenue"], "dimensions": ["revenue.status"]}
 CHART = {"type": "bar", "x": "revenue.status", "y": ["revenue.net_revenue"]}

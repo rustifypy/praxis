@@ -99,7 +99,7 @@ def test_exposed_counts_members_some_view_re_exports(catalog):
 
 
 def test_counts_survive_a_model_with_no_views():
-    from analyst_agent.modelstore.catalog import Catalog
+    from praxis.modelstore.catalog import Catalog
 
     bare = Catalog.from_meta(
         {"cubes": [{"name": "orders", "type": "cube", "measures": [{"name": "orders.count"}]}]}

@@ -4,7 +4,7 @@ from copy import deepcopy
 
 import yaml
 
-from analyst_agent.modelstore.editing import edits
+from praxis.modelstore.editing import edits
 
 ALBUM = {
     "name": "album",

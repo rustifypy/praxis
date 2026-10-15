@@ -12,7 +12,7 @@ import pathlib
 
 import pytest
 
-ROOT = pathlib.Path(__file__).resolve().parents[1] / "src" / "analyst_agent"
+ROOT = pathlib.Path(__file__).resolve().parents[1] / "src" / "praxis"
 
 # Tier 1 is external integrations, and there are exactly two. Everything process-local —
 # settings, the sqlite file and every table's accessors, the event format, the LLM builder, the

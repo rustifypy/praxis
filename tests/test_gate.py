@@ -1,7 +1,7 @@
 import pytest
 
-from analyst_agent.modelstore import gate
-from analyst_agent.modelstore.schema import CubeQuery
+from praxis.modelstore import gate
+from praxis.modelstore.schema import CubeQuery
 
 
 def check(payload: dict, catalog):

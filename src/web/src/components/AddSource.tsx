@@ -584,7 +584,7 @@ export function ConnectionForm({
       <p className="drawer-blurb">
         {editing
           ? "Leave a box empty to keep what is stored. A deployment's settings are fixed when it is created, so this takes effect once you re-run it from a freshly downloaded file."
-          : "Stored in analyst.db, which is owner-readable only, and written into the file you run the deployment with. Nothing is contacted yet."}
+          : "Stored in praxis.db, which is owner-readable only, and written into the file you run the deployment with. Nothing is contacted yet."}
       </p>
 
       {!editing && (

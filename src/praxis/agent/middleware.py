@@ -4,7 +4,7 @@ from langchain.agents.middleware import AgentMiddleware, SummarizationMiddleware
 
 from ..core.events import Event, emit
 
-log = logging.getLogger("analyst.audit")
+log = logging.getLogger("praxis.audit")
 
 
 class AuditLog(AgentMiddleware):

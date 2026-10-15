@@ -81,7 +81,7 @@ def onboarded(deployment: Deployment, found: Evidence) -> bool:
 
     Computed rather than stored, because `core.db.SCHEMA` cannot gain a column —
     `CREATE TABLE IF NOT EXISTS` does not diff, so a new column silently fails to appear on an
-    existing `analyst.db` and there is no migration mechanism to add one with.
+    existing `praxis.db` and there is no migration mechanism to add one with.
 
     Read off the cubes the store holds and not off a recorded step, the same way every other
     question here is: a step record says what this portal once did, and the model is what is

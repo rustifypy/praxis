@@ -31,7 +31,7 @@ CUBESTORE_IMAGE = f"cubejs/cubestore:{CUBE_VERSION}{'-arm64v8' if _ARM else ''}"
 # The sandbox is built and published from its own repository too. Pinned for the same reason as
 # the store: it is the analysis stack a saved script reproduces against, so which build a
 # hand-over names is what makes last month's script mean the same thing today.
-SANDBOX_IMAGE = "skshmjn/analyst-sandbox:0.1.0"
+SANDBOX_IMAGE = "skshmjn/praxis-sandbox:0.1.0"
 
 # What the sandbox gives a script, and a profile of an upload. Rendered into the hand-over rather
 # than left at the image's defaults so `sandbox.client`'s caps can be held *above* them from this
@@ -116,14 +116,14 @@ REQUIRED: dict[str, dict[str, str]] = {
 # Where the renderer writes a block rather than a value, so it cannot be a `${...}` scalar:
 # which CUBEJS_DB_* keys a warehouse needs is per-connection, so no fixed set of lines could
 # serve every one of them.
-CREDENTIALS = "# ANALYST:CREDENTIALS"
+CREDENTIALS = "# PRAXIS:CREDENTIALS"
 
 # Cube's config, shipped as an inline compose config rather than baked into an image of ours —
 # so the hand-over needs no registry but Docker Hub. A block for the same reason as the
 # credentials: it contains a `$` (the anchor in SAFE_REF), and compose interpolates the whole
 # file after parsing it, so every one has to be doubled and the renderer's unresolved-variable
 # guard has to skip it.
-CUBE_PY = "# ANALYST:CUBE_PY"
+CUBE_PY = "# PRAXIS:CUBE_PY"
 
 # One Cube process serves every ref: `context_to_app_id` keys the compiled-model cache on
 # <ref>@<rev> and `repository_factory` reads that revision's immutable snapshot off the shared
@@ -208,12 +208,12 @@ SEMANTIC = """\
 # Every image is pinned, so this file describes one deployment rather than whatever was newest
 # the day it was run. Upgrading is a fresh download from the portal, not an edit here.
 
-name: analyst-semantic
+name: praxis-semantic
 
 x-cube-env: &cube-env
   CUBEJS_API_SECRET: ${CUBEJS_API_SECRET}
   # The warehouse, as it was configured in the portal.
-  # ANALYST:CREDENTIALS
+  # PRAXIS:CREDENTIALS
   CUBEJS_CUBESTORE_HOST: cubestore
   CUBEJS_CUBESTORE_PORT: "3030"
   CUBEJS_DEFAULT_API_SCOPES: meta,data,graphql,sql
@@ -283,7 +283,7 @@ volumes:
 configs:
   cube_py:
     content: |
-      # ANALYST:CUBE_PY
+      # PRAXIS:CUBE_PY
 """
 
 SANDBOX = """\
@@ -296,7 +296,7 @@ SANDBOX = """\
 #
 # To move the published port, change the left-hand number only.
 
-name: analyst-sandbox
+name: praxis-sandbox
 
 services:
   sandbox:

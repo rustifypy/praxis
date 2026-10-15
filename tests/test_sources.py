@@ -1,4 +1,4 @@
-from analyst_agent.api.onboarding import controller as serving
+from praxis.api.onboarding import controller as serving
 
 SERVED = serving.Serving(cubes=13, views=["sales"], described=13)
 

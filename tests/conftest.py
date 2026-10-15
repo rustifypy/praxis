@@ -3,17 +3,17 @@ from dataclasses import dataclass, field
 import httpx
 import pytest
 
-from analyst_agent.core.config import settings
-from analyst_agent.core.deployment import MAIN, Deployment
-from analyst_agent.modelstore.catalog import Catalog
-from analyst_agent.modelstore.client import CompileResult, LoadResult, StoreError
-from analyst_agent.modelstore.schema import CubeQuery
+from praxis.core.config import settings
+from praxis.core.deployment import MAIN, Deployment
+from praxis.modelstore.catalog import Catalog
+from praxis.modelstore.client import CompileResult, LoadResult, StoreError
+from praxis.modelstore.schema import CubeQuery
 
 
 @pytest.fixture(autouse=True)
 def scratch_data_dir(monkeypatch, tmp_path_factory):
-    """Nothing may reach the developer's own ~/.analyst. The deployment row lives in
-    analyst.db and `open_client` reads it, so an unpinned data dir would point a test at a
+    """Nothing may reach the developer's own ~/.praxis. The deployment row lives in
+    praxis.db and `open_client` reads it, so an unpinned data dir would point a test at a
     real Cube.
 
     `flows_dir` is pinned for a sharper version of the same reason: it is *relative* by design, so
@@ -244,15 +244,15 @@ async def api(tmp_path, monkeypatch, cube):
     `test_http` asserts behaviour and `test_payloads` snapshots what comes back.
 
     `app.state` is populated directly rather than by running the lifespan, because the real one
-    opens `~/.analyst` — everything here is under tmp_path.
+    opens `~/.praxis` — everything here is under tmp_path.
     """
-    from analyst_agent.api import server
-    from analyst_agent.api.support import state
-    from analyst_agent.core import boards, db, jobs, transcript
-    from analyst_agent.core import deployment as connection
+    from praxis.api import server
+    from praxis.api.support import state
+    from praxis.core import boards, db, jobs, transcript
+    from praxis.core import deployment as connection
 
     # The stores read `settings.db_path`, so pointing the setting is the whole of what keeps
-    # these routes off the real ~/.analyst.
+    # these routes off the real ~/.praxis.
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
     await db.create_tables()
 

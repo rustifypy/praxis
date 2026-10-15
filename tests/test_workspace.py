@@ -12,9 +12,9 @@ that a refusal short-circuits before any of it.
 
 import pytest
 
-from analyst_agent.core.deployment import MAIN
-from analyst_agent.modelstore.editing import drafts, impact, workspace
-from analyst_agent.modelstore.modelgen import publish
+from praxis.core.deployment import MAIN
+from praxis.modelstore.editing import drafts, impact, workspace
+from praxis.modelstore.modelgen import publish
 
 ALBUM = """cubes:
   - name: album

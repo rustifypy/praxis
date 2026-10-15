@@ -20,10 +20,10 @@ from . import chat, chat_management, dashboard, flows, ide, mcp, onboarding
 from .support import state
 
 STATIC = Path(__file__).parent / "static"
-COOKIE = "analyst_token"
+COOKIE = "praxis_token"
 
 # Minted at import and announced only by the launcher, which is why `uvicorn
-# analyst_agent.api.server:app` serves a portal nobody can authenticate against.
+# praxis.api.server:app` serves a portal nobody can authenticate against.
 TOKEN = secrets.token_urlsafe(24)
 
 
@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI):
             yield
 
 
-app = FastAPI(title="analyst-agent web", lifespan=lifespan)
+app = FastAPI(title="praxis web", lifespan=lifespan)
 
 # The products.
 app.include_router(chat_management.router)
@@ -112,7 +112,7 @@ async def guard(request: Request, call_next):
 
     supplied = request.query_params.get("token") or request.cookies.get(COOKIE)
     if not supplied or not secrets.compare_digest(supplied, TOKEN):
-        return Response("Unauthorized. Open the URL printed by `analyst`.", status_code=401)
+        return Response("Unauthorized. Open the URL printed by `praxis`.", status_code=401)
     response = await call_next(request)
     if request.query_params.get("token"):
         response.set_cookie(COOKIE, TOKEN, httponly=True, samesite="strict")

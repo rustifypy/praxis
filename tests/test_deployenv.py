@@ -16,8 +16,8 @@ import re
 import pytest
 import yaml
 
-from analyst_agent.core import deployenv
-from analyst_agent.core.deployment import Deployment
+from praxis.core import deployenv
+from praxis.core.deployment import Deployment
 
 SHOP = Deployment(
     api_secret="secret-" + "s" * 33,
@@ -28,7 +28,7 @@ SHOP = Deployment(
         "CUBEJS_DB_TYPE": "postgres",
         "CUBEJS_DB_HOST": "warehouse.internal",
         "CUBEJS_DB_NAME": "shop",
-        "CUBEJS_DB_USER": "analyst",
+        "CUBEJS_DB_USER": "praxis",
         "CUBEJS_DB_PASS": "hunter2",
     },
 )

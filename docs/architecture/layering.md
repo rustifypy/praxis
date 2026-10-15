@@ -1,6 +1,6 @@
 # Layering
 
-Packages under `src/analyst_agent/` are tiered, and **a package may import only its own tier or
+Packages under `src/praxis/` are tiered, and **a package may import only its own tier or
 below**. This is not a convention: `tests/test_layering.py` parses the import graph and fails the
 suite on an upward import. A new top-level package fails until it is given a tier.
 

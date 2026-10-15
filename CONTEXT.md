@@ -1,9 +1,9 @@
-# Analyst
+# Praxis
 
 The portal answers questions about one connected database through a semantic layer it does not
 run. Everything it queries, or stores a model in, sits behind an address someone else started.
 
-This is the glossary. Implementation guidance lives in `CLAUDE.md`; nothing here should describe
+This is the glossary. Implementation guidance lives in `AGENTS.md`; nothing here should describe
 how anything works.
 
 <!-- The docs site's glossary page includes everything from here on. --8<-- [start:terms] -->
@@ -127,7 +127,7 @@ _Avoid_: pipeline — that is the model build (`/api/onboarding/pipeline`); work
 
 `flows/` names two sizes of thing, and both are correct — the same way **Store** does. `flows/`
 in the launch directory is the *content*: the Flow folders someone authors, edits and commits.
-`analyst_agent.flows` is the *engine* that reads them. Neither name is wrong; expecting one word
+`praxis.flows` is the *engine* that reads them. Neither name is wrong; expecting one word
 to mean one size of thing is.
 
 **Phase**:

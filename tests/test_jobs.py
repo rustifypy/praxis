@@ -8,13 +8,13 @@ import asyncio
 
 import pytest
 
-from analyst_agent.core import jobs
+from praxis.core import jobs
 
 
 @pytest.fixture(autouse=True)
 def scratch_lock(tmp_path, monkeypatch):
     """The lock lives in the data directory, so point that somewhere disposable."""
-    from analyst_agent.core.config import settings
+    from praxis.core.config import settings
 
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
 

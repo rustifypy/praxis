@@ -2,8 +2,8 @@
 
 ## One file, one schema
 
-`core/db.py` declares every table this process creates (SQLAlchemy `metadata`), and `DATA_DIR/analyst.db`
-(`~/.analyst/analyst.db`) holds all of them:
+`core/db.py` declares every table this process creates (SQLAlchemy `metadata`), and `DATA_DIR/praxis.db`
+(`~/.praxis/praxis.db`) holds all of them:
 
 | Tables | Accessors |
 |---|---|

@@ -11,13 +11,13 @@ import csv
 
 import pytest
 
-from analyst_agent.agent.session import QueryRecord, Session
-from analyst_agent.agent.tools import code as tools
-from analyst_agent.agent.tools import trace
-from analyst_agent.core import db
-from analyst_agent.core import transcript as _transcript
-from analyst_agent.core.events import Event, emit
-from analyst_agent.sandbox import Run
+from praxis.agent.session import QueryRecord, Session
+from praxis.agent.tools import code as tools
+from praxis.agent.tools import trace
+from praxis.core import db
+from praxis.core import transcript as _transcript
+from praxis.core.events import Event, emit
+from praxis.sandbox import Run
 
 CHAT = "beefcafe0001"
 COLUMNS = [
@@ -46,7 +46,7 @@ ROWS = [
 
 @pytest.fixture(autouse=True)
 def data_dir(tmp_path, monkeypatch):
-    from analyst_agent.core.config import settings
+    from praxis.core.config import settings
 
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
     return tmp_path
@@ -199,7 +199,7 @@ async def test_the_path_a_csv_lands_on_is_the_services_answer(session, sandbox):
     that owns the directory, so `..` and an absolute path are checked once."""
     sandbox()
     out = await named(tools.build_code_tools(session), "export_result").ainvoke(
-        {"filename": "../../analyst.db"}
+        {"filename": "../../praxis.db"}
     )
     assert "uploads/" in out
 

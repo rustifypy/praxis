@@ -13,7 +13,7 @@ harder than it should, a rule the gate doesn't check yet.
 
 **Proposed approach**
 
-If you have one. Point at the relevant subsystem in `CLAUDE.md` if you know it
+If you have one. Point at the relevant subsystem in `AGENTS.md` if you know it
 (query time, model generation, dashboards, the web portal, sources) — it
 documents the invariants a change needs to respect.
 

@@ -73,7 +73,7 @@ class Fix(BaseModel):
 class Enrichment(BaseModel):
     """Everything steps 3 and 4 decided. A model rather than a dataclass so that storing it
     is `model_dump()` and reading it back is `model_validate()` — a new field here survives
-    the trip through `analyst.db` without anyone enumerating it."""
+    the trip through `praxis.db` without anyone enumerating it."""
 
     cubes: dict[str, CubeDecision] = Field(default_factory=dict)
     views: list[ViewDecision] = Field(default_factory=list)

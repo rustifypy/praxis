@@ -2,13 +2,13 @@
 
 Every other stateful thing in this portal is a row: chats, events, results, tiles, the deployment.
 A **Flow** is not. Its definition, its **Runs**, each Run's event log, each Run's artifacts and the
-record of where a Run is paused all live as plain files under `flows/` in the directory `analyst`
+record of where a Run is paused all live as plain files under `flows/` in the directory `praxis`
 was launched from, or wherever `FLOWS_DIR` points. `core.db.SCHEMA` gains nothing.
 
 Not `DATA_DIR`, which scopes the rest of the install. A Flow next to the code is a Flow in git,
 and the prose that decides an agent's behaviour is then diffable and revertible like any other
 source — which is the property the paper claims for the method and the only one a home under
-`~/.analyst/` would have quietly withheld. The cost is real and accepted: flows found by relative
+`~/.praxis/` would have quietly withheld. The cost is real and accepted: flows found by relative
 path are flows that depend on where the terminal was, and `FLOWS_DIR` is the answer for anyone who
 would rather they did not.
 
@@ -34,7 +34,7 @@ saving a `results` row. That is not a special case bolted on — a query's rows 
 *is* the handoff to the next Phase.
 
 The flow chat's scope is in `flows/<flow>/chat.json`, not a column on `chats`. There is no
-migration mechanism here, so a new column would mean every existing user deletes `analyst.db` to
+migration mechanism here, so a new column would mean every existing user deletes `praxis.db` to
 get this feature.
 
 The one thing genuinely given up: a Run's state is only as durable as the files. An **approval**

@@ -21,7 +21,7 @@ as a chat. No dashboards, no model edits, no Python.
 === "Claude Code"
 
     ```bash
-    claude mcp add --transport http analyst http://127.0.0.1:8420/mcp \
+    claude mcp add --transport http praxis http://127.0.0.1:8420/mcp \
       --header "Authorization: Bearer <token>"
     ```
 
@@ -32,7 +32,7 @@ as a chat. No dashboards, no model edits, no Python.
     ```json
     {
       "mcpServers": {
-        "analyst": {
+        "praxis": {
           "command": "npx",
           "args": ["-y", "mcp-remote", "http://127.0.0.1:8420/mcp",
                    "--header", "Authorization: Bearer <token>"]
@@ -54,7 +54,7 @@ The portal must be running for the tools to answer.
 <div class="ui-spread" style="margin:10px 0 2px"><span class="ui-faint">Token</span><span class="ui-row"><span class="ui-btn">Show</span><span class="ui-btn">Rotate</span><span class="ui-btn">Copy</span></span></div>
 <div class="ui-code">••••••••••••••••••••••••••••••••</div>
 <div class="ui-spread" style="margin:10px 0 2px"><span class="ui-faint">Claude Code</span><span class="ui-btn">Copy</span></div>
-<div class="ui-code">claude mcp add --transport http analyst http://127.0.0.1:8420/mcp --header "Authorization: Bearer ••••••••••••••••"</div>
+<div class="ui-code">claude mcp add --transport http praxis http://127.0.0.1:8420/mcp --header "Authorization: Bearer ••••••••••••••••"</div>
 </div>
 </div>
 </div>

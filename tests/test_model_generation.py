@@ -2,8 +2,8 @@
 
 import yaml
 
-from analyst_agent.modelstore.modelgen import build, publish
-from analyst_agent.modelstore.modelgen.decide import (
+from praxis.modelstore.modelgen import build, publish
+from praxis.modelstore.modelgen.decide import (
     CubeDecision,
     FolderDecision,
     MeasureDecision,
@@ -16,7 +16,7 @@ from analyst_agent.modelstore.modelgen.decide import (
     validate_paths,
     validate_views,
 )
-from analyst_agent.modelstore.modelgen.warehouse import Column, ForeignKey, Schema, Table
+from praxis.modelstore.modelgen.warehouse import Column, ForeignKey, Schema, Table
 
 
 def col(name, data_type="integer", distinct=None, null_fraction=None):

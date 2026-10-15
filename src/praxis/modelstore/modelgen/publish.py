@@ -16,7 +16,7 @@ COMPILE_TIMEOUT_S = 90.0
 CANDIDATE = "candidate"
 
 # A filter value nothing can equal, so an executed probe aggregates almost no rows.
-NO_MATCH = "__analyst_probe_no_match__"
+NO_MATCH = "__praxis_probe_no_match__"
 
 
 @dataclass

@@ -9,8 +9,8 @@ import httpx
 import pytest
 import respx
 
-from analyst_agent.core.deployment import Deployment
-from analyst_agent.sandbox import profile
+from praxis.core.deployment import Deployment
+from praxis.sandbox import profile
 
 URL = "http://sandbox:8600"
 
@@ -20,7 +20,7 @@ def configured(monkeypatch):
     async def deployment():
         return Deployment(sandbox_url=URL, sandbox_token="tok")
 
-    monkeypatch.setattr("analyst_agent.sandbox.client.current", deployment)
+    monkeypatch.setattr("praxis.sandbox.client.current", deployment)
 
 
 def a_profile(**kwargs) -> profile.Profile:
@@ -105,5 +105,5 @@ async def test_no_sandbox_configured_is_the_same_answer(monkeypatch):
     async def none():
         return Deployment()
 
-    monkeypatch.setattr("analyst_agent.sandbox.client.current", none)
+    monkeypatch.setattr("praxis.sandbox.client.current", none)
     assert await profile.saved("c1") == []

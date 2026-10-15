@@ -1,6 +1,6 @@
 import pytest
 
-from analyst_agent.modelstore.editing import drafts
+from praxis.modelstore.editing import drafts
 
 MODEL = {
     "cubes/orders.yml": "cubes:\n  - name: orders\n",

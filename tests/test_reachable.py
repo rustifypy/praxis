@@ -9,8 +9,8 @@ import httpx
 import pytest
 import respx
 
-from analyst_agent.api.onboarding import reachable
-from analyst_agent.core.deployment import CONTRACT, Deployment
+from praxis.api.onboarding import reachable
+from praxis.core.deployment import CONTRACT, Deployment
 
 STORE = "http://localhost:8000"
 SANDBOX = "http://localhost:8600"
