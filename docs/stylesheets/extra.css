@@ -395,8 +395,35 @@
 }
 
 /* ---------------------------------------------------------------- home page */
-.ax-hero {
+/* The pitch and the product side by side on a wide screen, so the recording is the first thing
+   seen rather than something below the fold; stacked on anything narrower. */
+.ax-top {
   margin: 1.5rem 0 2.5rem;
+}
+
+.ax-hero {
+  margin: 0 0 2rem;
+}
+
+@media screen and (min-width: 76.25em) {
+  .ax-top {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    gap: 2.5rem;
+    align-items: center;
+  }
+
+  .ax-top .ax-hero {
+    margin: 0;
+  }
+
+  .md-typeset .ax-top .ax-hero h1 {
+    font-size: 2.2em;
+  }
+
+  .md-typeset .ax-top .ax-video {
+    margin: 0;
+  }
 }
 
 .ax-hero .ax-eyebrow {

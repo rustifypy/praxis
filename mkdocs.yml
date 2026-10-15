@@ -63,6 +63,7 @@ extra_css:
 
 extra_javascript:
   - javascripts/api.js
+  - javascripts/home.js
 
 markdown_extensions:
   - admonition
