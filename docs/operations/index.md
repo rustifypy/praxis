@@ -1,6 +1,6 @@
 # Operating
 
-This section is for whoever brings up praxis's services and keeps them running. A first
+This section is for whoever brings up Praxis's services and keeps them running. A first
 install is [Get started](../getting-started/index.md); this is everything after it.
 
 **The portal runs nothing.** It holds credentials, mints secrets, renders a `docker compose` file
@@ -9,7 +9,7 @@ So there are three things to run, owned separately:
 
 ```mermaid
 flowchart TB
-    subgraph you["Your machine — praxis (this repo)"]
+    subgraph you["Your machine — Praxis (this repo)"]
         P[portal<br/>127.0.0.1:8420]
         DB[(~/.praxis/praxis.db)]
         F[flows/]

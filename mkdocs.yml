@@ -1,4 +1,4 @@
-site_name: praxis
+site_name: Praxis
 site_description: Ask questions about your data in plain English, and run repeatable data work step by step.
 # Canonical links and the sitemap are built from this. docs/CNAME is what tells GitHub Pages the
 # domain, and the two must name the same host.
@@ -10,7 +10,7 @@ docs_dir: docs
 # `make docs-build` writes here. Not under docs/, which mkdocs would then try to read as source.
 site_dir: site
 strict: true
-copyright: praxis by rustify
+copyright: Praxis by rustify
 
 theme:
   name: material

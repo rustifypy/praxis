@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI):
             yield
 
 
-app = FastAPI(title="praxis web", lifespan=lifespan)
+app = FastAPI(title="Praxis", lifespan=lifespan)
 
 # The products.
 app.include_router(chat_management.router)

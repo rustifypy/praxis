@@ -1,4 +1,4 @@
-# praxis by rustify
+# Praxis by rustify
 
 [![Documentation](https://img.shields.io/badge/docs-rustify.tech-3355dd.svg)](https://rustify.tech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -8,7 +8,7 @@ Ask questions about your data in plain English, and run repeatable data work ste
 
 [![A one-minute tour of the portal: a question answered with a chart, the semantic layer, and a Flow Run](.github/assets/portal-tour.gif)](https://rustify.tech)
 
-praxis sits on top of your SQL warehouse (Postgres, Snowflake, BigQuery, Databricks and
+Praxis sits on top of your SQL warehouse (Postgres, Snowflake, BigQuery, Databricks and
 more). It:
 
 - **builds a semantic layer**: what each table means, how tables join, which numbers add up;
