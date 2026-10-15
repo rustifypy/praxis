@@ -30,13 +30,13 @@ def config_for(access: Access, base_url: str) -> ClientConfig:
     header = f"Authorization: Bearer {access.token}"
     desktop = {
         "mcpServers": {
-            "analyst": {"command": "npx", "args": ["-y", "mcp-remote", url, "--header", header]}
+            "praxis": {"command": "npx", "args": ["-y", "mcp-remote", url, "--header", header]}
         }
     }
     return ClientConfig(
         url=url,
         desktop=json.dumps(desktop, indent=2),
-        cli=f'claude mcp add --transport http analyst {url} --header "{header}"',
+        cli=f'claude mcp add --transport http praxis {url} --header "{header}"',
     )
 
 

@@ -1,9 +1,9 @@
 import pytest
 
-from analyst_agent.agent.session import replay
-from analyst_agent.core import db
-from analyst_agent.core import transcript as _transcript
-from analyst_agent.core.events import Event
+from praxis.agent.session import replay
+from praxis.core import db
+from praxis.core import transcript as _transcript
+from praxis.core.events import Event
 
 
 @pytest.fixture

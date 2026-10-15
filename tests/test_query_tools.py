@@ -11,11 +11,11 @@ import json
 
 import pytest
 
-from analyst_agent.agent.session import Session
-from analyst_agent.agent.tools import query as tools_module
-from analyst_agent.agent.tools import trace
-from analyst_agent.agent.tools.query import build_query_tools
-from analyst_agent.core.events import Event, emit
+from praxis.agent.session import Session
+from praxis.agent.tools import query as tools_module
+from praxis.agent.tools import trace
+from praxis.agent.tools.query import build_query_tools
+from praxis.core.events import Event, emit
 
 QUERY = {
     "measures": ["orders.net_revenue"],

@@ -1,8 +1,8 @@
 # HTTP
 
 Every route below needs the portal token — `?token=<token>` once, after which the
-`analyst_token` cookie (HTTP-only, SameSite=Strict) carries it — except `GET /api/healthz`.
-Without it: `401 Unauthorized. Open the URL printed by analyst.`
+`praxis_token` cookie (HTTP-only, SameSite=Strict) carries it — except `GET /api/healthz`.
+Without it: `401 Unauthorized. Open the URL printed by praxis.`
 
 Errors are JSON `{"detail": "..."}`. Statuses worth knowing everywhere:
 

@@ -7,11 +7,11 @@ it reports a working model as unstarted.
 
 import json
 
-from analyst_agent.api.onboarding.controller import public
-from analyst_agent.core.deployment import Deployment
-from analyst_agent.modelstore.definitions import Definition
-from analyst_agent.modelstore.modelgen import evidence
-from analyst_agent.modelstore.modelgen.evidence import STEPS, onboarded
+from praxis.api.onboarding.controller import public
+from praxis.core.deployment import Deployment
+from praxis.modelstore.definitions import Definition
+from praxis.modelstore.modelgen import evidence
+from praxis.modelstore.modelgen.evidence import STEPS, onboarded
 
 CREDENTIALS = {"CUBEJS_DB_NAME": "chinook", "CUBEJS_DB_PASS": "secret"}
 SHOP = Deployment(

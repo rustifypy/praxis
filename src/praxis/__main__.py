@@ -1,4 +1,4 @@
-"""Launch the portal: `analyst`, or `python -m analyst_agent`. A launcher, not a CLI, and not
+"""Launch the portal: `praxis`, or `python -m praxis`. A launcher, not a CLI, and not
 replaceable by uvicorn — `web.server.TOKEN` is minted at import and nothing else prints it.
 """
 
@@ -16,7 +16,7 @@ def main() -> None:
     port = settings.web_port
     url = f"http://{settings.web_host}:{port}/?token={TOKEN}"
 
-    print(f"\nAnalyst portal is running at:\n    {url}")
+    print(f"\nPraxis portal is running at:\n    {url}")
     print("Press Ctrl-C to stop.\n", flush=True)
 
     webbrowser.open(url)

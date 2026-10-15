@@ -1,7 +1,7 @@
 """What `search_model` can find. Lexical scoring is a judgement; which entities are in the pool
 at all is a rule, and that rule is what is asserted here."""
 
-from analyst_agent.agent.retrieval import LexicalRetriever
+from praxis.agent.retrieval import LexicalRetriever
 
 
 def test_a_cube_no_view_covers_can_still_be_found(catalog):
@@ -21,7 +21,7 @@ def test_a_cube_a_view_covers_stays_behind_the_view(catalog):
 def test_a_cube_with_one_member_no_view_carries_can_be_found(catalog):
     """A view that re-exports most of a cube still hides the column it left out — the case pack
     on an item dimension whose SKU a sales view kept."""
-    from analyst_agent.modelstore.catalog import MemberDoc
+    from praxis.modelstore.catalog import MemberDoc
 
     orders = next(cube for cube in catalog.cubes if cube.name == "orders")
     orders.members.append(

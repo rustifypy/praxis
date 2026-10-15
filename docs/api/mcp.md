@@ -1,11 +1,11 @@
 # MCP
 
-The portal is an MCP server named `analyst`, over **streamable HTTP** at `/mcp`. Setup from the
+The portal is an MCP server named `praxis`, over **streamable HTTP** at `/mcp`. Setup from the
 browser is on the [Agents page](../user-guide/agents.md).
 
 ## Auth
 
-`Authorization: Bearer <MCP token>`. The token is stored in `analyst.db`, survives restarts, and
+`Authorization: Bearer <MCP token>`. The token is stored in `praxis.db`, survives restarts, and
 is separate from the portal's browser token. A missing or wrong token gets `401`. When MCP is
 switched off, `/mcp` answers `404`.
 
@@ -57,7 +57,7 @@ instead, so the calling agent can correct it.
 
 ```bash
 # Claude Code
-claude mcp add --transport http analyst http://127.0.0.1:8420/mcp \
+claude mcp add --transport http praxis http://127.0.0.1:8420/mcp \
   --header "Authorization: Bearer <token>"
 ```
 

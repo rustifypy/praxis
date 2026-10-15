@@ -1,6 +1,6 @@
 # The Flow engine
 
-`src/analyst_agent/flows/`, tier 3. For what a Flow *is*, see [Flow authoring](../flows/index.md);
+`src/praxis/flows/`, tier 3. For what a Flow *is*, see [Flow authoring](../flows/index.md);
 this page is how it runs.
 
 | Module | Holds |

@@ -1,4 +1,4 @@
-# analyst-agent
+# praxis by rustify
 
 [![Documentation](https://img.shields.io/badge/docs-rustify.tech-3355dd.svg)](https://rustify.tech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -8,7 +8,7 @@ Ask questions about your data in plain English, and run repeatable data work ste
 
 [![A one-minute tour of the portal: a question answered with a chart, the semantic layer, and a Flow Run](.github/assets/portal-tour.gif)](https://rustify.tech)
 
-analyst-agent sits on top of your SQL warehouse (Postgres, Snowflake, BigQuery, Databricks and
+praxis sits on top of your SQL warehouse (Postgres, Snowflake, BigQuery, Databricks and
 more). It:
 
 - **builds a semantic layer**: what each table means, how tables join, which numbers add up;
@@ -18,7 +18,7 @@ more). It:
   files rather than to the AI and a person checking each step.
 
 ```
-browser ─▶ analyst portal ──Cube JSON──▶ model store + Cube ──SQL──▶ your warehouse
+browser ─▶ Praxis portal ──Cube JSON──▶ model store + Cube ──SQL──▶ your warehouse
                           └─Python────▶ sandbox (no database password)
 ```
 
@@ -27,8 +27,8 @@ browser ─▶ analyst portal ──Cube JSON──▶ model store + Cube ──
 You need Python with [uv](https://docs.astral.sh/uv/), Node.js, Docker and an Azure OpenAI key.
 
 ```bash
-git clone https://github.com/rustifypy/analyst-agent.git
-cd analyst-agent
+git clone https://github.com/rustifypy/praxis.git
+cd praxis
 cp .env.example .env      # your Azure OpenAI key and endpoint
 make install
 make web                  # builds the web app and opens the portal

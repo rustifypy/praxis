@@ -23,10 +23,10 @@ class Settings(BaseSettings):
     flow_page_rows: int = 50_000
     flow_max_rows: int = 5_000_000
 
-    data_dir: str = "~/.analyst"
+    data_dir: str = "~/.praxis"
     # Relative on purpose, and deliberately not under `data_dir`: a Flow beside the code is a Flow
     # in git, which is what makes the prose deciding an agent's behaviour diffable. The cost is
-    # that flows are found relative to where `analyst` was launched — set an absolute path here to
+    # that flows are found relative to where `praxis` was launched — set an absolute path here to
     # pin them. See `docs/adr/0006`.
     flows_dir: str = "flows"
 
@@ -41,7 +41,7 @@ class Settings(BaseSettings):
 
     @property
     def db_path(self) -> Path:
-        return self.dir_path / "analyst.db"
+        return self.dir_path / "praxis.db"
 
     @property
     def flows_path(self) -> Path:

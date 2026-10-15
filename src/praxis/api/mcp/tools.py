@@ -38,7 +38,7 @@ PREVIEW_ROWS = 30
 def build(app) -> MCPServer:
     # Reads its catalog off the portal's own `app.state.cube`, so an MCP call cannot query a
     # model the portal is not serving.
-    mcp = MCPServer(name="analyst", instructions=INSTRUCTIONS)
+    mcp = MCPServer(name="praxis", instructions=INSTRUCTIONS)
 
     @mcp.tool()
     async def search_model(question: str) -> str:

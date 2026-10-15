@@ -11,10 +11,10 @@ both is the only thing that catches an argument one of them cannot take.
 import pytest
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 
-from analyst_agent.agent import build as agent_build
-from analyst_agent.agent.session import Session
-from analyst_agent.agent.tools.dashboards import DashboardContext
-from analyst_agent.agent.tools.editor import EditContext
+from praxis.agent import build as agent_build
+from praxis.agent.session import Session
+from praxis.agent.tools.dashboards import DashboardContext
+from praxis.agent.tools.editor import EditContext
 
 
 @pytest.fixture(autouse=True)

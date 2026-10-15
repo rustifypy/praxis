@@ -20,7 +20,7 @@ web-build: src/web/node_modules
 web: web-build serve
 
 serve:
-	uv run analyst
+	uv run praxis
 
 # Run through uvx rather than added to the project: the docs toolchain has no business in uv.lock.
 # The banner is Material's notice about MkDocs 2.0, which the pin below already avoids.

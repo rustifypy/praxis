@@ -1,4 +1,4 @@
-from analyst_agent.core.llm import reasoning_of, text_of
+from praxis.core.llm import reasoning_of, text_of
 
 # Shape captured from a live Azure gpt-5.1 Responses API call.
 RESPONSES_BLOCKS = [

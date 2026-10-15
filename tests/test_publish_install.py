@@ -10,8 +10,8 @@ import httpx
 import pytest
 import respx
 
-from analyst_agent.core.deployment import Deployment
-from analyst_agent.modelstore.modelgen import publish
+from praxis.core.deployment import Deployment
+from praxis.modelstore.modelgen import publish
 
 URL = "http://store:8000"
 FILES = {"cubes/album.yml": "cubes:\n- name: album\n"}
@@ -22,7 +22,7 @@ def configured(monkeypatch):
     async def deployment():
         return Deployment(store_url=URL, store_token="w")
 
-    monkeypatch.setattr("analyst_agent.modelstore.client.current", deployment)
+    monkeypatch.setattr("praxis.modelstore.client.current", deployment)
 
 
 @pytest.fixture

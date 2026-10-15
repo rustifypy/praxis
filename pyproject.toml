@@ -1,5 +1,5 @@
 [project]
-name = "analyst-agent"
+name = "praxis"
 version = "0.1.0"
 description = "Agentic analytics over a self-hosted Cube Core semantic layer"
 readme = "README.md"
@@ -26,7 +26,7 @@ dependencies = [
 ]
 
 [project.scripts]
-analyst = "analyst_agent.__main__:main"
+praxis = "praxis.__main__:main"
 
 [dependency-groups]
 dev = [

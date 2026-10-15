@@ -4,7 +4,7 @@ Step 2 of 5 — setup step 1, **Your database or warehouse**. At the end of it, 
 your connection settings stored. Nothing has contacted the warehouse yet.
 { .ax-step }
 
-The form says: *"Stored in analyst.db, which is owner-readable only, and written into the file you run
+The form says: *"Stored in praxis.db, which is owner-readable only, and written into the file you run
 the deployment with. Nothing is contacted yet."*
 
 
@@ -17,12 +17,12 @@ the deployment with. Nothing is contacted yet."*
 <label class="ui-field"><span>Host <b>*</b></span><span class="ui-input">host.docker.internal</span></label>
 <label class="ui-field"><span>Port</span><span class="ui-input">5432</span></label>
 <label class="ui-field"><span>Database <b>*</b></span><span class="ui-input focus">retail</span></label>
-<label class="ui-field"><span>User <b>*</b></span><span class="ui-input">analyst</span></label>
+<label class="ui-field"><span>User <b>*</b></span><span class="ui-input">praxis</span></label>
 <label class="ui-field"><span>Password</span><span class="ui-input">••••••••••</span></label>
 <label class="ui-field"><span>Description · optional</span><span class="ui-input">Store sales and stock, daily</span></label>
 </div>
 <p class="ui-faint">▸ More settings</p>
-<p class="ui-faint">Stored in analyst.db, which is owner-readable only, and written into the file you run the deployment with. Nothing is contacted yet.</p>
+<p class="ui-faint">Stored in praxis.db, which is owner-readable only, and written into the file you run the deployment with. Nothing is contacted yet.</p>
 <span class="ui-btn primary">Store the connection</span>
 </div>
 </div>

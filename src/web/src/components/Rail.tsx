@@ -94,7 +94,7 @@ export function Rail({
   const face = THEMES[theme];
   return (
     <nav className="rail">
-      <span className="rail-brand" title="analyst">
+      <span className="rail-brand" title="praxis">
         <span className="dot" />
       </span>
 

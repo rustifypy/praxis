@@ -9,9 +9,9 @@ import asyncio
 
 import pytest
 
-from analyst_agent.agent.turn import run_turn, sink
-from analyst_agent.core import db
-from analyst_agent.core import transcript as _transcript
+from praxis.agent.turn import run_turn, sink
+from praxis.core import db
+from praxis.core import transcript as _transcript
 
 
 @pytest.fixture

@@ -32,7 +32,7 @@ make install              # uv sync --all-groups
 You need a database of your own — nothing is bundled. Point the tool at it from the portal:
 `make web`, then **Data** in the rail, **Connect a database**.
 
-That writes one row to the `deployment` table in `~/.analyst/analyst.db` — credentials, the
+That writes one row to the `deployment` table in `~/.praxis/praxis.db` — credentials, the
 API secret and the model store's token, chmod 600 — and **starts nothing**. The portal does not
 run Cube. It renders a compose file from that row; you download it, run `docker compose up -d`
 wherever it should live, and paste the two addresses back. Connecting is two steps because the

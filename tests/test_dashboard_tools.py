@@ -8,12 +8,12 @@ event-shape assertions need to observe.
 
 import pytest
 
-from analyst_agent.agent.tools import dashboards as tools
-from analyst_agent.agent.tools import trace
-from analyst_agent.core import boards as _dashboards
-from analyst_agent.core import boards as layout
-from analyst_agent.core import db
-from analyst_agent.core.boards import Tile
+from praxis.agent.tools import dashboards as tools
+from praxis.agent.tools import trace
+from praxis.core import boards as _dashboards
+from praxis.core import boards as layout
+from praxis.core import db
+from praxis.core.boards import Tile
 
 QUERY = {"measures": ["orders.net_revenue"], "dimensions": ["orders.status"]}
 BAR = {"type": "bar", "x": "orders.status", "y": ["orders.net_revenue"]}

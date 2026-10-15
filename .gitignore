@@ -29,7 +29,7 @@ wheels/
 
 # Frontend
 src/web/node_modules/
-src/analyst_agent/api/static/
+src/praxis/api/static/
 
 /cube/
 .cube-probe/

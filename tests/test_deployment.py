@@ -3,11 +3,11 @@ from dataclasses import MISSING, fields
 
 import pytest
 
-from analyst_agent.core import db
-from analyst_agent.core import deployment as _deployment
-from analyst_agent.core.config import settings
-from analyst_agent.core.deployment import Deployment
-from analyst_agent.modelstore.modelgen.decide import (
+from praxis.core import db
+from praxis.core import deployment as _deployment
+from praxis.core.config import settings
+from praxis.core.deployment import Deployment
+from praxis.modelstore.modelgen.decide import (
     CubeDecision,
     Enrichment,
     MeasureDecision,
@@ -15,7 +15,7 @@ from analyst_agent.modelstore.modelgen.decide import (
     ViewCube,
     ViewDecision,
 )
-from analyst_agent.modelstore.modelgen.warehouse import (
+from praxis.modelstore.modelgen.warehouse import (
     Column,
     ForeignKey,
     Schema,

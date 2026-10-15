@@ -7,7 +7,7 @@ Find the words you see, then read the fix.
 | You see | Cause | Fix |
 |---|---|---|
 | `The frontend has not been built. Run make web.` (503) | Fresh clone or clean checkout | `make web-build` |
-| `Unauthorized. Open the URL printed by analyst.` (401) | No token, or a token from before a restart | Use the URL printed at the last start |
+| `Unauthorized. Open the URL printed by praxis.` (401) | No token, or a token from before a restart | Use the URL printed at the last start |
 | An empty thinking panel | `REASONING_SUMMARY=auto`, or API version earlier than `2025-03-01-preview` | Set `REASONING_SUMMARY=detailed` and a newer API version |
 
 ## Connecting
@@ -66,4 +66,4 @@ See [What fails a Phase](../flows/failures.md) for every run-time message. The c
 | `the phase stopped before it finished` | The portal restarted or the stream dropped — re-run the Phase |
 | `No streaming chunk received for 120.0s` | The LLM stream stalled — re-run the Phase |
 | 409 when starting a run | A run of this Flow is already going |
-| A Flow missing from the list | Its folder has no `flow.yml`, or `FLOWS_DIR` points elsewhere — Flows are found relative to where `analyst` was started |
+| A Flow missing from the list | Its folder has no `flow.yml`, or `FLOWS_DIR` points elsewhere — Flows are found relative to where `praxis` was started |

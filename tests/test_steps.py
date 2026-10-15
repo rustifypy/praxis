@@ -7,11 +7,11 @@ order rule, and what a failure leaves in the database.
 
 import pytest
 
-from analyst_agent.core import db
-from analyst_agent.core import deployment as _deployment
-from analyst_agent.core.deployment import Deployment
-from analyst_agent.modelstore.modelgen import steps
-from analyst_agent.modelstore.modelgen.steps import StepFailed
+from praxis.core import db
+from praxis.core import deployment as _deployment
+from praxis.core.deployment import Deployment
+from praxis.modelstore.modelgen import steps
+from praxis.modelstore.modelgen.steps import StepFailed
 
 SHOP = Deployment(store_url="http://localhost:8000", driver="postgres", credentials={"x": "1"})
 

@@ -12,8 +12,8 @@ import json
 import pathlib
 import re
 
-from analyst_agent.core.config import Settings
-from analyst_agent.flows.contract import BUNDLES, FlowSpec, PhaseSpec
+from praxis.core.config import Settings
+from praxis.flows.contract import BUNDLES, FlowSpec, PhaseSpec
 
 ROOT = pathlib.Path(__file__).parent.parent
 DOCS = ROOT / "docs"

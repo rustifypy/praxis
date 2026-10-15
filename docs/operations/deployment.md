@@ -4,7 +4,7 @@ There are two deployments, and they share nothing — no network, no volume, no 
 
 | | Semantic deployment | Sandbox |
 |---|---|---|
-| Compose project | `analyst-semantic` | `analyst-sandbox` |
+| Compose project | `praxis-semantic` | `praxis-sandbox` |
 | Services | `modelstore`, `cube-api`, `cubestore` | `sandbox` |
 | Published port | `127.0.0.1:8000` (model store) | `127.0.0.1:8600` |
 | Volumes | `model` (every data model you have — **back it up**), `cubestore` | `workspaces` |

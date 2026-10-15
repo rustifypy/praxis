@@ -8,7 +8,7 @@ section is the readable map, and [the glossary](../glossary.md) says what each d
 
 ```mermaid
 flowchart TB
-    subgraph portal["analyst — one Python process"]
+    subgraph portal["praxis — one Python process"]
         API["api/ — tier 4<br/>HTTP, SSE, MCP"]
         FL["flows/ — tier 3<br/>Flow folders, Phases, Runs"]
         AG["agent/ — tier 2<br/>prompts, toolsets, one turn"]

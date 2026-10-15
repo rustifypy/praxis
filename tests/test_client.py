@@ -4,8 +4,8 @@ import httpx
 import pytest
 import respx
 
-from analyst_agent.modelstore import gate
-from analyst_agent.modelstore.client import Bound, ModelStore, StoreError
+from praxis.modelstore import gate
+from praxis.modelstore.client import Bound, ModelStore, StoreError
 
 ROOT = "http://store.test"
 """Cube is reached only through the store, and the ref is a path segment there."""

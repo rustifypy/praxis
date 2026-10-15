@@ -7,9 +7,9 @@ hide:
 
 <div class="ax-top" markdown>
 <div class="ax-hero" markdown>
-<span class="ax-eyebrow">analyst-agent documentation</span>
+<span class="ax-eyebrow">praxis by rustify</span>
 <h1>Ask your warehouse questions. Get answers you can check.</h1>
-<p class="ax-lede">analyst-agent builds a semantic layer on your SQL warehouse, answers plain-English
+<p class="ax-lede">praxis builds a semantic layer on your SQL warehouse, answers plain-English
 questions through queries checked against it, and runs the data work you repeat in numbered steps,
 with a person checking each one.</p>
 
@@ -36,7 +36,7 @@ query and a chart, then the model it was checked against, then a four-step Flow 
 
 ```mermaid
 flowchart LR
-    U[You, in a browser] --> P[analyst portal]
+    U[You, in a browser] --> P[Praxis portal]
     P -- Cube JSON --> S[model store + Cube]
     P -- Python --> X[sandbox<br/>no database password]
     S -- SQL written by Cube --> W[(your warehouse)]

@@ -7,8 +7,8 @@ import httpx
 import pytest
 import respx
 
-from analyst_agent.core.deployment import Deployment
-from analyst_agent.modelstore import ModelStore, StoreError, open_store
+from praxis.core.deployment import Deployment
+from praxis.modelstore import ModelStore, StoreError, open_store
 
 URL = "http://store:8000"
 
@@ -75,7 +75,7 @@ async def test_files_are_cached_so_a_read_does_not_pay_a_round_trip_per_turn(sto
 
 @respx.mock
 async def test_a_stale_cache_is_revalidated_against_the_rev_not_the_whole_model(store, monkeypatch):
-    monkeypatch.setattr("analyst_agent.modelstore.client.FILES_TTL_S", 0)
+    monkeypatch.setattr("praxis.modelstore.client.FILES_TTL_S", 0)
     tree = model_routes(1, {"cubes/a.yml": "x"})
     head = ref_route(1)
 
@@ -87,7 +87,7 @@ async def test_a_stale_cache_is_revalidated_against_the_rev_not_the_whole_model(
 
 @respx.mock
 async def test_a_moved_rev_refetches(store, monkeypatch):
-    monkeypatch.setattr("analyst_agent.modelstore.client.FILES_TTL_S", 0)
+    monkeypatch.setattr("praxis.modelstore.client.FILES_TTL_S", 0)
     model_routes(1, {"cubes/a.yml": "x"})
     ref_route(2)
 
@@ -262,6 +262,6 @@ async def test_an_unconfigured_store_is_refused_before_a_request(monkeypatch):
     async def none():
         return Deployment()
 
-    monkeypatch.setattr("analyst_agent.modelstore.client.current", none)
+    monkeypatch.setattr("praxis.modelstore.client.current", none)
     with pytest.raises(StoreError, match="no model store is configured"):
         await open_store()

@@ -15,9 +15,9 @@ make test                    # uv run pytest -q  — deterministic only: no cont
 make lint                    # ruff check + ruff format --check
 make fmt                     # ruff format + ruff check --fix
 
-make web-build               # build src/web/ into src/analyst_agent/web/static/ (needs npm)
+make web-build               # build src/web/ into src/praxis/web/static/ (needs npm)
 make web                     # web-build, then serve
-make serve                   # uv run analyst — opens the portal in a browser with a token
+make serve                   # uv run praxis — opens the portal in a browser with a token
 make docs                    # serve docs/ (MkDocs Material via uvx); make docs-build is CI's --strict check
 
 ```
@@ -30,9 +30,9 @@ uv run pytest tests/test_model_generation.py -q
 uv run pytest -q -k dashboard
 ```
 
-**`__main__.py` is a launcher, not a passthrough.** `analyst` takes no arguments — host, port and
-`DATA_DIR` come from `.env`/settings, so `WEB_PORT=8481 uv run analyst` moves it. It cannot be
-replaced by `uvicorn analyst_agent.web.server:app`: `web.server.TOKEN` is minted at import and the
+**`__main__.py` is a launcher, not a passthrough.** `praxis` takes no arguments — host, port and
+`DATA_DIR` come from `.env`/settings, so `WEB_PORT=8481 uv run praxis` moves it. It cannot be
+replaced by `uvicorn praxis.web.server:app`: `web.server.TOKEN` is minted at import and the
 launcher is the only thing that prints it, so pointing uvicorn at the app serves a portal nobody
 can authenticate against. It prints with `print(..., flush=True)` because stdout is block-buffered
 when redirected. `typer`/`rich` are deliberately absent.
@@ -50,9 +50,9 @@ and `SANDBOX_IMAGE` are the lines to move on an upgrade, and a mismatch surfaces
 first call, never at startup.
 
 **The frontend build is not committed.** Vite hashes chunk names, so committing `api/static/`
-collides on every branch; a fresh clone has no frontend and `analyst` answers 503 until
+collides on every branch; a fresh clone has no frontend and `praxis` answers 503 until
 `make web-build`. It still builds *into* the package because `uv_build` ships only
-`src/analyst_agent`. `npm run dev` in `src/web/` gives hot reload against a running `analyst`.
+`src/praxis`. `npm run dev` in `src/web/` gives hot reload against a running `praxis`.
 
 ## Layering — the load-bearing rule
 
@@ -241,7 +241,7 @@ A sequential pipeline someone repeats, defined by a folder rather than by code, 
 *Interpretable Context Methodology* (arXiv:2603.16021). Read `docs/adr/0006` before proposing a
 table for any of it: **the folder is the definition**, there is no row and no builder behind it,
 and the numbering of `phases/NN_name/` *is* the execution order — so inserting a step is renaming
-folders. The root is the directory `analyst` was launched from, `FLOWS_DIR` overrides it, and it
+folders. The root is the directory `praxis` was launched from, `FLOWS_DIR` overrides it, and it
 is deliberately not `DATA_DIR`: a Flow beside the code is a Flow in git, which is the only way the
 prose that decides an agent's behaviour becomes diffable.
 
@@ -308,7 +308,7 @@ resolution, which checks belong to write time versus run time, `run.json`'s tran
 permits. A real Run needs both services and a model, so it is verified by running one.
 
 ### Web portal — `web/`, `src/web/`, `core/transcript.py`, `core/events.py`
-`analyst` opens a browser Jupyter-style. **One flat event stream is the contract** between agent and
+`praxis` opens a browser Jupyter-style. **One flat event stream is the contract** between agent and
 browser. Two invariants: **the event log is the transcript** — `Session` provenance is rebuilt from
 it (`agent.session.replay`), so nothing lives only in memory; and **tools author their own events**
 via `agent/tools/trace.py`, so a gate rejection reaches the browser with its reasons. The one
@@ -339,7 +339,7 @@ trying to do.
 
 `flows` carries its own chat routes rather than sharing `/api/chats`, on the `ide` precedent —
 and the flow chat's scope is `flows/<flow>/chat.json`, not a column on `chats`. There is no
-migration mechanism, so a new column would mean every existing user deleting `analyst.db` to get
+migration mechanism, so a new column would mean every existing user deleting `praxis.db` to get
 the feature.
 
 Two of the six do not get a prefix of their own, for reasons worth keeping. `chat_management`
@@ -382,7 +382,7 @@ observe a stop. **Two deployments, sharing nothing:**
 **One deployment, one row** in `deployment` (`id = 1` is a CHECK). `core/deployenv.py` is the
 one place that decides what a deployment needs and **generates** the hand-over — no `.env`, nothing
 to disk. The templates are inlined there (`SEMANTIC`/`SANDBOX`) because `uv_build` ships only
-`src/analyst_agent` and a wheel must be able to render a hand-over. `SEMANTIC` is now the *only*
+`src/praxis` and a wheel must be able to render a hand-over. `SEMANTIC` is now the *only*
 copy here, with the store's own `compose.yml` as its reference — they can drift, accepted
 deliberately, and `MODELSTORE_IMAGE` is the line to move when the store is upgraded. Pinning is
 the only compatibility control there is: **the store reports no contract**, so `CONTRACT` is the
@@ -400,7 +400,7 @@ cost a request. `api/onboarding/reachable.py` holds both reachability questions.
 
 ## Storage — one file, one schema
 
-`core.db.SCHEMA` is every table this process creates and `~/.analyst/analyst.db` holds all of them:
+`core.db.SCHEMA` is every table this process creates and `~/.praxis/praxis.db` holds all of them:
 `chats`/`events` (the transcript), `results`, the dashboard tables, `deployment`, and LangGraph's
 `checkpoints`/`writes`. `core.db.connect` is the one opener, so `PRAGMA foreign_keys` can't drift.
 **The accessors live beside the schema**, one module per group: `deployment.py`, `transcript.py`,
@@ -440,7 +440,7 @@ approval pause cannot be written down, so a restart mid-Phase costs that Phase.
   (`modelstore.catalog`); the generation side is `Introspection`/`Definition`/`MemberDescription`/
   `FolderDecision`. Grep before naming.
 - **`flows/` points at two sizes of thing, and both are correct.** `flows/` in the launch directory
-  is the *content* — the Flow folders someone authors and commits. `analyst_agent.flows` is the
+  is the *content* — the Flow folders someone authors and commits. `praxis.flows` is the
   *engine* that reads them. The same shape as `modelstore` beside `semantic`, and documented here
   rather than renamed: renaming either would move the name off the thing the domain word means.
 - **One rule, one place.** What re-running a step discards, what a failed step looks like, layout
@@ -490,7 +490,7 @@ These cost real hours and are not guessable from the docs:
 ## LLM / infra gotchas
 
 - **Reasoning summaries need Azure `AZURE_OPENAI_API_VERSION=2025-03-01-preview` or later**;
-  `analyst` refuses to start below it. `REASONING_SUMMARY=detailed` is what actually fills the panel
+  `praxis` refuses to start below it. `REASONING_SUMMARY=detailed` is what actually fills the panel
   (`"auto"` frequently emits nothing).
 - **The Responses API makes `.content` a list of blocks, not a str.** Never read it directly —
   `core/llm.py` (`text_of`, `reasoning_of`) is the only correct accessor.

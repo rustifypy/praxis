@@ -1,6 +1,6 @@
-from analyst_agent.api.dashboard.delta import deltas
-from analyst_agent.core.boards import TileResult
-from analyst_agent.modelstore.shape import Column
+from praxis.api.dashboard.delta import deltas
+from praxis.core.boards import TileResult
+from praxis.modelstore.shape import Column
 
 REVENUE = Column(
     id="orders.net_revenue", label="Revenue", kind="measure", type="sum", format="", align="right"

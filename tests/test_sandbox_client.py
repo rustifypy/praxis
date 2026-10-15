@@ -8,9 +8,9 @@ import httpx
 import pytest
 import respx
 
-from analyst_agent.core.deployment import Deployment
-from analyst_agent.sandbox import SandboxError, open_sandbox
-from analyst_agent.sandbox.client import SandboxClient
+from praxis.core.deployment import Deployment
+from praxis.sandbox import SandboxError, open_sandbox
+from praxis.sandbox.client import SandboxClient
 
 URL = "http://sandbox:8600"
 
@@ -102,7 +102,7 @@ async def test_an_unconfigured_sandbox_is_refused_before_a_request(monkeypatch):
     async def none():
         return Deployment()
 
-    monkeypatch.setattr("analyst_agent.sandbox.client.current", none)
+    monkeypatch.setattr("praxis.sandbox.client.current", none)
     with pytest.raises(SandboxError, match="no sandbox") as caught:
         await open_sandbox()
     assert caught.value.status is None

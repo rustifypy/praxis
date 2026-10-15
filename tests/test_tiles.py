@@ -1,7 +1,7 @@
-from analyst_agent.modelstore import charts as tiles
-from analyst_agent.modelstore.charts import MAX_HBARS, MAX_SERIES, MAX_SLICES
-from analyst_agent.modelstore.schema import CubeQuery
-from analyst_agent.modelstore.shape import Column
+from praxis.modelstore import charts as tiles
+from praxis.modelstore.charts import MAX_HBARS, MAX_SERIES, MAX_SLICES
+from praxis.modelstore.schema import CubeQuery
+from praxis.modelstore.shape import Column
 
 BAR = {"type": "bar", "x": "orders.status", "y": ["orders.net_revenue"]}
 

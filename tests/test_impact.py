@@ -2,9 +2,9 @@
 
 import pytest
 
-from analyst_agent.core import boards as _dashboards
-from analyst_agent.core import db
-from analyst_agent.modelstore.editing import impact
+from praxis.core import boards as _dashboards
+from praxis.core import db
+from praxis.modelstore.editing import impact
 
 REVENUE = {"measures": ["revenue.net_revenue"], "dimensions": ["revenue.status"]}
 

@@ -2,7 +2,7 @@
 
 ## Where Flows live
 
-Flows live in a `flows/` folder **in the directory you start `analyst` from**. Set `FLOWS_DIR` to
+Flows live in a `flows/` folder **in the directory you start `praxis` from**. Set `FLOWS_DIR` to
 an absolute path to put them somewhere fixed. A folder under that root is a Flow when it holds a
 `flow.yml`; anything else there is ignored.
 

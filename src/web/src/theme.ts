@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
  */
 export type Theme = "auto" | "light" | "dark";
 
-const KEY = "analyst-theme";
+const KEY = "praxis-theme";
 const SYSTEM = window.matchMedia("(prefers-color-scheme: dark)");
 
 function stored(): Theme {

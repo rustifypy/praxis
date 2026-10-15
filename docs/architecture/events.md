@@ -54,6 +54,6 @@ Phase by Phase from `run.json` and `events.jsonl`, taking only the approval from
 
 ## Where events are kept
 
-- Chats: the `events` table in `analyst.db`, with `turn_id` and `seq`.
+- Chats: the `events` table in `praxis.db`, with `turn_id` and `seq`.
 - Flow runs: `runs/<id>/events.jsonl`, the same shape plus `at`, filed under the Phase's folder
   name.

@@ -5,7 +5,7 @@ covered on their own: the token middleware, the status codes, the route shapes, 
 derived fields the browser is forbidden from recomputing.
 
 No containers and no model calls, per the repo's rule. `app.state` is populated directly
-rather than by running the lifespan, because the real one opens `~/.analyst` — the databases
+rather than by running the lifespan, because the real one opens `~/.praxis` — the databases
 here are all under tmp_path. Nothing needs a container stubbed any more: the portal does not
 run the deployment, so "is it up" is an HTTP probe and respx answers it.
 """
@@ -14,9 +14,9 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from analyst_agent.api import server
-from analyst_agent.core.deployment import Deployment
-from analyst_agent.modelstore.client import Ref
+from praxis.api import server
+from praxis.core.deployment import Deployment
+from praxis.modelstore.client import Ref
 
 SHOP = Deployment(
     store_url="http://localhost:8000",
@@ -178,7 +178,7 @@ class FakeSandbox:
         return {}
 
     async def read(self, chat_id, path):
-        from analyst_agent.sandbox import SandboxError
+        from praxis.sandbox import SandboxError
 
         if path not in self.files:
             raise SandboxError(f"no file at {path!r}", status=404)
@@ -196,8 +196,8 @@ class FakeSandbox:
 
 @pytest.fixture
 def fake_sandbox(monkeypatch):
-    from analyst_agent.api.chat import controller as workspace_controller
-    from analyst_agent.api.chat_management import controller as chat_controller
+    from praxis.api.chat import controller as workspace_controller
+    from praxis.api.chat_management import controller as chat_controller
 
     fake = FakeSandbox()
 
@@ -212,9 +212,9 @@ def fake_sandbox(monkeypatch):
 @pytest.fixture
 def no_sandbox(monkeypatch):
     """A deployment with none configured — which is every deployment until one is run."""
-    from analyst_agent.api.chat import controller as workspace_controller
-    from analyst_agent.api.chat_management import controller as chat_controller
-    from analyst_agent.sandbox import SandboxError
+    from praxis.api.chat import controller as workspace_controller
+    from praxis.api.chat_management import controller as chat_controller
+    from praxis.sandbox import SandboxError
 
     async def refused(*args, **kwargs):
         raise SandboxError("no sandbox is configured for this deployment")
@@ -260,7 +260,7 @@ async def test_an_upload_is_handed_over_and_its_shape_reported_back(api, fake_sa
 async def test_a_file_over_the_cap_is_refused_before_it_is_handed_over(api, fake_sandbox):
     """Content-Length is the cheap refusal and the running total is the real one — a chunked
     upload sends no length at all."""
-    from analyst_agent.api.chat import controller as workspace_controller
+    from praxis.api.chat import controller as workspace_controller
 
     chat = (await api.post("/api/chats", json={})).json()
     over = b"x" * (workspace_controller.MAX_BYTES + 1)
@@ -360,7 +360,7 @@ CHINOOK = {
         "CUBEJS_DB_HOST": "host.docker.internal",
         "CUBEJS_DB_PORT": "5433",
         "CUBEJS_DB_NAME": "chinook",
-        "CUBEJS_DB_USER": "analyst",
+        "CUBEJS_DB_USER": "praxis",
         "CUBEJS_DB_PASS": "chinook",
     },
 }
@@ -370,7 +370,7 @@ CHINOOK = {
 def answering(monkeypatch):
     """Both services reachable, so a test can get past step two of connecting. The addresses in
     these tests answer nothing, and `PUT /deployment` stores only what passed."""
-    from analyst_agent.api.onboarding import reachable, routes
+    from praxis.api.onboarding import reachable, routes
 
     async def reached(deployment, service, url):
         return reachable.Reached(True, "ok")
@@ -575,7 +575,7 @@ async def test_the_catalog_is_a_503_before_a_deployment_rather_than_a_500(api, m
     with "cannot reach the server" was the data panel that is the only way to configure one.
     """
 
-    from analyst_agent.api.support import state
+    from praxis.api.support import state
 
     async def unconfigured(_app):
         raise HTTPException(503, "no Cube deployment is configured")
@@ -612,7 +612,7 @@ def branching(monkeypatch):
     """
     from contextlib import asynccontextmanager
 
-    from analyst_agent.api.ide import controller
+    from praxis.api.ide import controller
 
     made: list[tuple[str, str]] = []
 
@@ -680,8 +680,8 @@ async def test_every_path_the_browser_calls_is_a_real_route():
     behaviour test of their own — so a rename that misses one shows up as a 404 in the browser
     rather than here. Resolved against the routers rather than requested, so it asserts the
     surface without standing up a deployment."""
-    from analyst_agent.api import onboarding
-    from analyst_agent.api.ide import routes as ide
+    from praxis.api import onboarding
+    from praxis.api.ide import routes as ide
 
     surface = {
         (method, route.path)
@@ -742,7 +742,7 @@ async def test_the_served_model_reports_entities_members_and_which_file_defined_
 ):
     """The data page's whole payload. `file` per entity is read from the store rather than
     guessed from `cubes/<name>.yml`, because a hand-edited model may put a cube anywhere."""
-    from analyst_agent.api.ide import routes
+    from praxis.api.ide import routes
 
     async def files(ref="main"):
         return {"cubes/everything.yml": "cubes:\n  - name: orders\n  - name: customers\n"}
@@ -776,8 +776,8 @@ async def test_the_served_model_reports_entities_members_and_which_file_defined_
 async def test_the_served_model_still_answers_when_cube_is_down(api, monkeypatch):
     """One half being unreachable must not hide the other: the files are still readable and the
     editor has to keep working, so this is a 200 saying `serving: false`."""
-    from analyst_agent.api.ide import routes
-    from analyst_agent.modelstore.client import StoreError
+    from praxis.api.ide import routes
+    from praxis.modelstore.client import StoreError
 
     async def files(ref="main"):
         return {"cubes/orders.yml": "cubes:\n  - name: orders\n"}
@@ -805,7 +805,7 @@ async def test_the_ref_diff_reports_what_would_break(
     module it calls, from inside its own body. Ruff cannot see it, the unit tests never called it,
     and the route answered 500 for every branch anyone asked about.
     """
-    from analyst_agent.api.ide import controller
+    from praxis.api.ide import controller
 
     store = model_store(main={"cubes/orders.yml": "cubes: []"}, feature={})
 
@@ -831,7 +831,7 @@ async def test_the_ref_list_counts_changed_files_and_never_counts_main(
 ):
     """Files changed and not commits: it is what a reviewer is about to read. Main has nothing to
     compare against, so it is the one ref with no number."""
-    from analyst_agent.api.ide import controller
+    from praxis.api.ide import controller
 
     store = model_store(main={"cubes/orders.yml": "cubes: []"}, feature={})
 
@@ -855,8 +855,8 @@ async def test_a_rejected_change_set_is_a_200_carrying_its_reasons(
 ):
     """The editor renders errors in one banner, so a rejection is the *answer* and not a failed
     request. Splitting it across a 400 and a 200 would make one button read two code paths."""
-    from analyst_agent.api.ide import controller
-    from analyst_agent.modelstore.editing import workspace
+    from praxis.api.ide import controller
+    from praxis.modelstore.editing import workspace
 
     async def verify(store, ref, *, saved):
         return workspace.Verdict(
@@ -966,7 +966,7 @@ async def test_a_stored_result_pages_and_exports_with_labels(api):
 async def test_agent_access_reports_the_token_and_a_config_for_the_address_it_was_asked_on(api):
     """`base_url` and not `settings.web_host`: reached over a tunnel, the settings pair still says
     127.0.0.1, which is a config that cannot work from wherever the person actually is."""
-    from analyst_agent.core.access import Access
+    from praxis.core.access import Access
 
     server.app.state.mcp = Access(enabled=True, token="tok-abc")
     server.app.state.mcp_max_rows = 100
@@ -1102,7 +1102,7 @@ async def test_a_missing_flow_or_run_is_a_404_not_a_traceback(api):
 async def test_a_run_says_what_each_phase_is_for_and_previews_what_it_made(api):
     """The Run page tells the story from these two answers: the plan from the Phase's folder, and
     each output's head with every row counted — not only the rows that fit in the head."""
-    from analyst_agent.flows import layout, runner
+    from praxis.flows import layout, runner
 
     await api.post("/api/flows", json={"name": "weekly", "title": "Weekly"})
     await api.put(
@@ -1141,8 +1141,8 @@ async def test_a_run_is_deleted_with_its_folder_but_not_while_it_is_going(api, m
     `run.json` write would bring half of it back."""
     import asyncio
 
-    from analyst_agent.api import server
-    from analyst_agent.flows import layout, runner
+    from praxis.api import server
+    from praxis.flows import layout, runner
 
     async def nothing(*args):
         return None
