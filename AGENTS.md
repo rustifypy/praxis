@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+For anyone changing the code, person or coding agent.
 
 `CONTEXT.md` is the glossary — what the domain words mean and which synonyms are wrong. Read it
 before naming anything. `docs/adr/` holds decisions a reader would otherwise try to "undo" —

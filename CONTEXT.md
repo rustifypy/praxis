@@ -3,7 +3,7 @@
 The portal answers questions about one connected database through a semantic layer it does not
 run. Everything it queries, or stores a model in, sits behind an address someone else started.
 
-This is the glossary. Implementation guidance lives in `CLAUDE.md`; nothing here should describe
+This is the glossary. Implementation guidance lives in `AGENTS.md`; nothing here should describe
 how anything works.
 
 <!-- The docs site's glossary page includes everything from here on. --8<-- [start:terms] -->

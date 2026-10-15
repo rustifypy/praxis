@@ -18,5 +18,5 @@ against. A mock passing is not evidence here.
 - [ ] New behavior has a test, or I've explained above why it can't be tested
       without a container/model call
 - [ ] If I removed or weakened a test, I said what still covers the behavior
-- [ ] Docs (`README.md` / `CLAUDE.md` / `CONTRIBUTING.md`) updated if this
+- [ ] Docs (`README.md` / `AGENTS.md` / `CONTRIBUTING.md`) updated if this
       changes a documented invariant, module, or command

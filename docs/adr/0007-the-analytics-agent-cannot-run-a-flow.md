@@ -14,7 +14,7 @@ The alternative considered was injecting the runner into the tool as a callback 
 That works and would satisfy the import graph, because the edge would no longer be visible to a
 static parse. That is exactly the objection: it would be a cycle `test_layering` cannot see, and
 the next person to reason about the tiers would be reasoning about a graph that does not describe
-the program. `if TYPE_CHECKING:` is already called out in CLAUDE.md as a cycle that has not failed
+the program. `if TYPE_CHECKING:` is already called out in AGENTS.md as a cycle that has not failed
 yet; a callback is the same trick with better manners.
 
 What is lost is smaller than it sounds. "Run it from the agent" is still true — it is the flow

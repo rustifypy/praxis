@@ -20,7 +20,7 @@ PR against `main`. Everyone participating is expected to follow the
 Small, focused PRs get reviewed faster than large ones. If you're planning something
 bigger than a bug fix, open an issue first so the approach can be discussed before you've
 written the code — especially for anything touching an invariant documented in
-`CLAUDE.md`.
+`AGENTS.md`.
 
 ## Setup
 

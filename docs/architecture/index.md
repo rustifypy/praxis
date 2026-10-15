@@ -1,6 +1,6 @@
 # Architecture
 
-This section is for contributors. It explains how the code fits together and why. `CLAUDE.md` at
+This section is for contributors. It explains how the code fits together and why. `AGENTS.md` at
 the repository root is the fuller, denser version, written for agents and maintainers; this
 section is the readable map, and [the glossary](../glossary.md) says what each domain word means.
 
