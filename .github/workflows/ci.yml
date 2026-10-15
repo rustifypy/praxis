@@ -62,5 +62,3 @@ jobs:
       # Strict: a broken link or a page missing from the nav fails the build.
       - name: Build the documentation
         run: make docs-build
-        env:
-          NO_MKDOCS_2_WARNING: "1"
