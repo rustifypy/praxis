@@ -44,18 +44,25 @@ volumes and directory stay until you remove them.
 | Compose projects | `analyst-semantic`, `analyst-sandbox` | `praxis-semantic`, `praxis-sandbox` |
 | Command | `analyst` | `praxis` |
 
-1. **Stop both deployments**, in each old folder: `docker compose down` (no `-v`: that deletes the
-   volumes).
-2. **Move the database** (skip if you set `DATA_DIR`; rename only the file inside it):
+1. **Stop the portal and both deployments.** Ctrl-C the portal, then in each old folder
+   `docker compose down` (no `-v`: that deletes the volumes).
+2. **Copy the database.** If `praxis` has already been started, it made an empty `~/.praxis`;
+   move that aside first. Copy with `.backup` rather than `mv`: recent changes can still sit in
+   `analyst.db-wal`, which a renamed database no longer reads.
 
     ```bash
-    mv ~/.analyst ~/.praxis && mv ~/.praxis/analyst.db ~/.praxis/praxis.db
+    mkdir ~/.praxis
+    sqlite3 ~/.analyst/analyst.db ".backup '$HOME/.praxis/praxis.db'"
+    chmod 600 ~/.praxis/praxis.db
+    cp -a ~/.analyst/drafts ~/.praxis/
     ```
+
+    With `DATA_DIR` set, do the same inside it.
 
 3. **Download both compose files** from the portal again (`make serve`, then **Data**) and create
    the new volumes without starting anything: `docker compose up --no-start` beside each.
 4. **Copy the volumes across.** `model` holds every data model and `workspaces` the uploaded
-   files; `cubestore` is a cache and rebuilds itself.
+   files and Run files; `cubestore` is a cache and rebuilds itself.
 
     ```bash
     docker run --rm -v analyst-semantic_model:/from -v praxis-semantic_model:/to \
@@ -67,7 +74,8 @@ volumes and directory stay until you remove them.
 5. **Start both:** `docker compose up -d` beside each new file. The addresses are unchanged, so
    the portal needs no new connection.
 
-Once the portal answers questions again, `docker volume rm` the three `analyst-*` volumes.
+Once the portal answers questions again, `docker volume rm` the three `analyst-*` volumes and
+delete `~/.analyst`.
 The browser keeps its theme choice and editor pane widths under new keys, so set those once more.
 
 ## The database has no migrations
