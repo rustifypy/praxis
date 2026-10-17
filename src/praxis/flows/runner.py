@@ -18,7 +18,6 @@ are now. A Flow edited mid-Run must not change what this Run is.
 
 import asyncio
 import contextlib
-import fcntl
 import os
 import time
 import uuid
@@ -33,6 +32,7 @@ from ..agent.session import Session
 from ..agent.turn import Sink, run_turn
 from ..core.config import settings
 from ..core.events import Event
+from ..core.filelock import try_lock
 from ..core.llm import build_model
 from ..modelstore.client import open_store
 from ..sandbox import SandboxError, open_sandbox
@@ -66,7 +66,7 @@ def hold(flow: Path):
     handle = (flow / layout.LOCK).open("a+")
     try:
         try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            try_lock(handle)
         except OSError:
             handle.seek(0)
             raise Busy(handle.read().strip() or "another run") from None
