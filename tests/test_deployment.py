@@ -1,4 +1,5 @@
 import json
+import os
 from dataclasses import MISSING, fields
 
 import pytest
@@ -71,6 +72,7 @@ async def test_round_trip_keeps_whatever_variables_were_configured(store):
     assert loaded.driver == "bigquery"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows has no POSIX file modes")
 async def test_the_database_is_owner_only(store):
     """It holds database passwords in plaintext, so the file mode is the only thing guarding
     them."""
