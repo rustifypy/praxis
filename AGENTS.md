@@ -10,7 +10,7 @@ cannot start a **Run**. This file is how the code fits together.
 ## Commands
 
 ```bash
-make install                 # uv sync --all-groups
+make install                 # uv sync --all-groups --all-extras — every provider, which test_llm builds
 make test                    # uv run pytest -q  — deterministic only: no containers, no LLM
 make lint                    # ruff check + ruff format --check
 make fmt                     # ruff format + ruff check --fix
@@ -493,7 +493,18 @@ These cost real hours and are not guessable from the docs:
   `praxis` refuses to start below it. `REASONING_SUMMARY=detailed` is what actually fills the panel
   (`"auto"` frequently emits nothing).
 - **The Responses API makes `.content` a list of blocks, not a str.** Never read it directly —
-  `core/llm.py` (`text_of`, `reasoning_of`) is the only correct accessor.
+  `core/llm.py` (`text_of`, `reasoning_of`) is the only correct accessor, and it takes the
+  message: Ollama and LiteLLM put reasoning in `additional_kwargs`, not in the content.
+- **A provider is one row of `core.llm.PROVIDERS`**, and its kwargs are pure functions of
+  `settings`, which is why `test_llm` can build every class with no network. No proxy: a service
+  in front of the model would be one more thing the portal does not run. LiteLLM is a row, not
+  the route, because its chat-completions shape drops the Responses API's reasoning summaries.
+- **A thread is pinned to the provider that wrote it.** Its history holds that provider's own
+  blocks (Responses API reasoning ids, signed thinking) and another refuses them, so `run_turn`
+  compares `response_metadata["model_provider"]` on the last answer with `llm.provider_of` and
+  acts on `ON_PROVIDER_CHANGE`. That tag is per package, not per prefix — Azure writes `openai`.
+- **Structured output is `method="json_schema"` at every call.** It is the default everywhere
+  except Anthropic, whose default forces a tool call, and thinking refuses a forced tool.
 - **`pydantic-settings` reads `.env` into `Settings` and puts nothing in `os.environ`**, so SDKs
   looking up their own env vars find nothing; `build_model` passes `api_key` explicitly.
 - **`get_stream_writer()` raises outside a runnable context** (how unit tests invoke a tool
