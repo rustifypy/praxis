@@ -9,7 +9,7 @@ from ..core import transcript
 from ..core.config import settings
 from ..core.deployment import MAIN
 from ..core.events import Event
-from ..core.llm import reasoning_of, text_of
+from ..core.llm import answered_by, provider_of, reasoning_of, text_of
 from ..modelstore.client import Bound, open_store
 from .build import (
     COMPACTION_TAG,
@@ -60,9 +60,25 @@ async def run_turn(
         yield user_event
 
         agent = await build(turn_id)
+        config = {"configurable": {"thread_id": thread}}
+        # A thread holds one provider's own blocks and another provider refuses them, so a chat
+        # begun on one model is not continued on another. A Phase has no checkpointer and so no
+        # history to check.
+        if getattr(agent, "checkpointer", None):
+            history = (await agent.aget_state(config)).values.get("messages", [])
+            before, now = answered_by(history), provider_of()
+            if before and before != now:
+                if settings.on_provider_change == "refuse":
+                    raise RuntimeError(
+                        f"This chat was answered by {before}, and the model is now {now}. "
+                        "Start a new chat, or set ON_PROVIDER_CHANGE=new_thread to continue "
+                        "this one without its earlier turns."
+                    )
+                # Named by provider, so switching back finds the original thread again.
+                config = {"configurable": {"thread_id": f"{thread}@{now}"}}
         async for mode, payload in agent.astream(
             {"messages": [{"role": "user", "content": question}]},
-            config={"configurable": {"thread_id": thread}},
+            config=config,
             stream_mode=["custom", "messages"],
         ):
             if mode == "custom":
@@ -81,10 +97,10 @@ async def run_turn(
                 # values (run_query's is a JSON row dump) and the summarizer's output.
                 tagged = COMPACTION_TAG in (meta.get("tags") or [])
                 if isinstance(chunk, AIMessageChunk) and not tagged:
-                    if thinking := reasoning_of(chunk.content):
+                    if thinking := reasoning_of(chunk):
                         buffer["thinking"] += thinking
                         yield Event(type="thinking", data={"delta": thinking})
-                    if text := text_of(chunk.content):
+                    if text := text_of(chunk):
                         buffer["text"] += text
                         yield Event(type="text", data={"delta": text})
 

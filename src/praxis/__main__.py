@@ -6,6 +6,11 @@ import webbrowser
 
 
 def main() -> None:
+    from .core import llm
+
+    if problems := llm.check():
+        print("\nPraxis cannot start:", *(f"    {p}" for p in problems), sep="\n", flush=True)
+        raise SystemExit(1)
 
     import uvicorn
 

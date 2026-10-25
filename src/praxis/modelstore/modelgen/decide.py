@@ -383,12 +383,14 @@ def validate_views(
 def _cube_model():
     """Built once. A wide schema is one call per table, and constructing a client for
     each of four hundred tables is four hundred clients."""
-    return build_model().with_structured_output(CubeDecision)
+    # `json_schema` is every provider's default except Anthropic's, whose default forces a tool
+    # call — which its thinking refuses. Named at all three calls so none can drift back.
+    return build_model("modelgen").with_structured_output(CubeDecision, method="json_schema")
 
 
 @cache
 def _view_model():
-    return build_model().with_structured_output(ViewSet)
+    return build_model("modelgen").with_structured_output(ViewSet, method="json_schema")
 
 
 async def describe_table(table: Table, menu: Menu, enrichment: Enrichment) -> None:
@@ -410,7 +412,7 @@ async def repair(enrichment: Enrichment, schema: Schema, errors: dict[str, str])
     if not errors:
         return
 
-    model = build_model().with_structured_output(Fix)
+    model = build_model("modelgen").with_structured_output(Fix, method="json_schema")
 
     for member, error in errors.items():
         cube_name, _, measure_name = member.partition(".")
