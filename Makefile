@@ -1,5 +1,5 @@
 install:
-	uv sync --all-groups
+	uv sync --all-groups --all-extras
 
 test:
 	uv run pytest -q

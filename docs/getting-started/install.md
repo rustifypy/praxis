@@ -10,10 +10,14 @@ You need the tools in [Before you begin](index.md#before-you-begin).
 ```bash
 git clone https://github.com/rustifypy/praxis.git
 cd praxis
-cp .env.example .env      # fill in the AZURE_OPENAI_* lines
-make install              # uv sync --all-groups
+cp .env.example .env      # set QUERY_MODEL and its provider's key
+make install              # uv sync --all-groups --all-extras
 make web                  # build the browser app, then start the portal
 ```
+
+`QUERY_MODEL` picks the provider: Azure OpenAI, OpenAI, Anthropic, Gemini, Ollama, any
+OpenAI-compatible server, or anything else through LiteLLM. [Configuration](../operations/configuration.md#model)
+lists each one's settings. `praxis` will not start until the one you chose has its key.
 
 `praxis` prints a URL and opens it in your browser:
 
@@ -54,7 +58,7 @@ For frontend work, `npm run dev` in `src/web/` gives hot reload against a runnin
 
 | Command | Does |
 |---|---|
-| `make install` | `uv sync --all-groups` |
+| `make install` | `uv sync --all-groups --all-extras` |
 | `make web` | build the browser app, then start the portal |
 | `make web-build` | build the browser app only |
 | `make serve` | start the portal only (`uv run praxis`) |

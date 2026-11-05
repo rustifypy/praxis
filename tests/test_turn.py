@@ -129,3 +129,71 @@ async def test_the_sink_is_the_only_thing_that_decides_where_events_are_kept(sto
     assert [kind for _, kind in kept] == ["user", "tool_start"]
     assert len({turn for turn, _ in kept}) == 1, "one turn id across the turn's events"
     assert await store.events(chat.id) == []
+
+
+def answered(provider: str | None, threads: list[str]):
+    """An agent with a checkpointed history last answered by `provider`, recording which thread
+    each stream asked for."""
+    from types import SimpleNamespace
+
+    from langchain_core.messages import AIMessage
+
+    class Agent:
+        checkpointer = object()
+
+        async def aget_state(self, config):
+            tag = {"model_provider": provider} if provider else {}
+            answer = AIMessage("before", response_metadata=tag)
+            return SimpleNamespace(values={"messages": [answer]})
+
+        async def astream(self, _input, config=None, stream_mode=None):
+            threads.append(config["configurable"]["thread_id"])
+            return
+            yield
+
+    async def build(_turn_id: str):
+        return Agent()
+
+    return build
+
+
+@pytest.fixture
+def on_anthropic(monkeypatch):
+    from praxis.core.config import settings
+
+    monkeypatch.setattr(settings, "query_model", "anthropic:claude-opus-5-5")
+    monkeypatch.setattr(settings, "on_provider_change", "refuse")
+    return settings
+
+
+async def test_a_chat_answered_by_another_provider_is_refused(store, on_anthropic):
+    """Its history holds the other provider's own blocks, which this one would refuse mid-turn."""
+    chat = await store.create()
+    threads: list[str] = []
+    events = [e async for e in run_turn(answered("openai", threads), sink(chat.id), chat.id, "hi")]
+
+    assert threads == []
+    assert [e.type for e in events] == ["user", "error", "done"]
+    assert "answered by openai, and the model is now anthropic" in events[1].data["message"]
+
+
+async def test_a_new_thread_is_one_per_provider(store, on_anthropic, monkeypatch):
+    """Named by provider, so a switch back finds the original thread rather than a third one."""
+    monkeypatch.setattr(on_anthropic, "on_provider_change", "new_thread")
+    chat = await store.create()
+    threads: list[str] = []
+    events = [e async for e in run_turn(answered("openai", threads), sink(chat.id), chat.id, "hi")]
+
+    assert threads == [f"{chat.id}@anthropic"]
+    assert [e.type for e in events] == ["user", "done"]
+
+
+@pytest.mark.parametrize("provider", ["anthropic", None])
+async def test_a_chat_continues_on_its_own_provider_or_an_unknown_one(
+    store, on_anthropic, provider
+):
+    chat = await store.create()
+    threads: list[str] = []
+    [e async for e in run_turn(answered(provider, threads), sink(chat.id), chat.id, "hi")]
+
+    assert threads == [chat.id]

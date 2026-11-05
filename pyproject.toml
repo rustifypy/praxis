@@ -25,6 +25,16 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0",
 ]
 
+# One extra per provider, so the default install carries only `langchain-openai` — which Azure,
+# OpenAI and every OpenAI-compatible server share. `core.llm.check` names the extra a missing
+# package needs.
+[project.optional-dependencies]
+anthropic = ["langchain-anthropic"]
+google = ["langchain-google-genai"]
+ollama = ["langchain-ollama"]
+litellm = ["langchain-litellm"]
+all = ["praxis[anthropic,google,ollama,litellm]"]
+
 [project.scripts]
 praxis = "praxis.__main__:main"
 
