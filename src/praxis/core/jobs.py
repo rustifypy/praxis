@@ -1,6 +1,5 @@
 import asyncio
 import contextlib
-import fcntl
 import os
 import time
 import uuid
@@ -8,6 +7,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 
 from .config import settings
+from .filelock import try_lock
 
 BUFFER = 400
 LOCK_NAME = "jobs.lock"
@@ -24,7 +24,7 @@ def hold(description: str):
     handle = path.open("a+")
     try:
         try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            try_lock(handle)
         except OSError:
             handle.seek(0)
             holder = handle.read().strip() or "another process"
