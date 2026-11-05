@@ -10,13 +10,16 @@ here are all under tmp_path. Nothing needs a container stubbed any more: the por
 run the deployment, so "is it up" is an HTTP probe and respx answers it.
 """
 
+import asyncio
+
 import httpx
 import pytest
 from fastapi import HTTPException
 
+from praxis.agent.session import Approvals
 from praxis.api import server
 from praxis.core.deployment import Deployment
-from praxis.modelstore.client import Ref
+from praxis.modelstore.client import Ref, StoreError
 
 SHOP = Deployment(
     store_url="http://localhost:8000",
@@ -114,18 +117,57 @@ async def test_approving_when_nothing_is_waiting_is_a_404_rather_than_a_silent_o
 
 
 async def test_a_decision_reaches_the_waiting_script(api):
-    import asyncio
-
     chat = (await api.post("/api/chats", json={})).json()
-    queue = asyncio.Queue()
+    queue = Approvals()
     server.app.state.approvals[chat["id"]] = queue
+    script = asyncio.create_task(queue.get())
+    await asyncio.sleep(0)
 
     assert (
         await api.post(f"/api/chats/{chat['id']}/approve", json={"decision": "always"})
     ).status_code == 200
-    assert queue.get_nowait() == "always"
+    assert await script == "always"
     # And the chat is not asked again, which is what "always" means past this turn.
     assert chat["id"] in server.app.state.always
+
+
+async def test_an_answer_sent_mid_turn_with_no_script_waiting_is_refused_and_not_kept(api):
+    """Kept, it would approve the next script before anyone saw that script."""
+    chat = (await api.post("/api/chats", json={})).json()
+    queue = Approvals()
+    server.app.state.approvals[chat["id"]] = queue
+
+    for decision in ("yes", "always"):
+        sent = await api.post(f"/api/chats/{chat['id']}/approve", json={"decision": decision})
+        assert sent.status_code == 404
+    assert queue.empty()
+    assert chat["id"] not in server.app.state.always
+
+
+async def test_a_double_click_approves_the_waiting_script_once(api):
+    chat = (await api.post("/api/chats", json={})).json()
+    queue = Approvals()
+    server.app.state.approvals[chat["id"]] = queue
+    script = asyncio.create_task(queue.get())
+    await asyncio.sleep(0)
+
+    first = await api.post(f"/api/chats/{chat['id']}/approve", json={"decision": "yes"})
+    second = await api.post(f"/api/chats/{chat['id']}/approve", json={"decision": "yes"})
+    assert (first.status_code, second.status_code) == (200, 404)
+    assert await script == "yes"
+    assert queue.empty(), "the second click must not be left for the next script"
+
+
+async def test_a_stopped_wait_stops_accepting_answers():
+    """Stopping a turn cancels the wait; an answer arriving after it must not be queued."""
+    queue = Approvals()
+    script = asyncio.create_task(queue.get())
+    await asyncio.sleep(0)
+    script.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await script
+    assert queue.answer("yes") is False
+    assert queue.empty()
 
 
 async def test_an_invented_decision_is_refused_by_the_schema(api):
@@ -582,6 +624,19 @@ async def test_the_catalog_is_a_503_before_a_deployment_rather_than_a_500(api, m
 
     monkeypatch.setattr(state, "cube", unconfigured)
     assert (await api.get("/api/ide/model/summary")).status_code == 503
+
+
+async def test_the_catalog_is_a_503_while_the_store_does_not_answer(api, cube, monkeypatch):
+    """A deployment whose store is down or still starting, which is every portal started before
+    its containers. It is the same state as no deployment yet, not a server error."""
+
+    async def unreachable(**_):
+        raise StoreError("http://localhost:8000 did not answer: connection refused", where="cube")
+
+    monkeypatch.setattr(cube, "catalog", unreachable)
+    response = await api.get("/api/ide/model/summary")
+    assert response.status_code == 503
+    assert "did not answer" in response.json()["detail"]
 
 
 # --- the editor's two routes -------------------------------------------------
@@ -1169,3 +1224,20 @@ async def test_a_run_is_deleted_with_its_folder_but_not_while_it_is_going(api, m
     assert removed.json() == {"removed": True}
     assert not folder.exists()
     assert (await api.get("/api/flows/weekly/runs")).json() == []
+
+
+async def test_a_run_approval_needs_a_waiting_script_and_one_of_three_answers(api):
+    """The tool runs a Phase's script on anything but "no", so the route is where a typo is
+    refused, and where an early answer is refused rather than left for the next script."""
+    queue = Approvals()
+    server.app.state.approvals["weekly/run-1"] = queue
+    route = "/api/flows/weekly/runs/run-1/approve"
+
+    assert (await api.post(route, json={"choice": "yes"})).status_code == 409
+    assert queue.empty()
+
+    script = asyncio.create_task(queue.get())
+    await asyncio.sleep(0)
+    assert (await api.post(route, json={"choice": "maybe"})).status_code == 422
+    assert (await api.post(route, json={"choice": "yes"})).status_code == 200
+    assert await script == "yes"

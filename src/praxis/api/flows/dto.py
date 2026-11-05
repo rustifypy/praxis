@@ -5,6 +5,8 @@ that package's to decide and restating it here would be a second definition to k
 modelled is what arrives: a body a browser sends has to be refused before it reaches a folder.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -42,6 +44,12 @@ class Written(BaseModel):
 class Started(BaseModel):
     run_id: str
     current: str
+
+
+class Choice(BaseModel):
+    """A Phase script's approval. A `Literal`, as the chat's is: the tool runs anything but "no"."""
+
+    choice: Literal["yes", "always", "no"] = "no"
 
 
 class Decided(BaseModel):

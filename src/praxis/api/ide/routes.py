@@ -116,7 +116,12 @@ async def summary(request: Request, refresh: bool = False) -> dict:
     The same object `GET /api/model` returns in full — cut down because a transcript needs the
     shape of the model and the data page needs every member of it."""
     cube = await state.cube(request.app)
-    catalog = await cube.catalog(refresh=refresh)
+    try:
+        catalog = await cube.catalog(refresh=refresh)
+    except StoreError as exc:
+        # The store being down or still starting is a state, not a fault: 503, as before a
+        # deployment exists, and the chat page renders without suggestions either way.
+        raise HTTPException(503, str(exc)[:400]) from None
     return {
         "cube_url": cube.root,
         "entities": [

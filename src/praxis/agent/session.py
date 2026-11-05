@@ -19,6 +19,34 @@ class QueryRecord:
     result_id: str = ""
 
 
+class Approvals(asyncio.Queue):
+    """Where a click on "run this" arrives, taken only while a script is waiting for it.
+
+    A plain queue would hold an answer sent early (a double click, a retried request) and hand it
+    to the next script before anyone saw that script. `answer` refuses when nothing is waiting, and
+    takes one answer per wait.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.waiting = False
+
+    async def get(self) -> str:
+        self.waiting = True
+        try:
+            return await super().get()
+        finally:
+            self.waiting = False
+
+    def answer(self, decision: str) -> bool:
+        if not self.waiting:
+            return False
+        # Cleared here and not when `get` resumes, so a second click before then is refused.
+        self.waiting = False
+        self.put_nowait(decision)
+        return True
+
+
 @dataclass
 class Session:
     catalog: Catalog
